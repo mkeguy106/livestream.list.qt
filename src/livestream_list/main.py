@@ -26,8 +26,8 @@ def main() -> int:
         return run()
     except ImportError as e:
         logging.error(f"Failed to import GUI: {e}")
-        logging.error("Make sure PyGObject and libadwaita are installed:")
-        logging.error("  sudo pacman -S python-gobject gtk4 libadwaita")
+        logging.error("Make sure PySide6 is installed:")
+        logging.error("  pip install PySide6")
         return 1
 
 

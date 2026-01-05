@@ -209,7 +209,10 @@ class Livestream:
         self.video_id = other.video_id
 
         if other.live:
-            self.last_live_time = datetime.now()
+            self.last_live_time = datetime.now(timezone.utc)
+        elif other.last_live_time:
+            # Preserve last_live_time from API for offline channels
+            self.last_live_time = other.last_live_time
 
         return went_live
 

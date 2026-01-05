@@ -15,7 +15,7 @@ authors = [
 keywords = ["twitch", "youtube", "kick", "livestream", "monitor", "streaming"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Environment :: X11 Applications :: GTK",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
     "Operating System :: POSIX :: Linux",
@@ -28,7 +28,7 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.9.0",
-    "PyGObject>=3.46.0",
+    "PySide6>=6.6.0",
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "desktop-notifier>=5.0.0",

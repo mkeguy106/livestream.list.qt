@@ -128,14 +128,16 @@ class KickApiClient(BaseApiClient):
                     last_live_time = await self._get_last_video_date(channel)
                     return Livestream(channel=channel, live=False, last_live_time=last_live_time)
 
-                # Parse start time
+                # Parse start time (prefer start_time over created_at)
                 start_time = None
-                if livestream_data.get("created_at"):
+                time_str = livestream_data.get("start_time") or livestream_data.get("created_at")
+                if time_str:
                     try:
-                        # Kick uses format like "2024-01-15 12:30:00"
-                        start_time = datetime.fromisoformat(
-                            livestream_data["created_at"].replace(" ", "T")
-                        )
+                        # Kick uses format like "2024-01-15 12:30:00" in UTC
+                        start_time = datetime.fromisoformat(time_str.replace(" ", "T"))
+                        # Add UTC timezone if not present
+                        if start_time.tzinfo is None:
+                            start_time = start_time.replace(tzinfo=timezone.utc)
                     except ValueError:
                         pass
 
@@ -205,11 +207,12 @@ class KickApiClient(BaseApiClient):
                     channel_data = stream_data.get("channel", {})
 
                     start_time = None
-                    if stream_data.get("created_at"):
+                    time_str = stream_data.get("start_time") or stream_data.get("created_at")
+                    if time_str:
                         try:
-                            start_time = datetime.fromisoformat(
-                                stream_data["created_at"].replace(" ", "T")
-                            )
+                            start_time = datetime.fromisoformat(time_str.replace(" ", "T"))
+                            if start_time.tzinfo is None:
+                                start_time = start_time.replace(tzinfo=timezone.utc)
                         except ValueError:
                             pass
 

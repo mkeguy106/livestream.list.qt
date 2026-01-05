@@ -71,9 +71,15 @@ class TwitchApiClient(BaseApiClient):
         }
 
     async def is_authorized(self) -> bool:
-        """Check if we have a valid access token."""
+        """Check if we have a valid access token.
+
+        Note: Returns True even without token since GraphQL works unauthenticated.
+        The token is only needed for importing follows.
+        """
+        # GraphQL API works without authentication, so always return True
+        # for basic stream status checking
         if not self.settings.access_token:
-            return False
+            return True  # GraphQL doesn't need auth
 
         try:
             async with self.session.get(
