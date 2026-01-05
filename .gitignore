@@ -83,3 +83,4 @@ credentials.json
 # OS
 .DS_Store
 Thumbs.db
+livestream-list-export-*.json
