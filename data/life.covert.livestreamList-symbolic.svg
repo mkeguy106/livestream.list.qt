@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <style>
+    path, circle { fill: currentColor; }
+  </style>
+  <!-- Monitor frame -->
+  <path d="M2.5 1A1.5 1.5 0 001 2.5v9A1.5 1.5 0 002.5 13h11a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0013.5 1h-11zM2 2.5a.5.5 0 01.5-.5h11a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-11a.5.5 0 01-.5-.5v-9z"/>
+  <!-- Play triangle -->
+  <path d="M6 4.5v5l4-2.5z"/>
+  <!-- Live dot -->
+  <circle cx="13" cy="3.5" r="1"/>
+  <!-- Stand -->
+  <path d="M6 14h4v1H6zM5 15h6v1H5z"/>
+</svg>

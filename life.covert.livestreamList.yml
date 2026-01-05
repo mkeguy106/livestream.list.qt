@@ -1,0 +1,46 @@
+app-id: life.covert.livestreamList
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: livestream-list
+
+finish-args:
+  # Display access
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  # Network access for API calls
+  - --share=network
+  # Desktop notifications
+  - --talk-name=org.freedesktop.Notifications
+  # System tray (StatusNotifierItem)
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.kde.StatusNotifierItem-2-1
+  # Open URLs in browser
+  - --talk-name=org.freedesktop.portal.OpenURI
+  - --talk-name=org.freedesktop.portal.Desktop
+  # Keyring for token storage
+  - --talk-name=org.freedesktop.secrets
+  # Home directory for config
+  - --filesystem=~/.config/livestream-list:create
+  # Autostart directory for launch on login
+  - --filesystem=~/.config/autostart:create
+  # Allow running host commands (streamlink, mpv)
+  - --talk-name=org.freedesktop.Flatpak
+
+build-options:
+  build-args:
+    - --share=network
+
+modules:
+  - name: livestream-list
+    buildsystem: simple
+    build-commands:
+      - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir .
+      - install -Dm644 data/life.covert.livestreamList.desktop ${FLATPAK_DEST}/share/applications/life.covert.livestreamList.desktop
+      - install -Dm644 data/life.covert.livestreamList.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/life.covert.livestreamList.svg
+      - install -Dm644 data/life.covert.livestreamList-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/life.covert.livestreamList-symbolic.svg
+      - install -Dm644 data/life.covert.livestreamList.metainfo.xml ${FLATPAK_DEST}/share/metainfo/life.covert.livestreamList.metainfo.xml
+    sources:
+      - type: dir
+        path: .
