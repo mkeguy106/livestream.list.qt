@@ -1172,7 +1172,7 @@ class AboutDialog(QDialog):
 
 
 class AddChannelDialog(QDialog):
-    """Dialog for adding a new channel."""
+    """Dialog for adding channels manually or importing from Twitch."""
 
     def __init__(self, parent, app: "Application"):
         super().__init__(parent)
@@ -1181,9 +1181,18 @@ class AddChannelDialog(QDialog):
         self._detected_channel = None
 
         self.setWindowTitle("Add Channel")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(350)
 
         layout = QVBoxLayout(self)
+
+        # Tab widget
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+
+        # Manual Add tab
+        manual_tab = QWidget()
+        manual_layout = QVBoxLayout(manual_tab)
 
         # Channel input
         form_layout = QFormLayout()
@@ -1192,7 +1201,7 @@ class AddChannelDialog(QDialog):
         self.channel_edit.setPlaceholderText("Channel name or URL")
         self.channel_edit.textChanged.connect(self._on_text_changed)
         self.channel_edit.installEventFilter(self)
-        self._has_auto_pasted = False  # Track if we've already auto-pasted
+        self._has_auto_pasted = False
         form_layout.addRow("Channel:", self.channel_edit)
 
         self.platform_combo = QComboBox()
@@ -1201,18 +1210,75 @@ class AddChannelDialog(QDialog):
         self.platform_combo.addItem("Kick", StreamPlatform.KICK)
         form_layout.addRow("Platform:", self.platform_combo)
 
-        layout.addLayout(form_layout)
+        manual_layout.addLayout(form_layout)
 
         # Detection hint
         self.hint_label = QLabel("")
         self.hint_label.setStyleSheet("color: gray; font-style: italic;")
-        layout.addWidget(self.hint_label)
+        manual_layout.addWidget(self.hint_label)
 
-        # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._on_add)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        # Add button
+        add_btn = QPushButton("Add Channel")
+        add_btn.clicked.connect(self._on_add)
+        manual_layout.addWidget(add_btn)
+
+        manual_layout.addStretch()
+
+        tabs.addTab(manual_tab, "Manual Add")
+
+        # Import from Twitch tab
+        twitch_tab = QWidget()
+        twitch_layout = QVBoxLayout(twitch_tab)
+
+        # Twitch status
+        self.twitch_status_label = QLabel()
+        twitch_layout.addWidget(self.twitch_status_label)
+
+        # Twitch buttons
+        twitch_btn_layout = QHBoxLayout()
+        self.twitch_login_btn = QPushButton("Login to Twitch")
+        self.twitch_login_btn.clicked.connect(self._on_twitch_login)
+        twitch_btn_layout.addWidget(self.twitch_login_btn)
+
+        self.twitch_import_btn = QPushButton("Import Follows")
+        self.twitch_import_btn.clicked.connect(self._on_import_follows)
+        twitch_btn_layout.addWidget(self.twitch_import_btn)
+
+        self.twitch_logout_btn = QPushButton("Logout")
+        self.twitch_logout_btn.clicked.connect(self._on_twitch_logout)
+        twitch_btn_layout.addWidget(self.twitch_logout_btn)
+
+        twitch_layout.addLayout(twitch_btn_layout)
+
+        # Import info
+        import_info = QLabel(
+            "<p><b>Import your followed Twitch channels</b></p>"
+            "<p>Login to your Twitch account and click Import Follows "
+            "to add all channels you follow.</p>"
+        )
+        import_info.setWordWrap(True)
+        twitch_layout.addWidget(import_info)
+
+        twitch_layout.addStretch()
+
+        # Note about other platforms
+        note_label = QLabel(
+            "<p style='color: gray;'><i>Note: YouTube and Kick channels must be added "
+            "manually using the Manual Add tab. These platforms don't support "
+            "importing followed channels.</i></p>"
+        )
+        note_label.setWordWrap(True)
+        twitch_layout.addWidget(note_label)
+
+        tabs.addTab(twitch_tab, "Import from Twitch")
+
+        # Close button
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.reject)
+        layout.addWidget(close_btn)
+
+        # Update Twitch status
+        self._update_twitch_status()
 
         # Auto-paste from clipboard on dialog open
         self._try_paste_clipboard()
@@ -1329,6 +1395,71 @@ class AddChannelDialog(QDialog):
         worker.finished.connect(on_complete)
         worker.error.connect(on_error)
         worker.start()
+
+    def _update_twitch_status(self):
+        """Update Twitch login status display."""
+        if self.app.settings.twitch.access_token:
+            self.twitch_status_label.setText(
+                "<p style='color: #4CAF50;'><b>Logged in to Twitch</b></p>"
+            )
+            self.twitch_login_btn.hide()
+            self.twitch_import_btn.show()
+            self.twitch_logout_btn.show()
+        else:
+            self.twitch_status_label.setText(
+                "<p style='color: gray;'>Not logged in to Twitch</p>"
+            )
+            self.twitch_login_btn.show()
+            self.twitch_import_btn.hide()
+            self.twitch_logout_btn.hide()
+
+    def _on_twitch_login(self):
+        """Handle Twitch login."""
+        dialog = ImportFollowsDialog(self, self.app, StreamPlatform.TWITCH)
+        dialog.exec()
+        self._update_twitch_status()
+
+        # Suppress notifications for any channels imported during login
+        added = getattr(dialog, '_added_count', 0)
+        if added > 0:
+            self.app.monitor._initial_load_complete = False
+
+            def on_refresh_complete():
+                self.app.monitor._initial_load_complete = True
+                if self.app.main_window:
+                    self.app.main_window.refresh_stream_list()
+
+            if self.app.main_window:
+                self.app.main_window.refresh_stream_list()
+
+            self.app.refresh(on_complete=on_refresh_complete)
+
+    def _on_import_follows(self):
+        """Handle import follows."""
+        dialog = ImportFollowsDialog(self, self.app, StreamPlatform.TWITCH, start_import=True)
+        dialog.exec()
+
+        # Suppress notifications during import refresh
+        added = getattr(dialog, '_added_count', 0)
+        if added > 0:
+            self.app.monitor._initial_load_complete = False
+
+            def on_refresh_complete():
+                self.app.monitor._initial_load_complete = True
+                if self.app.main_window:
+                    self.app.main_window.refresh_stream_list()
+
+            if self.app.main_window:
+                self.app.main_window.refresh_stream_list()
+
+            self.app.refresh(on_complete=on_refresh_complete)
+
+    def _on_twitch_logout(self):
+        """Handle Twitch logout."""
+        self.app.settings.twitch.access_token = None
+        self.app.settings.twitch.user_id = None
+        self.app.save_settings()
+        self._update_twitch_status()
 
 
 class PreferencesDialog(QDialog):
