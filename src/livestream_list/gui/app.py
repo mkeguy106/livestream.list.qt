@@ -95,17 +95,19 @@ class NotificationBridge(QObject):
             except Exception as e:
                 logger.error(f"Notification error: {e}")
 
-    def _send_notification_sync(self, livestream):
+    def _send_notification_sync(self, livestream, is_test=False):
         """Send notification synchronously using notify-send."""
         import subprocess
         import shutil
+        import os
 
-        if not self.notifier.settings.enabled:
+        # Skip enabled check for test notifications
+        if not is_test and not self.notifier.settings.enabled:
             return
 
-        # Check if channel is excluded
+        # Check if channel is excluded (skip for test)
         channel_key = livestream.channel.unique_key
-        if channel_key in self.notifier.settings.excluded_channels:
+        if not is_test and channel_key in self.notifier.settings.excluded_channels:
             return
 
         # Store for Watch button callback
@@ -122,16 +124,29 @@ class NotificationBridge(QObject):
 
         body = "\n".join(body_parts) if body_parts else "Stream is now live"
 
-        # Use notify-send (works reliably across threads)
-        if shutil.which("notify-send"):
+        # Check if running in flatpak
+        is_flatpak = os.path.exists("/.flatpak-info")
+
+        # Use notify-send (via flatpak-spawn if in sandbox)
+        if is_flatpak:
+            cmd = ["flatpak-spawn", "--host", "notify-send", title, body, "--app-name=Livestream List Qt"]
+        elif shutil.which("notify-send"):
             cmd = ["notify-send", title, body, "--app-name=Livestream List Qt"]
-            if self.notifier.settings.sound_enabled:
-                cmd.extend(["--hint", "int:sound-file:default"])
-            subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        else:
+            return
+
+        if self.notifier.settings.sound_enabled:
+            cmd.extend(["--hint", "int:sound-file:default"])
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    def send_test_notification(self, livestream):
+        """Send a test notification (bypasses enabled check)."""
+        self._send_notification_sync(livestream, is_test=True)
 
 
 class Application(QApplication):

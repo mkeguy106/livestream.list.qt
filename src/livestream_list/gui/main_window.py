@@ -1867,9 +1867,9 @@ class PreferencesDialog(QDialog):
             viewers=1234,
         )
 
-        # Send test notification
+        # Send test notification (bypasses enabled check, handles flatpak)
         if self.app.notification_bridge:
-            self.app.notification_bridge.queue_notification(test_livestream)
+            self.app.notification_bridge.send_test_notification(test_livestream)
 
     def _on_platform_colors_changed(self, state):
         self.app.settings.platform_colors = (state == Qt.Checked)
