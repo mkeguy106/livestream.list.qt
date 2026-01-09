@@ -1075,6 +1075,14 @@ class AboutDialog(QDialog):
         license_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(license_label)
 
+        # GitHub link
+        github_label = QLabel(
+            f'<p><a href="https://github.com/{self.GITHUB_REPO}">GitHub Repository</a></p>'
+        )
+        github_label.setAlignment(Qt.AlignCenter)
+        github_label.setOpenExternalLinks(True)
+        layout.addWidget(github_label)
+
         layout.addSpacing(10)
 
         # Update status label (hidden initially)
