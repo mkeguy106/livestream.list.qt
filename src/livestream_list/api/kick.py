@@ -40,7 +40,8 @@ class KickApiClient(BaseApiClient):
         """Get headers for API requests."""
         return {
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+            "Referer": "https://kick.com/",
         }
 
     async def is_authorized(self) -> bool:

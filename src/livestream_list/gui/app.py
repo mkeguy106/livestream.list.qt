@@ -87,16 +87,51 @@ class NotificationBridge(QObject):
         pending = self._pending[:]
         self._pending.clear()
 
-        # Run notifications in a worker thread
-        async def send_notifications():
-            for livestream in pending:
-                try:
-                    await self.notifier.notify_stream_online(livestream)
-                except Exception as e:
-                    logger.error(f"Notification error: {e}")
+        # Send notifications synchronously using notify-send to avoid event loop issues
+        # The desktop-notifier D-Bus backend has issues when run in a different event loop
+        for livestream in pending:
+            try:
+                self._send_notification_sync(livestream)
+            except Exception as e:
+                logger.error(f"Notification error: {e}")
 
-        worker = AsyncWorker(send_notifications, parent=self)
-        worker.start()
+    def _send_notification_sync(self, livestream):
+        """Send notification synchronously using notify-send."""
+        import subprocess
+        import shutil
+
+        if not self.notifier.settings.enabled:
+            return
+
+        # Check if channel is excluded
+        channel_key = livestream.channel.unique_key
+        if channel_key in self.notifier.settings.excluded_channels:
+            return
+
+        # Store for Watch button callback
+        self.notifier._pending_streams[channel_key] = livestream
+
+        # Build notification content
+        title = f"{livestream.display_name} is live!"
+
+        body_parts = []
+        if self.notifier.settings.show_game and livestream.game:
+            body_parts.append(f"Playing: {livestream.game}")
+        if self.notifier.settings.show_title and livestream.title:
+            body_parts.append(livestream.title)
+
+        body = "\n".join(body_parts) if body_parts else "Stream is now live"
+
+        # Use notify-send (works reliably across threads)
+        if shutil.which("notify-send"):
+            cmd = ["notify-send", title, body, "--app-name=Livestream List Qt"]
+            if self.notifier.settings.sound_enabled:
+                cmd.extend(["--hint", "int:sound-file:default"])
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
 
 class Application(QApplication):
