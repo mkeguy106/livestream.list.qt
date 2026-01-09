@@ -1,7 +1,7 @@
 app-id: life.covert.livestreamListQt
-runtime: org.kde.Platform
-runtime-version: '6.8'
-sdk: org.kde.Sdk
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
 command: livestream-list-qt
 
 finish-args:
