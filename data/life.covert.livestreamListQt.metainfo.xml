@@ -1,28 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>life.covert.livestreamList</id>
-  <name>Livestream List</name>
-  <summary>Monitor your favorite livestreams</summary>
+  <id>life.covert.livestreamListQt</id>
+  <name>Livestream List Qt</name>
+  <summary>Monitor your favorite livestreams (Qt version)</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-2.0</project_license>
 
   <description>
     <p>
-      Livestream List is a GTK4/Libadwaita application for monitoring livestreams on Twitch.
+      Livestream List Qt is a PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, and Kick.
       Get notified when your favorite streamers go live and launch streams directly in your preferred video player.
     </p>
     <p>Features include:</p>
     <ul>
-      <li>Monitor Twitch channels for live status</li>
+      <li>Monitor Twitch, YouTube, and Kick channels for live status</li>
       <li>Desktop notifications when streams go live</li>
       <li>Streamlink integration for launching streams in mpv/VLC</li>
       <li>Import your followed channels from Twitch</li>
       <li>Filter and sort your channel list</li>
-      <li>Multiple compact UI styles</li>
+      <li>System tray support</li>
     </ul>
   </description>
 
-  <launchable type="desktop-id">life.covert.livestreamList.desktop</launchable>
+  <launchable type="desktop-id">life.covert.livestreamListQt.desktop</launchable>
 
   <url type="homepage">https://github.com/mkeguy106/livestream-list-linux</url>
   <url type="bugtracker">https://github.com/mkeguy106/livestream-list-linux/issues</url>
@@ -30,9 +30,9 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
-    <release version="0.1.0" date="2024-01-02">
+    <release version="0.5.6" date="2026-01-09">
       <description>
-        <p>Initial release</p>
+        <p>Initial Qt release - migrated from GTK4/Libadwaita to PySide6/Qt6</p>
       </description>
     </release>
   </releases>
@@ -47,8 +47,11 @@
 
   <keywords>
     <keyword>twitch</keyword>
+    <keyword>youtube</keyword>
+    <keyword>kick</keyword>
     <keyword>stream</keyword>
     <keyword>livestream</keyword>
     <keyword>monitor</keyword>
+    <keyword>qt</keyword>
   </keywords>
 </component>

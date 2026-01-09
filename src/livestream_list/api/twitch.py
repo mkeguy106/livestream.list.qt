@@ -18,10 +18,9 @@ from .oauth_server import OAuthServer
 
 logger = logging.getLogger(__name__)
 
-# Twitch application client ID for OAuth
-# Using Streamlink Twitch GUI's registered app (open source, widely used)
-# Users can override with their own in settings
-DEFAULT_CLIENT_ID = "phiay4sq36lfv9zu7cbqwz2ndnesfd8"
+# Twitch application client ID for OAuth (Qt version)
+# Registered separately from GTK version to use different OAuth port
+DEFAULT_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
 
 # For GraphQL queries (no auth required)
 GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
@@ -146,8 +145,9 @@ class TwitchApiClient(BaseApiClient):
         Returns:
             True if authorization was successful.
         """
-        # Start local OAuth server on port 65432 (must match registered redirect URI)
-        server = OAuthServer(port=65432)
+        # Start local OAuth server on port 65433 (must match registered redirect URI)
+        # Using different port than GTK version (65432) to allow running both apps
+        server = OAuthServer(port=65433)
         server.start()
 
         try:

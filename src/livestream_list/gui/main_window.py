@@ -1657,6 +1657,21 @@ class PreferencesDialog(QDialog):
         self._update_twitch_status()
         self._update_account_buttons()
 
+        # Suppress notifications for any channels imported during login
+        added = getattr(dialog, '_added_count', 0)
+        if added > 0:
+            self.app.monitor._initial_load_complete = False
+
+            def on_refresh_complete():
+                self.app.monitor._initial_load_complete = True
+                if self.app.main_window:
+                    self.app.main_window.refresh_stream_list()
+
+            if self.app.main_window:
+                self.app.main_window.refresh_stream_list()
+
+            self.app.refresh(on_complete=on_refresh_complete)
+
     def _on_twitch_logout(self):
         """Handle Twitch logout."""
         self.app.settings.twitch.access_token = None

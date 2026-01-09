@@ -9,7 +9,7 @@ jobs:
     name: Test Flatpak Build
     runs-on: ubuntu-latest
     container:
-      image: bilelmoussaoui/flatpak-github-actions:gnome-46
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.8
       options: --privileged
 
     steps:
@@ -19,14 +19,14 @@ jobs:
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: livestreamList.flatpak
-          manifest-path: life.covert.livestreamList.yml
+          bundle: livestreamListQt.flatpak
+          manifest-path: life.covert.livestreamListQt.yml
           cache-key: flatpak-builder-${{ github.sha }}
           build-bundle: true
 
       - name: Upload Flatpak artifact
         uses: actions/upload-artifact@v4
         with:
-          name: livestreamList-flatpak
-          path: livestreamList.flatpak
+          name: livestreamListQt-flatpak
+          path: livestreamListQt.flatpak
           retention-days: 7

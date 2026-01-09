@@ -1,8 +1,8 @@
-app-id: life.covert.livestreamList
-runtime: org.gnome.Platform
-runtime-version: '48'
-sdk: org.gnome.Sdk
-command: livestream-list
+app-id: life.covert.livestreamListQt
+runtime: org.kde.Platform
+runtime-version: '6.8'
+sdk: org.kde.Sdk
+command: livestream-list-qt
 
 finish-args:
   # Display access
@@ -13,7 +13,7 @@ finish-args:
   - --share=network
   # Desktop notifications
   - --talk-name=org.freedesktop.Notifications
-  # System tray (StatusNotifierItem)
+  # System tray
   - --talk-name=org.kde.StatusNotifierWatcher
   - --own-name=org.kde.StatusNotifierItem-2-1
   # Open URLs in browser
@@ -21,8 +21,8 @@ finish-args:
   - --talk-name=org.freedesktop.portal.Desktop
   # Keyring for token storage
   - --talk-name=org.freedesktop.secrets
-  # Home directory for config
-  - --filesystem=~/.config/livestream-list:create
+  # Home directory for config (Qt version uses separate dir)
+  - --filesystem=~/.config/livestream-list-qt:create
   # Autostart directory for launch on login
   - --filesystem=~/.config/autostart:create
   # Allow running host commands (streamlink, mpv)
@@ -33,14 +33,14 @@ build-options:
     - --share=network
 
 modules:
-  - name: livestream-list
+  - name: livestream-list-qt
     buildsystem: simple
     build-commands:
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir .
-      - install -Dm644 data/life.covert.livestreamList.desktop ${FLATPAK_DEST}/share/applications/life.covert.livestreamList.desktop
-      - install -Dm644 data/life.covert.livestreamList.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/life.covert.livestreamList.svg
-      - install -Dm644 data/life.covert.livestreamList-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/life.covert.livestreamList-symbolic.svg
-      - install -Dm644 data/life.covert.livestreamList.metainfo.xml ${FLATPAK_DEST}/share/metainfo/life.covert.livestreamList.metainfo.xml
+      - install -Dm644 data/life.covert.livestreamListQt.desktop ${FLATPAK_DEST}/share/applications/life.covert.livestreamListQt.desktop
+      - install -Dm644 data/life.covert.livestreamListQt.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/life.covert.livestreamListQt.svg
+      - install -Dm644 data/life.covert.livestreamListQt-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/life.covert.livestreamListQt-symbolic.svg
+      - install -Dm644 data/life.covert.livestreamListQt.metainfo.xml ${FLATPAK_DEST}/share/metainfo/life.covert.livestreamListQt.metainfo.xml
     sources:
       - type: dir
         path: .

@@ -111,8 +111,8 @@ class Application(QApplication):
     def __init__(self, argv=None):
         super().__init__(argv or sys.argv)
 
-        self.setApplicationName("Livestream List")
-        self.setApplicationDisplayName("Livestream List")
+        self.setApplicationName("Livestream List Qt")
+        self.setApplicationDisplayName("Livestream List Qt")
         self.setApplicationVersion(__version__)
         self.setOrganizationName("life.covert")
         self.setOrganizationDomain("life.covert")
@@ -140,15 +140,15 @@ class Application(QApplication):
         # Load settings
         self.settings = Settings.load()
 
-        # Connect signal for notification watch button (thread-safe)
-        self.open_stream_requested.connect(self._on_notification_open_stream)
+        # Connect signal for notification watch button UI updates
+        self.open_stream_requested.connect(self._on_notification_open_stream_ui)
 
         # Initialize core services
         self.monitor = StreamMonitor(self.settings)
         self.streamlink = StreamlinkLauncher(self.settings.streamlink)
         self.notifier = Notifier(
             self.settings.notifications,
-            on_open_stream=lambda ls: self.open_stream_requested.emit(ls),
+            on_open_stream=self._on_notification_watch_clicked,
         )
 
         # Set up notification bridge
@@ -240,12 +240,35 @@ class Application(QApplication):
         # Emit signal for UI update
         self.stream_online.emit(livestream)
 
-    def _on_notification_open_stream(self, livestream):
-        """Handle opening stream from notification."""
-        if self.main_window:
-            self.main_window.play_stream(livestream)
-        elif self.streamlink:
+    def _on_notification_watch_clicked(self, livestream):
+        """Handle Watch button click from notification.
+
+        Called from desktop-notifier's thread, so we launch streamlink
+        directly (thread-safe) for instant response, then schedule UI
+        updates via signal.
+        """
+        # Launch stream immediately (thread-safe - just spawns subprocess)
+        if self.streamlink:
             self.streamlink.launch(livestream)
+
+            # Auto-open chat if enabled (also thread-safe - spawns browser)
+            if self.settings and self.settings.chat.auto_open and self.settings.chat.enabled:
+                ch = livestream.channel
+                video_id = getattr(livestream, 'video_id', None) or ""
+                if self.main_window and hasattr(self.main_window, '_chat_launcher'):
+                    self.main_window._chat_launcher.open_chat(
+                        ch.channel_id, ch.platform.value, video_id
+                    )
+
+        # Schedule UI updates via signal (can be delayed, that's fine)
+        self.open_stream_requested.emit(livestream)
+
+    def _on_notification_open_stream_ui(self, livestream):
+        """Handle UI updates after stream launched from notification."""
+        if self.main_window:
+            # Refresh will pick up playing state from streamlink.is_playing()
+            self.main_window.refresh_stream_list()
+            self.main_window.set_status(f"Playing {livestream.channel.display_name}")
 
     def _check_processes(self):
         """Check for dead stream processes and update UI."""

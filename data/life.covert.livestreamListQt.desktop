@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Livestream List Qt
+Comment=Monitor your favorite livestreams (Qt version)
+Exec=livestream-list-qt
+Icon=life.covert.livestreamListQt
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Network;
+Keywords=twitch;stream;live;monitor;qt;
+StartupNotify=true

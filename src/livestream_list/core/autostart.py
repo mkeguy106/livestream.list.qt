@@ -5,19 +5,19 @@ import shutil
 from pathlib import Path
 
 
-DESKTOP_FILE_NAME = "life.covert.livestreamList.desktop"
+DESKTOP_FILE_NAME = "life.covert.livestreamListQt.desktop"
 
 # Check if running in Flatpak
 IS_FLATPAK = os.path.exists("/.flatpak-info")
 
 # Use appropriate Exec command based on environment
-EXEC_COMMAND = "flatpak run life.covert.livestreamList" if IS_FLATPAK else "livestream-list"
+EXEC_COMMAND = "flatpak run life.covert.livestreamListQt" if IS_FLATPAK else "livestream-list-qt"
 
 DESKTOP_FILE_CONTENT = f"""[Desktop Entry]
-Name=Livestream List
-Comment=Monitor your favorite livestreams
+Name=Livestream List Qt
+Comment=Monitor your favorite livestreams (Qt version)
 Exec={EXEC_COMMAND}
-Icon=life.covert.livestreamList
+Icon=life.covert.livestreamListQt
 Terminal=false
 Type=Application
 Categories=AudioVideo;Video;Network;

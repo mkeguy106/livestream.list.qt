@@ -13,7 +13,7 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     container:
-      image: bilelmoussaoui/flatpak-github-actions:gnome-46
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.8
       options: --privileged
 
     steps:
@@ -27,18 +27,18 @@ jobs:
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: livestreamList-v${{ steps.version.outputs.VERSION }}.flatpak
-          manifest-path: life.covert.livestreamList.yml
+          bundle: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+          manifest-path: life.covert.livestreamListQt.yml
           cache-key: flatpak-builder-${{ github.sha }}
           build-bundle: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: Livestream List v${{ steps.version.outputs.VERSION }}
+          name: Livestream List Qt v${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          files: livestreamList-v${{ steps.version.outputs.VERSION }}.flatpak
+          files: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

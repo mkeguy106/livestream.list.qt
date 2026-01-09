@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "livestream-list"
+name = "livestream-list-qt"
 dynamic = ["version"]
 description = "Linux livestream monitoring application for Twitch, YouTube, and Kick"
 readme = "README.md"
@@ -47,10 +47,10 @@ dev = [
 ]
 
 [project.scripts]
-livestream-list = "livestream_list.main:main"
+livestream-list-qt = "livestream_list.main:main"
 
 [project.gui-scripts]
-livestream-list-gui = "livestream_list.main:main"
+livestream-list-qt-gui = "livestream_list.main:main"
 
 [project.urls]
 Homepage = "https://github.com/mkeguy106/livestream-list-linux"

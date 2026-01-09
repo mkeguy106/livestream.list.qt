@@ -10,8 +10,8 @@ from appdirs import user_config_dir, user_data_dir
 from .models import StreamQuality
 
 
-APP_NAME = "livestream-list"
-APP_AUTHOR = "livestream-list"
+APP_NAME = "livestream-list-qt"
+APP_AUTHOR = "livestream-list-qt"
 
 
 def get_config_dir() -> Path:
