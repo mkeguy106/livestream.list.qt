@@ -321,7 +321,7 @@ class MainWindow(QMainWindow):
 
     def _setup_ui(self):
         """Set up the main window UI."""
-        self.setWindowTitle("Livestream List")
+        self.setWindowTitle("Livestream List (Qt)")
         self.resize(
             self.app.settings.window.width,
             self.app.settings.window.height
@@ -1047,13 +1047,13 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.app = app
 
-        self.setWindowTitle("About Livestream List Qt")
+        self.setWindowTitle("About Livestream List (Qt)")
         self.setMinimumWidth(350)
 
         layout = QVBoxLayout(self)
 
         # App icon and name
-        title_label = QLabel("<h2>Livestream List Qt</h2>")
+        title_label = QLabel("<h2>Livestream List (Qt)</h2>")
         title_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(title_label)
 

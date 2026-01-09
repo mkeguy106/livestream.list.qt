@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Livestream List Qt
+Name=Livestream List (Qt)
 Comment=Monitor your favorite livestreams (Qt version)
 Exec=livestream-list-qt
 Icon=life.covert.livestreamListQt

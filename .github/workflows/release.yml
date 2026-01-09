@@ -13,7 +13,9 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
     container:
-      image: bilelmoussaoui/flatpak-github-actions:kde-6.9
+      # Note: Using kde-6.7 until kde-6.9 docker image is available
+      # Local builds should use kde-6.9 manifest for Kick API compatibility
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
       options: --privileged
 
     steps:

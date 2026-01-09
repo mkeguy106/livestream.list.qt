@@ -36,7 +36,7 @@ class TrayIcon(QSystemTrayIcon):
         self._create_icon()
 
         # Set tooltip
-        self.setToolTip("Livestream List")
+        self.setToolTip("Livestream List (Qt)")
 
         # Create context menu
         self._create_menu()
@@ -100,7 +100,7 @@ class TrayIcon(QSystemTrayIcon):
         menu = QMenu()
 
         # Open action
-        open_action = menu.addAction("Open Livestream List")
+        open_action = menu.addAction("Open Livestream List (Qt)")
         open_action.triggered.connect(self._on_open)
 
         menu.addSeparator()

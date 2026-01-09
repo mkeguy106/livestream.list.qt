@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>life.covert.livestreamListQt</id>
-  <name>Livestream List Qt</name>
+  <name>Livestream List (Qt)</name>
   <summary>Monitor your favorite livestreams (Qt version)</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-2.0</project_license>
 
   <description>
     <p>
-      Livestream List Qt is a PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, and Kick.
+      Livestream List (Qt) is a PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, and Kick.
       Get notified when your favorite streamers go live and launch streams directly in your preferred video player.
     </p>
     <p>Features include:</p>
@@ -30,6 +30,11 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
+    <release version="0.5.11" date="2026-01-09">
+      <description>
+        <p>Fix Kick channel lookup (upgrade to KDE Platform 6.9), fix test notifications in flatpak</p>
+      </description>
+    </release>
     <release version="0.5.6" date="2026-01-09">
       <description>
         <p>Initial Qt release - migrated from GTK4/Libadwaita to PySide6/Qt6</p>
