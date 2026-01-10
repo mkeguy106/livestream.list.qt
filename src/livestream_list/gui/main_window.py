@@ -313,6 +313,7 @@ class MainWindow(QMainWindow):
         self._name_filter = ""
         self._platform_filter: Optional[StreamPlatform] = None
         self._chat_launcher = ChatLauncher(app.settings.chat)
+        self._force_quit = False  # When True, closeEvent quits instead of minimizing
 
         self._setup_ui()
         self._setup_shortcuts()
@@ -468,7 +469,7 @@ class MainWindow(QMainWindow):
 
         quit_action = file_menu.addAction("&Quit")
         quit_action.setShortcut("Ctrl+Q")
-        quit_action.triggered.connect(self.close)
+        quit_action.triggered.connect(self._quit_app)
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
@@ -1029,8 +1030,8 @@ class MainWindow(QMainWindow):
 
             self.app.save_settings()
 
-        # Check if should run in background
-        if self.app.settings.close_to_tray and self.app.tray_icon:
+        # Check if should run in background (unless force quit was requested)
+        if self.app.settings.close_to_tray and self.app.tray_icon and not self._force_quit:
             # Save window geometry before minimizing
             self._save_window_geometry()
             event.ignore()
@@ -1051,6 +1052,11 @@ class MainWindow(QMainWindow):
         self.app.settings.window.x = pos.x()
         self.app.settings.window.y = pos.y()
         self.app.save_settings()
+
+    def _quit_app(self):
+        """Quit the application (bypasses minimize-to-tray)."""
+        self._force_quit = True
+        self.close()
 
 
 class AboutDialog(QDialog):

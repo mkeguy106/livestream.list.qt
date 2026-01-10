@@ -30,6 +30,11 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
+    <release version="0.5.18" date="2026-01-10">
+      <description>
+        <p>Fix Quit menu option to properly quit instead of minimizing to tray</p>
+      </description>
+    </release>
     <release version="0.5.17" date="2026-01-10">
       <description>
         <p>Window position now preserved when minimizing to tray and restoring (Wayland fix)</p>
