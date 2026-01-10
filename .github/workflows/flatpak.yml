@@ -7,23 +7,25 @@ on:
 jobs:
   flatpak:
     name: Test Flatpak Build
-    runs-on: ubuntu-latest
-    container:
-      # Note: Using kde-6.7 until kde-6.9 docker image is available
-      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
-      options: --privileged
+    runs-on: [self-hosted, linux, x64, docker]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build Flatpak
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: livestreamListQt.flatpak
-          manifest-path: life.covert.livestreamListQt.yml
-          cache-key: flatpak-builder-${{ github.sha }}
-          build-bundle: true
+      - name: Build Flatpak in Docker
+        run: |
+          docker run --rm --privileged \
+            -v ${{ github.workspace }}:/workspace \
+            -v /tmp/flatpak-cache:/root/.local/share/flatpak \
+            -w /workspace \
+            ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
+            bash -c "
+              flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+              flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
+              flatpak-builder --user --install --force-clean build-dir life.covert.livestreamListQt.yml
+              flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt.flatpak life.covert.livestreamListQt
+            "
 
       - name: Upload Flatpak artifact
         uses: actions/upload-artifact@v4

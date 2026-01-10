@@ -11,12 +11,7 @@ permissions:
 jobs:
   release:
     name: Build and Release
-    runs-on: ubuntu-latest
-    container:
-      # Note: Using kde-6.7 until kde-6.9 docker image is available
-      # Local builds should use kde-6.9 manifest for Kick API compatibility
-      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
-      options: --privileged
+    runs-on: [self-hosted, linux, x64, docker]
 
     steps:
       - name: Checkout
@@ -26,13 +21,19 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Build Flatpak
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
-          manifest-path: life.covert.livestreamListQt.yml
-          cache-key: flatpak-builder-${{ github.sha }}
-          build-bundle: true
+      - name: Build Flatpak in Docker
+        run: |
+          docker run --rm --privileged \
+            -v ${{ github.workspace }}:/workspace \
+            -v /tmp/flatpak-cache:/root/.local/share/flatpak \
+            -w /workspace \
+            ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
+            bash -c "
+              flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+              flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
+              flatpak-builder --user --install --force-clean build-dir life.covert.livestreamListQt.yml
+              flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak life.covert.livestreamListQt
+            "
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
