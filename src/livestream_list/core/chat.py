@@ -210,13 +210,13 @@ class ChatLauncher:
         elif platform == StreamPlatform.KICK:
             return f"https://kick.com/{channel.lower()}"
         elif platform == StreamPlatform.YOUTUBE:
-            # Handle @ prefix for YouTube handles
+            # Open the live stream page (redirects to channel if not live)
             if channel.startswith("@"):
-                return f"https://youtube.com/{channel}"
+                return f"https://youtube.com/{channel}/live"
             elif channel.startswith("UC"):
-                return f"https://youtube.com/channel/{channel}"
+                return f"https://youtube.com/channel/{channel}/live"
             else:
-                return f"https://youtube.com/@{channel}"
+                return f"https://youtube.com/@{channel}/live"
         else:
             return f"https://twitch.tv/{channel.lower()}"
 

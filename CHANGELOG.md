@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.15] - 2026-01-09
+
+### Fixed
+- YouTube browser button now opens the live stream instead of channel landing page
+  - URLs now use `/live` suffix (e.g., `youtube.com/@channel/live`)
+
 ## [0.5.14] - 2026-01-09
 
 ### Fixed
@@ -78,7 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration directory from `~/.config/livestream-list` to `~/.config/livestream-list-qt`
 - Flatpak runtime from GNOME to KDE Platform
 
-[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.14...HEAD
+[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.15...HEAD
+[0.5.15]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.12...v0.5.13
 [0.5.12]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.11...v0.5.12
