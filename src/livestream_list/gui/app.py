@@ -392,20 +392,15 @@ def run() -> int:
     # Create tray icon if available
     if is_tray_available():
         def restore_window():
-            """Restore and focus the main window."""
-            from PySide6.QtCore import Qt
-            # If minimized, restore it
-            if main_window.isMinimized():
-                main_window.setWindowState(main_window.windowState() & ~Qt.WindowMinimized)
-            # Show the window
-            main_window.show()
-            # Raise to top of window stack
+            """Restore and focus the main window.
+
+            Uses showNormal() to restore from minimized state. This preserves
+            window position on Wayland where hidden windows lose their geometry
+            but minimized windows retain it.
+            """
+            main_window.showNormal()
             main_window.raise_()
-            # Activate to give keyboard focus
             main_window.activateWindow()
-            # On some Linux WMs, we need to also set the window flags to force focus
-            # This is a workaround for focus stealing prevention
-            main_window.setWindowState(main_window.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
 
         tray = TrayIcon(
             main_window,

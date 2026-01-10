@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.17] - 2026-01-10
+
+### Fixed
+- Window position now preserved when minimizing to tray and restoring
+  - Uses minimize instead of hide to work around Wayland compositor limitations
+  - Window geometry (position and size) saved to settings on close
+
 ## [0.5.16] - 2026-01-10
 
 ### Fixed
@@ -92,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration directory from `~/.config/livestream-list` to `~/.config/livestream-list-qt`
 - Flatpak runtime from GNOME to KDE Platform
 
-[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.16...HEAD
+[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.17...HEAD
+[0.5.17]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.13...v0.5.14

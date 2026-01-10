@@ -326,6 +326,9 @@ class MainWindow(QMainWindow):
             self.app.settings.window.width,
             self.app.settings.window.height
         )
+        # Restore window position if saved
+        if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
+            self.move(self.app.settings.window.x, self.app.settings.window.y)
 
         # Central widget
         central = QWidget()
@@ -1028,14 +1031,26 @@ class MainWindow(QMainWindow):
 
         # Check if should run in background
         if self.app.settings.close_to_tray and self.app.tray_icon:
+            # Save window geometry before minimizing
+            self._save_window_geometry()
             event.ignore()
-            self.hide()
+            # Minimize instead of hide to preserve window position on Wayland.
+            # On Wayland, hidden windows lose their position state, but minimized
+            # windows stay mapped and retain their geometry when restored.
+            self.showMinimized()
         else:
-            # Save window size
-            self.app.settings.window.width = self.width()
-            self.app.settings.window.height = self.height()
-            self.app.save_settings()
+            # Save window geometry before quitting
+            self._save_window_geometry()
             event.accept()
+
+    def _save_window_geometry(self):
+        """Save current window position and size to settings."""
+        pos = self.pos()
+        self.app.settings.window.width = self.width()
+        self.app.settings.window.height = self.height()
+        self.app.settings.window.x = pos.x()
+        self.app.settings.window.y = pos.y()
+        self.app.save_settings()
 
 
 class AboutDialog(QDialog):
