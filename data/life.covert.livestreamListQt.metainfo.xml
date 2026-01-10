@@ -30,6 +30,11 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
+    <release version="0.5.12" date="2026-01-09">
+      <description>
+        <p>Fix CI build for Docker-in-Docker environments</p>
+      </description>
+    </release>
     <release version="0.5.11" date="2026-01-09">
       <description>
         <p>Fix Kick channel lookup (upgrade to KDE Platform 6.9), fix test notifications in flatpak</p>
