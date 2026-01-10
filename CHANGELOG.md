@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.16] - 2026-01-10
+
+### Fixed
+- Preferences "Run in background when closed" and "Launch on login" not saving
+  - PySide6 enum comparison issue: `Qt.Checked` vs `Qt.CheckState.Checked.value`
+- Window not coming to focus when restoring from system tray
+  - Now properly restores minimized state and activates window
+
 ## [0.5.15] - 2026-01-09
 
 ### Fixed
@@ -84,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration directory from `~/.config/livestream-list` to `~/.config/livestream-list-qt`
 - Flatpak runtime from GNOME to KDE Platform
 
-[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.15...HEAD
+[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.16...HEAD
+[0.5.16]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.15...v0.5.16
 [0.5.15]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.14...v0.5.15
 [0.5.14]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.13...v0.5.14
 [0.5.13]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.12...v0.5.13

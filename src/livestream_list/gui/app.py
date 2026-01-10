@@ -391,9 +391,25 @@ def run() -> int:
 
     # Create tray icon if available
     if is_tray_available():
+        def restore_window():
+            """Restore and focus the main window."""
+            from PySide6.QtCore import Qt
+            # If minimized, restore it
+            if main_window.isMinimized():
+                main_window.setWindowState(main_window.windowState() & ~Qt.WindowMinimized)
+            # Show the window
+            main_window.show()
+            # Raise to top of window stack
+            main_window.raise_()
+            # Activate to give keyboard focus
+            main_window.activateWindow()
+            # On some Linux WMs, we need to also set the window flags to force focus
+            # This is a workaround for focus stealing prevention
+            main_window.setWindowState(main_window.windowState() & ~Qt.WindowMinimized | Qt.WindowActive)
+
         tray = TrayIcon(
             main_window,
-            on_open=lambda: main_window.show() or main_window.raise_() or main_window.activateWindow(),
+            on_open=restore_window,
             on_quit=app.quit,
             get_notifications_enabled=lambda: app.settings.notifications.enabled,
             set_notifications_enabled=lambda enabled: setattr(app.settings.notifications, 'enabled', enabled) or app.save_settings(),

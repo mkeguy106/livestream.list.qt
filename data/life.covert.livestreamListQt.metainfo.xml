@@ -30,6 +30,11 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
+    <release version="0.5.16" date="2026-01-10">
+      <description>
+        <p>Fix preferences not saving, fix window focus when restoring from tray</p>
+      </description>
+    </release>
     <release version="0.5.15" date="2026-01-09">
       <description>
         <p>Fix YouTube browser button to open live stream instead of channel page</p>

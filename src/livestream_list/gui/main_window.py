@@ -1824,10 +1824,14 @@ class PreferencesDialog(QDialog):
         self.twitch_logout_btn.setVisible(is_logged_in)
 
     def _on_autostart_changed(self, state):
-        set_autostart(state == Qt.Checked)
+        enabled = (state == Qt.CheckState.Checked.value)
+        set_autostart(enabled)
+        self.app.settings.autostart = enabled
+        self.app.save_settings()
 
     def _on_background_changed(self, state):
-        self.app.settings.close_to_tray = (state == Qt.Checked)
+        enabled = (state == Qt.CheckState.Checked.value)
+        self.app.settings.close_to_tray = enabled
         self.app.save_settings()
 
     def _on_refresh_changed(self, value):
