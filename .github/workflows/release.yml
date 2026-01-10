@@ -23,19 +23,11 @@ jobs:
 
       - name: Build Flatpak in Docker
         run: |
-          # Clean up any stale cache
-          sudo rm -rf /tmp/flatpak-build-*
+          # Docker-in-Docker: volume mounts don't work because paths are relative to host
+          # Use docker cp instead to copy files into/out of container
 
-          # Create a unique build directory
-          BUILD_DIR="/tmp/flatpak-build-$$"
-          mkdir -p "$BUILD_DIR"
-          cp -r "${{ github.workspace }}"/* "$BUILD_DIR/"
-
-          echo "Build directory contents:"
-          ls -la "$BUILD_DIR"
-
-          docker run --rm --privileged \
-            -v "$BUILD_DIR:/workspace:rw" \
+          # Create container (don't start yet)
+          CONTAINER_ID=$(docker create --privileged \
             -w /workspace \
             ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
             bash -c "
@@ -46,10 +38,21 @@ jobs:
               flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
               flatpak-builder --user --install --force-clean build-dir /workspace/life.covert.livestreamListQt.yml
               flatpak build-bundle ~/.local/share/flatpak/repo /workspace/livestreamListQt.flatpak life.covert.livestreamListQt
-            "
+            ")
 
-          # Copy flatpak back to workspace
-          cp "$BUILD_DIR/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak"
+          echo "Container ID: $CONTAINER_ID"
+
+          # Copy workspace into container
+          docker cp "${{ github.workspace }}/." "$CONTAINER_ID:/workspace/"
+
+          # Start container and wait for completion
+          docker start -a "$CONTAINER_ID"
+
+          # Copy flatpak out of container
+          docker cp "$CONTAINER_ID:/workspace/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak"
+
+          # Clean up container
+          docker rm "$CONTAINER_ID"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1

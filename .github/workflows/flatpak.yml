@@ -15,17 +15,34 @@ jobs:
 
       - name: Build Flatpak in Docker
         run: |
-          docker run --rm --privileged \
-            -v ${{ github.workspace }}:/workspace \
-            -v /tmp/flatpak-cache:/root/.local/share/flatpak \
+          # Docker-in-Docker: volume mounts don't work because paths are relative to host
+          # Use docker cp instead to copy files into/out of container
+
+          # Create container (don't start yet)
+          CONTAINER_ID=$(docker create --privileged \
             -w /workspace \
             ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
             bash -c "
+              set -e
               flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
               flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
               flatpak-builder --user --install --force-clean build-dir life.covert.livestreamListQt.yml
               flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt.flatpak life.covert.livestreamListQt
-            "
+            ")
+
+          echo "Container ID: $CONTAINER_ID"
+
+          # Copy workspace into container
+          docker cp "${{ github.workspace }}/." "$CONTAINER_ID:/workspace/"
+
+          # Start container and wait for completion
+          docker start -a "$CONTAINER_ID"
+
+          # Copy flatpak out of container
+          docker cp "$CONTAINER_ID:/workspace/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt.flatpak"
+
+          # Clean up container
+          docker rm "$CONTAINER_ID"
 
       - name: Upload Flatpak artifact
         uses: actions/upload-artifact@v4
