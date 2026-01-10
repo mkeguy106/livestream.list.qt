@@ -23,16 +23,22 @@ jobs:
 
       - name: Build Flatpak in Docker
         run: |
+          # Debug: show workspace contents
+          echo "Workspace: ${{ github.workspace }}"
+          ls -la ${{ github.workspace }}
+
           docker run --rm --privileged \
-            -v ${{ github.workspace }}:/workspace \
+            -v "${{ github.workspace }}:/workspace:rw" \
             -v /tmp/flatpak-cache:/root/.local/share/flatpak \
             -w /workspace \
             ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
             bash -c "
+              echo 'Contents of /workspace:'
+              ls -la /workspace/
               flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
               flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
-              flatpak-builder --user --install --force-clean build-dir life.covert.livestreamListQt.yml
-              flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak life.covert.livestreamListQt
+              flatpak-builder --user --install --force-clean build-dir /workspace/life.covert.livestreamListQt.yml
+              flatpak build-bundle ~/.local/share/flatpak/repo /workspace/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak life.covert.livestreamListQt
             "
 
       - name: Create Release
