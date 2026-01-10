@@ -24,9 +24,11 @@ jobs:
             ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
             bash -c "
               set -e
+              # Create machine-id for D-Bus (required by flatpak-builder)
+              dbus-uuidgen > /etc/machine-id
               flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
               flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
-              flatpak-builder --user --install --force-clean build-dir life.covert.livestreamListQt.yml
+              flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir life.covert.livestreamListQt.yml
               flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt.flatpak life.covert.livestreamListQt
             ")
 
