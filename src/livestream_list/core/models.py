@@ -165,7 +165,13 @@ class Livestream:
         if self.channel.platform == StreamPlatform.TWITCH:
             return f"https://twitch.tv/{self.channel.channel_id}"
         elif self.channel.platform == StreamPlatform.YOUTUBE:
-            return f"https://youtube.com/channel/{self.channel.channel_id}/live"
+            channel_id = self.channel.channel_id
+            if channel_id.startswith("UC"):
+                return f"https://youtube.com/channel/{channel_id}/live"
+            elif channel_id.startswith("@"):
+                return f"https://youtube.com/{channel_id}/live"
+            else:
+                return f"https://youtube.com/@{channel_id}/live"
         elif self.channel.platform == StreamPlatform.KICK:
             return f"https://kick.com/{self.channel.channel_id}"
         return ""
