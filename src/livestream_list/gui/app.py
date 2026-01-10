@@ -136,7 +136,8 @@ class NotificationBridge(QObject):
             return
 
         if self.notifier.settings.sound_enabled:
-            cmd.extend(["--hint", "int:sound-file:default"])
+            # Use string hint for sound-name (freedesktop notification spec)
+            cmd.extend(["--hint", "string:sound-name:message-new-instant"])
 
         subprocess.Popen(
             cmd,
