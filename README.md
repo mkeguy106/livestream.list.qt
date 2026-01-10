@@ -1,6 +1,8 @@
-# Livestream List for Linux
+# Livestream List (Qt)
 
-A GTK4/Libadwaita application for monitoring livestreams on Twitch, YouTube, and Kick. Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
+A PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, and Kick. Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
+
+This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-linux) (GTK4/Libadwaita version).
 
 ---
 
@@ -41,15 +43,14 @@ A GTK4/Libadwaita application for monitoring livestreams on Twitch, YouTube, and
 - **Hide Offline** - Toggle to show only live streams
 - **Selection Mode** - Multi-select channels for bulk deletion
 - **UI Styles** - Default, Compact 1, Compact 2, Compact 3 layouts
-  - All UI elements scale with compact modes (buttons, icons, header bar)
+  - All UI elements scale with compact modes (buttons, icons, toolbar)
 - **Stream Playback Tracking** - Shows "Playing" indicator with stop button
 - **Window Size Persistence** - Remembers window size between sessions
 
 ## Requirements
 
 - Python 3.11+
-- GTK 4.0
-- Libadwaita 1.0
+- PySide6 (Qt6)
 - yt-dlp (bundled in Flatpak, for YouTube stream detection)
 - Streamlink (optional, for launching streams)
 - mpv (optional, default player)
@@ -58,37 +59,24 @@ A GTK4/Libadwaita application for monitoring livestreams on Twitch, YouTube, and
 
 ### Flatpak (Recommended)
 
-Download `livestreamList.flatpak` from [Releases](https://github.com/mkeguy106/livestream-list-linux/releases).
+Download `livestreamListQt.flatpak` from [Releases](https://github.com/mkeguy106/livestream.list.qt/releases).
 
 ```bash
-# Install (will also install GNOME runtime dependencies from Flathub)
-flatpak install --user ~/Downloads/livestreamList.flatpak
+# Install (will also install KDE runtime dependencies from Flathub)
+flatpak install --user ~/Downloads/livestreamListQt-v*.flatpak
 
 # Run
-flatpak run life.covert.livestreamList
+flatpak run life.covert.livestreamListQt
 
-# Or launch from your application menu: "Livestream List"
+# Or launch from your application menu: "Livestream List (Qt)"
 ```
 
-### Arch Linux
+### From Source
 
 ```bash
-# Install system dependencies
-sudo pacman -S python python-gobject gtk4 libadwaita streamlink mpv
-
 # Clone and install
-git clone https://github.com/mkeguy106/livestream-list-linux.git
-cd livestream-list-linux
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-### Other Distributions
-
-Install GTK4 and Libadwaita development packages for your distribution, then:
-
-```bash
+git clone https://github.com/mkeguy106/livestream.list.qt.git
+cd livestream.list.qt
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -97,7 +85,7 @@ pip install -e .
 ## Usage
 
 ```bash
-livestream-list
+livestream-list-qt
 # or
 python -m livestream_list
 ```
@@ -143,9 +131,9 @@ Supported platforms: Twitch (popout/embedded/default), Kick (chatroom), YouTube 
 
 ## Configuration
 
-Settings are stored in `~/.config/livestream-list/settings.json`
+Settings are stored in `~/.config/livestream-list-qt/settings.json`
 
-Channels are stored in `~/.local/share/livestream-list/channels.json`
+Channels are stored in `~/.config/livestream-list-qt/channels.json`
 
 ### Streamlink Settings
 
@@ -159,28 +147,13 @@ Configure in Preferences > Streamlink:
 
 ```bash
 # Flatpak
-flatpak uninstall life.covert.livestreamList
+flatpak uninstall life.covert.livestreamListQt
 
 # Manual installation
-rm -rf ~/.config/livestream-list
-rm -rf ~/.local/share/livestream-list
+rm -rf ~/.config/livestream-list-qt
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
-
-## Roadmap
-
-Planned features and improvements:
-
-- [x] **Simplify YouTube Account Message** - Replace yt-dlp status in Preferences → Accounts → YouTube with the same message used for Kick
-- [x] **Launch on Startup** - Option to start the application automatically on login
-- [x] **Run in Background** - Keep running when window is closed, with first-launch prompt
-- [x] **System Tray Icon** - Click to restore window, right-click menu with Open/Notifications/Quit
-- [ ] **Responsive Channel Layout** - Preserve channel name visibility when resizing window; hide live duration before truncating channel name
-- [x] **Notification Watch Button** - Make the "Watch" button in notifications functional (launches stream like double-click)
-- [ ] **Chatterino/Chatty Support** - Integration with popular standalone chat clients
-- [ ] **UI Scaling** - Ctrl+scroll zoom behavior for the channel list
-- [ ] **Qt Port** - Possible rewrite or fork using Qt framework
 
 ## License
 
@@ -188,4 +161,5 @@ GPL-2.0 - See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
+- Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
+- Original GTK4 version: [livestream.list.linux](https://github.com/mkeguy106/livestream-list-linux)
