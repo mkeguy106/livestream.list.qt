@@ -405,7 +405,7 @@ def run() -> int:
         tray = TrayIcon(
             main_window,
             on_open=restore_window,
-            on_quit=app.quit,
+            on_quit=main_window._quit_app,
             get_notifications_enabled=lambda: app.settings.notifications.enabled,
             set_notifications_enabled=lambda enabled: setattr(app.settings.notifications, 'enabled', enabled) or app.save_settings(),
         )
