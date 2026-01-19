@@ -204,6 +204,8 @@ class StreamRow(QWidget):
         if self._settings.platform_colors:
             color = PLATFORM_COLORS.get(channel.platform, "#888888")
             self.platform_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        else:
+            self.platform_label.setStyleSheet("font-weight: bold;")
 
         # Channel name
         self.name_label.setText(channel.display_name or channel.channel_id)
@@ -1939,8 +1941,11 @@ class PreferencesDialog(QDialog):
             self.app.notification_bridge.send_test_notification(test_livestream)
 
     def _on_platform_colors_changed(self, state):
-        self.app.settings.platform_colors = (state == Qt.Checked)
+        self.app.settings.platform_colors = self.platform_colors_cb.isChecked()
         self.app.save_settings()
+        # Refresh main window to apply changes
+        if self.parent():
+            self.parent().refresh_stream_list()
 
     def _on_channel_info_changed(self, state):
         self.app.settings.channel_info.show_live_duration = self.show_duration_cb.isChecked()
