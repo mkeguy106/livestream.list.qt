@@ -17,13 +17,13 @@ source .venv/bin/activate
 pip install -e .
 
 # Run
-livestream-list
+livestream-list-qt
 # or
-.venv/bin/livestream-list
+.venv/bin/livestream-list-qt
 
 # Relaunch during development (kill existing, launch fresh)
-pkill -9 -f livestream-list 2>/dev/null; sleep 0.5
-.venv/bin/livestream-list 2>&1 &
+pkill -9 -f livestream-list-qt 2>/dev/null; sleep 0.5
+.venv/bin/livestream-list-qt 2>&1 &
 
 # Lint
 ruff check src/
@@ -94,8 +94,8 @@ class AsyncWorker(QThread):
 
 ### Configuration Paths
 
-- Settings: `~/.config/livestream-list/settings.json`
-- Channels: `~/.config/livestream-list/channels.json`
+- Settings: `~/.config/livestream-list-qt/settings.json`
+- Channels: `~/.config/livestream-list-qt/channels.json`
 
 ## Known Pitfalls
 

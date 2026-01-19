@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from typing import Optional, Callable
 
-from .models import Livestream, StreamQuality
+from .models import Livestream, StreamPlatform, StreamQuality
 from .settings import StreamlinkSettings
 
 logger = logging.getLogger(__name__)
@@ -170,6 +170,23 @@ class StreamlinkLauncher:
 
         return cmd
 
+    def _build_youtube_command(self, livestream: Livestream) -> list[str]:
+        """Build command to launch YouTube stream directly with player (bypasses streamlink).
+
+        Streamlink's YouTube plugin has compatibility issues with YouTube's API,
+        so we launch the player directly and let it use yt-dlp internally.
+        """
+        cmd = [self.settings.player or "mpv"]
+
+        # Player arguments
+        if self.settings.player_args:
+            cmd.extend(self.settings.player_args.split())
+
+        # Stream URL - player (mpv) will use yt-dlp to handle YouTube
+        cmd.append(livestream.stream_url)
+
+        return cmd
+
     def launch(
         self,
         livestream: Livestream,
@@ -180,18 +197,22 @@ class StreamlinkLauncher:
             logger.warning("Streamlink is disabled")
             return None
 
-        if not self.is_available():
-            logger.error("Streamlink is not available")
-            return None
-
         channel_key = livestream.channel.unique_key
 
         # Stop existing stream for this channel if any
         if channel_key in self._active_streams:
             self.stop_stream(channel_key)
 
-        cmd = host_command(self.build_command(livestream, quality))
-        logger.info(f"Launching: {' '.join(cmd)}")
+        # For YouTube, launch player directly (streamlink YouTube plugin has issues)
+        if livestream.channel.platform == StreamPlatform.YOUTUBE:
+            cmd = host_command(self._build_youtube_command(livestream))
+            logger.info(f"Launching YouTube direct: {' '.join(cmd)}")
+        else:
+            if not self.is_available():
+                logger.error("Streamlink is not available")
+                return None
+            cmd = host_command(self.build_command(livestream, quality))
+            logger.info(f"Launching: {' '.join(cmd)}")
 
         try:
             process = subprocess.Popen(
@@ -204,7 +225,7 @@ class StreamlinkLauncher:
             self._active_streams[channel_key] = (process, livestream)
             return process
         except Exception as e:
-            logger.error(f"Failed to launch streamlink: {e}")
+            logger.error(f"Failed to launch stream: {e}")
             return None
 
     async def launch_async(
