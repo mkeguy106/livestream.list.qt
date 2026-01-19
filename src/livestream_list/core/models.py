@@ -25,6 +25,13 @@ class StreamQuality(str, Enum):
     AUDIO_ONLY = "audio_only"
 
 
+class LaunchMethod(str, Enum):
+    """Stream launch method options."""
+
+    STREAMLINK = "streamlink"  # Use external streamlink
+    YT_DLP = "yt-dlp"  # Use player directly (mpv with yt-dlp backend)
+
+
 @dataclass
 class Channel:
     """Represents a monitored channel."""

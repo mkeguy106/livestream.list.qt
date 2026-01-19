@@ -1514,7 +1514,7 @@ class PreferencesDialog(QDialog):
 
         # Streamlink tab
         streamlink_tab = self._create_streamlink_tab()
-        tabs.addTab(streamlink_tab, "Streamlink")
+        tabs.addTab(streamlink_tab, "Playback")
 
         # Chat tab
         chat_tab = self._create_chat_tab()
@@ -1715,6 +1715,48 @@ class PreferencesDialog(QDialog):
         player_layout.addRow("Arguments:", self.player_args_edit)
 
         layout.addWidget(player_group)
+
+        # Launch Method group (per-platform)
+        launch_group = QGroupBox("Launch Method")
+        launch_layout = QFormLayout(launch_group)
+
+        # Twitch launch method
+        self.twitch_launch_combo = QComboBox()
+        self.twitch_launch_combo.addItem("Streamlink", "streamlink")
+        self.twitch_launch_combo.addItem("yt-dlp (via player)", "yt-dlp")
+        current_twitch = self.app.settings.streamlink.twitch_launch_method.value
+        for i in range(self.twitch_launch_combo.count()):
+            if self.twitch_launch_combo.itemData(i) == current_twitch:
+                self.twitch_launch_combo.setCurrentIndex(i)
+                break
+        self.twitch_launch_combo.currentIndexChanged.connect(self._on_launch_method_changed)
+        launch_layout.addRow("Twitch:", self.twitch_launch_combo)
+
+        # YouTube launch method
+        self.youtube_launch_combo = QComboBox()
+        self.youtube_launch_combo.addItem("Streamlink", "streamlink")
+        self.youtube_launch_combo.addItem("yt-dlp (via player)", "yt-dlp")
+        current_youtube = self.app.settings.streamlink.youtube_launch_method.value
+        for i in range(self.youtube_launch_combo.count()):
+            if self.youtube_launch_combo.itemData(i) == current_youtube:
+                self.youtube_launch_combo.setCurrentIndex(i)
+                break
+        self.youtube_launch_combo.currentIndexChanged.connect(self._on_launch_method_changed)
+        launch_layout.addRow("YouTube:", self.youtube_launch_combo)
+
+        # Kick launch method
+        self.kick_launch_combo = QComboBox()
+        self.kick_launch_combo.addItem("Streamlink", "streamlink")
+        self.kick_launch_combo.addItem("yt-dlp (via player)", "yt-dlp")
+        current_kick = self.app.settings.streamlink.kick_launch_method.value
+        for i in range(self.kick_launch_combo.count()):
+            if self.kick_launch_combo.itemData(i) == current_kick:
+                self.kick_launch_combo.setCurrentIndex(i)
+                break
+        self.kick_launch_combo.currentIndexChanged.connect(self._on_launch_method_changed)
+        launch_layout.addRow("Kick:", self.kick_launch_combo)
+
+        layout.addWidget(launch_group)
 
         layout.addStretch()
         return widget
@@ -1924,6 +1966,19 @@ class PreferencesDialog(QDialog):
         self.app.settings.streamlink.additional_args = self.sl_args_edit.text()
         self.app.settings.streamlink.player = self.player_path_edit.text()
         self.app.settings.streamlink.player_args = self.player_args_edit.text()
+        self.app.save_settings()
+
+    def _on_launch_method_changed(self):
+        from ..core.models import LaunchMethod
+        self.app.settings.streamlink.twitch_launch_method = LaunchMethod(
+            self.twitch_launch_combo.currentData()
+        )
+        self.app.settings.streamlink.youtube_launch_method = LaunchMethod(
+            self.youtube_launch_combo.currentData()
+        )
+        self.app.settings.streamlink.kick_launch_method = LaunchMethod(
+            self.kick_launch_combo.currentData()
+        )
         self.app.save_settings()
 
     def _on_chat_client_changed(self, index):

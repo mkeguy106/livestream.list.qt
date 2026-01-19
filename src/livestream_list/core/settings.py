@@ -7,7 +7,7 @@ from typing import Optional
 
 from appdirs import user_config_dir, user_data_dir
 
-from .models import StreamQuality
+from .models import LaunchMethod, StreamQuality
 
 
 APP_NAME = "livestream-list-qt"
@@ -39,6 +39,11 @@ class StreamlinkSettings:
     default_quality: StreamQuality = StreamQuality.SOURCE
     low_latency: bool = False
     additional_args: str = ""
+
+    # Per-platform launch method (streamlink or yt-dlp)
+    twitch_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
+    youtube_launch_method: LaunchMethod = LaunchMethod.YT_DLP
+    kick_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
 
 
 @dataclass
@@ -236,6 +241,9 @@ class Settings:
                 default_quality=StreamQuality(s.get("default_quality", "best")),
                 low_latency=s.get("low_latency", False),
                 additional_args=s.get("additional_args", ""),
+                twitch_launch_method=LaunchMethod(s.get("twitch_launch_method", "streamlink")),
+                youtube_launch_method=LaunchMethod(s.get("youtube_launch_method", "yt-dlp")),
+                kick_launch_method=LaunchMethod(s.get("kick_launch_method", "streamlink")),
             )
 
         # Notifications
@@ -326,6 +334,9 @@ class Settings:
                 "default_quality": self.streamlink.default_quality.value,
                 "low_latency": self.streamlink.low_latency,
                 "additional_args": self.streamlink.additional_args,
+                "twitch_launch_method": self.streamlink.twitch_launch_method.value,
+                "youtube_launch_method": self.streamlink.youtube_launch_method.value,
+                "kick_launch_method": self.streamlink.kick_launch_method.value,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,

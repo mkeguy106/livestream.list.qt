@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from typing import Optional, Callable
 
-from .models import Livestream, StreamPlatform, StreamQuality
+from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
 from .settings import StreamlinkSettings
 
 logger = logging.getLogger(__name__)
@@ -170,11 +170,10 @@ class StreamlinkLauncher:
 
         return cmd
 
-    def _build_youtube_command(self, livestream: Livestream) -> list[str]:
-        """Build command to launch YouTube stream directly with player (bypasses streamlink).
+    def _build_ytdlp_command(self, livestream: Livestream) -> list[str]:
+        """Build command to launch stream directly with player (using yt-dlp backend).
 
-        Streamlink's YouTube plugin has compatibility issues with YouTube's API,
-        so we launch the player directly and let it use yt-dlp internally.
+        Launches the player directly and lets it use yt-dlp internally to handle the stream.
         """
         cmd = [self.settings.player or "mpv"]
 
@@ -182,17 +181,28 @@ class StreamlinkLauncher:
         if self.settings.player_args:
             cmd.extend(self.settings.player_args.split())
 
-        # Stream URL - player (mpv) will use yt-dlp to handle YouTube
+        # Stream URL - player (mpv) will use yt-dlp to handle the stream
         cmd.append(livestream.stream_url)
 
         return cmd
+
+    def _get_launch_method(self, platform: StreamPlatform) -> LaunchMethod:
+        """Get the configured launch method for a platform."""
+        if platform == StreamPlatform.TWITCH:
+            return self.settings.twitch_launch_method
+        elif platform == StreamPlatform.YOUTUBE:
+            return self.settings.youtube_launch_method
+        elif platform == StreamPlatform.KICK:
+            return self.settings.kick_launch_method
+        # Default to streamlink for unknown platforms
+        return LaunchMethod.STREAMLINK
 
     def launch(
         self,
         livestream: Livestream,
         quality: Optional[StreamQuality] = None,
     ) -> Optional[subprocess.Popen]:
-        """Launch streamlink for a stream."""
+        """Launch a stream using the configured method for the platform."""
         if not self.settings.enabled:
             logger.warning("Streamlink is disabled")
             return None
@@ -203,16 +213,19 @@ class StreamlinkLauncher:
         if channel_key in self._active_streams:
             self.stop_stream(channel_key)
 
-        # For YouTube, launch player directly (streamlink YouTube plugin has issues)
-        if livestream.channel.platform == StreamPlatform.YOUTUBE:
-            cmd = host_command(self._build_youtube_command(livestream))
-            logger.info(f"Launching YouTube direct: {' '.join(cmd)}")
+        # Get the launch method for this platform
+        launch_method = self._get_launch_method(livestream.channel.platform)
+
+        if launch_method == LaunchMethod.YT_DLP:
+            cmd = host_command(self._build_ytdlp_command(livestream))
+            logger.info(f"Launching via yt-dlp: {' '.join(cmd)}")
         else:
+            # LaunchMethod.STREAMLINK
             if not self.is_available():
                 logger.error("Streamlink is not available")
                 return None
             cmd = host_command(self.build_command(livestream, quality))
-            logger.info(f"Launching: {' '.join(cmd)}")
+            logger.info(f"Launching via streamlink: {' '.join(cmd)}")
 
         try:
             process = subprocess.Popen(
