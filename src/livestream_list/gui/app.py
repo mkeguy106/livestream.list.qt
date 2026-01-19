@@ -380,10 +380,13 @@ def run() -> int:
     """Run the application."""
     # Import here to avoid circular imports
     from .main_window import MainWindow
-    from .tray import TrayIcon, is_tray_available
+    from .tray import TrayIcon, is_tray_available, create_app_icon
 
     app = Application()
     app.initialize()
+
+    # Set application icon (used for taskbar/window icon)
+    app.setWindowIcon(create_app_icon(64))
 
     # Create main window
     main_window = MainWindow(app)

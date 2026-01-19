@@ -4,9 +4,77 @@ import logging
 from typing import Callable, Optional
 
 from PySide6.QtWidgets import QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPolygon
+from PySide6.QtCore import QPoint
 
 logger = logging.getLogger(__name__)
+
+
+def create_app_icon(size: int = 22) -> QIcon:
+    """Create the application icon at the specified size."""
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+
+    # Scale factor based on size (22 is the base size)
+    scale = size / 22.0
+
+    # Draw a simple monitor-like shape
+    # Monitor frame
+    monitor_color = QColor(100, 150, 200)  # Light blue
+    painter.setPen(monitor_color)
+    painter.setBrush(monitor_color)
+    painter.drawRoundedRect(
+        int(2 * scale), int(2 * scale),
+        int(18 * scale), int(14 * scale),
+        int(2 * scale), int(2 * scale)
+    )
+
+    # Screen (darker inside)
+    screen_color = QColor(40, 60, 80)
+    painter.setBrush(screen_color)
+    painter.drawRect(
+        int(4 * scale), int(4 * scale),
+        int(14 * scale), int(10 * scale)
+    )
+
+    # Play button triangle
+    play_color = QColor(255, 255, 255)
+    painter.setPen(play_color)
+    painter.setBrush(play_color)
+    triangle = QPolygon([
+        QPoint(int(8 * scale), int(6 * scale)),
+        QPoint(int(8 * scale), int(12 * scale)),
+        QPoint(int(14 * scale), int(9 * scale)),
+    ])
+    painter.drawPolygon(triangle)
+
+    # Live indicator dot (red)
+    live_color = QColor(255, 50, 50)
+    painter.setPen(live_color)
+    painter.setBrush(live_color)
+    painter.drawEllipse(
+        int(15 * scale), int(3 * scale),
+        int(4 * scale), int(4 * scale)
+    )
+
+    # Monitor stand
+    painter.setPen(monitor_color)
+    painter.setBrush(monitor_color)
+    painter.drawRect(
+        int(9 * scale), int(16 * scale),
+        int(4 * scale), int(2 * scale)
+    )
+    painter.drawRect(
+        int(7 * scale), int(18 * scale),
+        int(8 * scale), int(2 * scale)
+    )
+
+    painter.end()
+
+    return QIcon(pixmap)
 
 
 def is_tray_available() -> bool:
@@ -46,54 +114,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def _create_icon(self):
         """Create the tray icon."""
-        # Create a simple 22x22 icon
-        size = 22
-        pixmap = QPixmap(size, size)
-        pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        # Draw a simple monitor-like shape
-        # Monitor frame
-        monitor_color = QColor(100, 150, 200)  # Light blue
-        painter.setPen(monitor_color)
-        painter.setBrush(monitor_color)
-        painter.drawRoundedRect(2, 2, 18, 14, 2, 2)
-
-        # Screen (darker inside)
-        screen_color = QColor(40, 60, 80)
-        painter.setBrush(screen_color)
-        painter.drawRect(4, 4, 14, 10)
-
-        # Play button triangle
-        play_color = QColor(255, 255, 255)
-        painter.setPen(play_color)
-        painter.setBrush(play_color)
-        from PySide6.QtGui import QPolygon
-        from PySide6.QtCore import QPoint
-        triangle = QPolygon([
-            QPoint(8, 6),
-            QPoint(8, 12),
-            QPoint(14, 9),
-        ])
-        painter.drawPolygon(triangle)
-
-        # Live indicator dot (red)
-        live_color = QColor(255, 50, 50)
-        painter.setPen(live_color)
-        painter.setBrush(live_color)
-        painter.drawEllipse(15, 3, 4, 4)
-
-        # Monitor stand
-        painter.setPen(monitor_color)
-        painter.setBrush(monitor_color)
-        painter.drawRect(9, 16, 4, 2)
-        painter.drawRect(7, 18, 8, 2)
-
-        painter.end()
-
-        self.setIcon(QIcon(pixmap))
+        self.setIcon(create_app_icon(22))
 
     def _create_menu(self):
         """Create the context menu."""
