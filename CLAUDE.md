@@ -135,6 +135,35 @@ class AsyncWorker(QThread):
 | Kick wrong duration | Use `start_time` field, add UTC timezone to parsed datetime |
 | OAuth login UI not updating | Use Qt Signal instead of QTimer.singleShot from background thread |
 
+## CI/CD - Self-Hosted Runner
+
+Releases use a self-hosted GitHub Actions runner on `docker01.dd.local`.
+
+**Runner location**: `docker01.dd.local:/share/bsv/docker-compose/github-runner/`
+
+### Troubleshooting Release Builds
+
+If a release stays "queued" for a long time:
+
+```bash
+# Check runner status
+ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose ps"
+
+# Check runner logs (look for "deprecated" or errors)
+ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose logs --tail 50 github-runner-qt"
+
+# Restart runners
+ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose down && docker compose up -d"
+
+# Cleanup docker to free space (run periodically)
+ssh docker01.dd.local "docker system prune -af --volumes"
+```
+
+**Common issues:**
+- Runner version deprecated → pull latest image and restart
+- Runner in restart loop → check logs for auth/token issues
+- Job canceled mid-run → re-run workflow with `gh run rerun <run-id>`
+
 ## Git Commits
 
 Never include in commit messages:
