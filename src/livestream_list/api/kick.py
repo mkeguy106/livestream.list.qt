@@ -159,6 +159,10 @@ class KickApiClient(BaseApiClient):
                 if categories:
                     game = categories[0].get("name")
 
+                # Handle thumbnail safely (can be None or a dict)
+                thumbnail = livestream_data.get("thumbnail")
+                thumbnail_url = thumbnail.get("url") if thumbnail else None
+
                 return Livestream(
                     channel=channel,
                     live=True,
@@ -166,7 +170,7 @@ class KickApiClient(BaseApiClient):
                     game=game,
                     viewers=livestream_data.get("viewer_count", 0),
                     start_time=start_time,
-                    thumbnail_url=livestream_data.get("thumbnail", {}).get("url"),
+                    thumbnail_url=thumbnail_url,
                     language=livestream_data.get("language"),
                     is_mature=livestream_data.get("is_mature", False),
                 )
@@ -241,6 +245,10 @@ class KickApiClient(BaseApiClient):
                         display_name=channel_data.get("user", {}).get("username", ""),
                     )
 
+                    # Handle thumbnail safely (can be None or a dict)
+                    thumbnail = stream_data.get("thumbnail")
+                    thumbnail_url = thumbnail.get("url") if thumbnail else None
+
                     streams.append(
                         Livestream(
                             channel=channel,
@@ -249,7 +257,7 @@ class KickApiClient(BaseApiClient):
                             game=game,
                             viewers=stream_data.get("viewer_count", 0),
                             start_time=start_time,
-                            thumbnail_url=stream_data.get("thumbnail", {}).get("url"),
+                            thumbnail_url=thumbnail_url,
                             language=stream_data.get("language"),
                             is_mature=stream_data.get("is_mature", False),
                         )
