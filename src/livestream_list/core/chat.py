@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import webbrowser
-from typing import Optional
 
 from .models import StreamPlatform
 from .settings import ChatSettings
@@ -49,7 +48,7 @@ class ChatLauncher:
     def __init__(self, settings: ChatSettings) -> None:
         self.settings = settings
 
-    def get_chat_url(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: Optional[str] = None) -> Optional[str]:
+    def get_chat_url(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: str | None = None) -> str | None:
         """Get the chat URL for a channel based on platform and settings."""
         if platform == StreamPlatform.TWITCH:
             url_template = TWITCH_CHAT_URLS.get(self.settings.url_type, TWITCH_CHAT_URLS[0])
@@ -66,7 +65,7 @@ class ChatLauncher:
             url_template = TWITCH_CHAT_URLS.get(self.settings.url_type, TWITCH_CHAT_URLS[0])
             return url_template.format(channel=channel.lower())
 
-    def _find_browser_executable(self, browser: str) -> Optional[str]:
+    def _find_browser_executable(self, browser: str) -> str | None:
         """Find the executable path for a browser."""
         if browser == "default":
             return None  # Use system default
@@ -181,7 +180,7 @@ class ChatLauncher:
             logger.error(f"Failed to open {description}: {e}")
             return False
 
-    def open_chat(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: Optional[str] = None) -> bool:
+    def open_chat(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: str | None = None) -> bool:
         """
         Open chat for a channel in the configured browser.
 
@@ -234,7 +233,7 @@ class ChatLauncher:
         url = self.get_channel_url(channel, platform)
         return self._open_url_in_browser(url, f"channel {channel}")
 
-    def open_chat_app_mode(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: Optional[str] = None) -> bool:
+    def open_chat_app_mode(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH, video_id: str | None = None) -> bool:
         """
         Open chat in app mode (Chrome/Chromium/Edge only).
 

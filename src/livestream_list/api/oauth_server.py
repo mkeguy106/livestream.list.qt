@@ -4,9 +4,8 @@ import asyncio
 import logging
 import socket
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -136,9 +135,9 @@ class OAuthServer:
             port: Port to listen on. Use 0 to auto-select an available port.
         """
         self._port = port
-        self._server: Optional[HTTPServer] = None
-        self._thread: Optional[Thread] = None
-        self._token: Optional[str] = None
+        self._server: HTTPServer | None = None
+        self._thread: Thread | None = None
+        self._token: str | None = None
         self._token_event = threading.Event()
 
     @property
@@ -186,7 +185,7 @@ class OAuthServer:
 
         logger.info("OAuth server stopped")
 
-    async def wait_for_token(self, timeout: float = 300) -> Optional[str]:
+    async def wait_for_token(self, timeout: float = 300) -> str | None:
         """
         Wait for the OAuth token to be received.
 

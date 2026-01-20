@@ -6,24 +6,43 @@ import logging
 import re
 import threading
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional, Callable
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, QTimer, QThread
-from PySide6.QtGui import QAction, QShortcut, QKeySequence, QClipboard, QFont
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QLineEdit, QComboBox, QCheckBox, QListWidget,
-    QListWidgetItem, QStackedWidget, QProgressBar, QStatusBar,
-    QMenu, QMenuBar, QToolBar, QDialog, QDialogButtonBox,
-    QTabWidget, QSpinBox, QGroupBox, QFormLayout, QMessageBox,
-    QFileDialog, QApplication, QFrame, QSizePolicy, QScrollArea,
-    QToolButton
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QStackedWidget,
+    QStatusBar,
+    QTabWidget,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-from ..core.models import Channel, Livestream, StreamPlatform
-from ..core.chat import ChatLauncher
-from ..core.autostart import set_autostart, is_autostart_enabled
 from ..__version__ import __version__
+from ..core.autostart import is_autostart_enabled, set_autostart
+from ..core.chat import ChatLauncher
+from ..core.models import Channel, Livestream, SortMode, StreamPlatform, UIStyle
 
 if TYPE_CHECKING:
     from .app import Application
@@ -39,18 +58,11 @@ PLATFORM_COLORS = {
 
 # UI style configurations
 UI_STYLES = {
-    0: {"name": "Default", "margin_v": 4, "margin_h": 12, "spacing": 10, "icon_size": 16},
-    1: {"name": "Compact 1", "margin_v": 4, "margin_h": 12, "spacing": 8, "icon_size": 14},
-    2: {"name": "Compact 2", "margin_v": 2, "margin_h": 6, "spacing": 4, "icon_size": 12},
-    3: {"name": "Compact 3", "margin_v": 1, "margin_h": 4, "spacing": 2, "icon_size": 10},
+    UIStyle.DEFAULT: {"name": "Default", "margin_v": 4, "margin_h": 12, "spacing": 10, "icon_size": 16},
+    UIStyle.COMPACT_1: {"name": "Compact 1", "margin_v": 4, "margin_h": 12, "spacing": 8, "icon_size": 14},
+    UIStyle.COMPACT_2: {"name": "Compact 2", "margin_v": 2, "margin_h": 6, "spacing": 4, "icon_size": 12},
+    UIStyle.COMPACT_3: {"name": "Compact 3", "margin_v": 1, "margin_h": 4, "spacing": 2, "icon_size": 10},
 }
-
-# Sort modes
-SORT_NAME = 0
-SORT_VIEWERS = 1
-SORT_PLAYING = 2
-SORT_LAST_SEEN = 3
-SORT_TIME_LIVE = 4
 
 
 class StreamRow(QWidget):
@@ -72,7 +84,7 @@ class StreamRow(QWidget):
 
     def _setup_ui(self):
         """Set up the row UI."""
-        style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[0])
+        style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(style["margin_h"], style["margin_v"],
@@ -127,7 +139,7 @@ class StreamRow(QWidget):
         info_layout.addLayout(name_row)
 
         # Title row (only in default style)
-        if self._settings.ui_style == 0:
+        if self._settings.ui_style == UIStyle.DEFAULT:
             from PySide6.QtWidgets import QSizePolicy
             self.title_label = QLabel()
             self.title_label.setStyleSheet("color: gray; font-size: 11px;")
@@ -313,7 +325,7 @@ class MainWindow(QMainWindow):
         self._selection_mode = False
         self._initial_check_complete = False
         self._name_filter = ""
-        self._platform_filter: Optional[StreamPlatform] = None
+        self._platform_filter: StreamPlatform | None = None
         self._chat_launcher = ChatLauncher(app.settings.chat)
         self._force_quit = False  # When True, closeEvent quits instead of minimizing
 
@@ -567,12 +579,12 @@ class MainWindow(QMainWindow):
         # Sort dropdown
         filter_layout.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
-        self.sort_combo.addItem("Name", SORT_NAME)
-        self.sort_combo.addItem("Viewers", SORT_VIEWERS)
-        self.sort_combo.addItem("Playing", SORT_PLAYING)
-        self.sort_combo.addItem("Last Seen", SORT_LAST_SEEN)
-        self.sort_combo.addItem("Time Live", SORT_TIME_LIVE)
-        self.sort_combo.setCurrentIndex(self.app.settings.sort_mode)
+        self.sort_combo.addItem("Name", SortMode.NAME)
+        self.sort_combo.addItem("Viewers", SortMode.VIEWERS)
+        self.sort_combo.addItem("Playing", SortMode.PLAYING)
+        self.sort_combo.addItem("Last Seen", SortMode.LAST_SEEN)
+        self.sort_combo.addItem("Time Live", SortMode.TIME_LIVE)
+        self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         filter_layout.addWidget(self.sort_combo)
 
@@ -586,12 +598,13 @@ class MainWindow(QMainWindow):
         """Connect application signals."""
         self.app.stream_online.connect(self._on_stream_online)
         self.app.refresh_complete.connect(self._on_refresh_complete)
+        self.app.refresh_error.connect(self._on_refresh_error)
 
     def _apply_settings(self):
         """Apply current settings to the UI."""
         self.hide_offline_cb.setChecked(self.app.settings.hide_offline)
         self.favorites_cb.setChecked(self.app.settings.favorites_only)
-        self.sort_combo.setCurrentIndex(self.app.settings.sort_mode)
+        self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
 
     def set_loading_complete(self):
         """Switch from loading view to appropriate content view."""
@@ -695,16 +708,16 @@ class MainWindow(QMainWindow):
             live = 0 if ls.live else 1
             is_playing = 0 if streamlink and streamlink.is_playing(ls.channel.unique_key) else 1
 
-            if sort_mode == SORT_NAME:
+            if sort_mode == SortMode.NAME:
                 name = (ls.channel.display_name or ls.channel.channel_id).lower()
                 return (live, name)
-            elif sort_mode == SORT_VIEWERS:
+            elif sort_mode == SortMode.VIEWERS:
                 viewers = -(ls.viewers or 0)
                 return (live, viewers)
-            elif sort_mode == SORT_PLAYING:
+            elif sort_mode == SortMode.PLAYING:
                 name = (ls.channel.display_name or ls.channel.channel_id).lower()
                 return (is_playing, live, name)
-            elif sort_mode == SORT_LAST_SEEN:
+            elif sort_mode == SortMode.LAST_SEEN:
                 if ls.live and ls.start_time:
                     # Live streams: sort by time live (longest first = earliest start_time)
                     start = ls.start_time if ls.start_time.tzinfo else ls.start_time.replace(tzinfo=timezone.utc)
@@ -713,7 +726,7 @@ class MainWindow(QMainWindow):
                     # Offline streams: sort by last seen (most recent first)
                     last_live = ls.last_live_time or datetime.min.replace(tzinfo=timezone.utc)
                     return (live, -last_live.timestamp())
-            elif sort_mode == SORT_TIME_LIVE:
+            elif sort_mode == SortMode.TIME_LIVE:
                 if ls.live and ls.start_time:
                     now = datetime.now(timezone.utc) if ls.start_time.tzinfo else datetime.now()
                     uptime = (now - ls.start_time).total_seconds()
@@ -792,6 +805,10 @@ class MainWindow(QMainWindow):
     def _on_refresh_complete(self):
         """Handle refresh completion."""
         self.refresh_stream_list()
+
+    def _on_refresh_error(self, error_msg: str):
+        """Handle refresh error - show message in status bar."""
+        self.set_status(f"⚠ {error_msg}")
 
     def _on_refresh(self):
         """Handle refresh action."""
@@ -966,9 +983,10 @@ class MainWindow(QMainWindow):
     def _import_from_file(self, file_path: str):
         """Import channels and settings from a file."""
         import json
+
         from ..core.settings import Settings
         try:
-            with open(file_path, 'r') as f:
+            with open(file_path) as f:
                 data = json.load(f)
 
             channels_data = data.get('channels', [])
@@ -1045,7 +1063,7 @@ class MainWindow(QMainWindow):
             msg.setCheckBox(dont_ask_cb)
 
             run_bg_btn = msg.addButton("Run in Background", QMessageBox.AcceptRole)
-            quit_btn = msg.addButton("Quit", QMessageBox.RejectRole)
+            msg.addButton("Quit", QMessageBox.RejectRole)
             msg.setDefaultButton(run_bg_btn)
 
             msg.exec()
@@ -1159,8 +1177,8 @@ class AboutDialog(QDialog):
 
     def _check_for_updates(self):
         """Check GitHub for the latest release."""
-        import urllib.request
         import json
+        import urllib.request
 
         self.check_updates_btn.setEnabled(False)
         self.check_updates_btn.setText("Checking...")
@@ -1562,7 +1580,6 @@ class PreferencesDialog(QDialog):
 
     def _create_general_tab(self) -> QWidget:
         """Create the General settings tab."""
-        from PySide6.QtWidgets import QScrollArea
 
         # Create scroll area
         scroll = QScrollArea()
@@ -2334,8 +2351,8 @@ class ExportDialog(QDialog):
 
     def _on_export(self):
         """Handle export."""
-        from datetime import datetime
         import json
+        from datetime import datetime
 
         default_name = f"livestream-list-export-{datetime.now().strftime('%Y-%m-%d')}.json"
 

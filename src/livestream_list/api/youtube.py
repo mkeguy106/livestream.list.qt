@@ -6,7 +6,6 @@ import logging
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from typing import Optional
 
 from ..core.models import Channel, Livestream, StreamPlatform
 from ..core.settings import YouTubeSettings
@@ -27,7 +26,7 @@ class YouTubeApiClient(BaseApiClient):
     def __init__(self, settings: YouTubeSettings) -> None:
         super().__init__()
         self.settings = settings
-        self._ytdlp_path: Optional[str] = None
+        self._ytdlp_path: str | None = None
         self._check_ytdlp()
 
     def _check_ytdlp(self) -> None:
@@ -52,7 +51,7 @@ class YouTubeApiClient(BaseApiClient):
         """No authorization needed - yt-dlp works without API key."""
         return self._ytdlp_path is not None
 
-    def _run_ytdlp(self, url: str, extra_args: list[str] = None) -> Optional[dict]:
+    def _run_ytdlp(self, url: str, extra_args: list[str] = None) -> dict | None:
         """Run yt-dlp and return JSON output."""
         if not self._ytdlp_path:
             return None
@@ -89,12 +88,12 @@ class YouTubeApiClient(BaseApiClient):
 
         return None
 
-    async def _run_ytdlp_async(self, url: str, extra_args: list[str] = None) -> Optional[dict]:
+    async def _run_ytdlp_async(self, url: str, extra_args: list[str] = None) -> dict | None:
         """Run yt-dlp asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._run_ytdlp, url, extra_args)
 
-    async def _get_last_video_date(self, channel: Channel) -> Optional[datetime]:
+    async def _get_last_video_date(self, channel: Channel) -> datetime | None:
         """Get the upload date of the most recent video on the channel."""
         channel_id = channel.channel_id
         if channel_id.startswith("UC"):
@@ -128,7 +127,7 @@ class YouTubeApiClient(BaseApiClient):
 
         return None
 
-    async def get_channel_info(self, channel_id: str) -> Optional[Channel]:
+    async def get_channel_info(self, channel_id: str) -> Channel | None:
         """
         Get channel info using yt-dlp.
         channel_id can be a channel ID (UC...), username, or handle (@...).

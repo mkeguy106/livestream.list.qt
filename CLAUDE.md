@@ -35,6 +35,9 @@ mypy src/
 
 # Run tests (currently empty)
 pytest tests/
+
+# Run single test
+pytest tests/test_file.py::test_name -v
 ```
 
 ### App Keyboard Shortcuts
@@ -110,6 +113,10 @@ class AsyncWorker(QThread):
 | `src/livestream_list/__version__.py` | Single source of truth for version |
 | `src/livestream_list/core/models.py` | Data classes: Channel, Livestream, StreamPlatform |
 | `src/livestream_list/core/streamlink.py` | Stream launch via streamlink or yt-dlp |
+
+### Versioning
+
+Version is defined in `src/livestream_list/__version__.py`. Update `__version__ = "x.y.z"` before release.
 
 ### Configuration Paths
 

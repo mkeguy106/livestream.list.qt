@@ -1,14 +1,12 @@
 """Settings management for Livestream List."""
 
 import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from appdirs import user_config_dir, user_data_dir
 
-from .models import LaunchMethod, StreamQuality
-
+from .models import LaunchMethod, SortMode, StreamQuality, UIStyle
 
 APP_NAME = "livestream-list-qt"
 APP_AUTHOR = "livestream-list-qt"
@@ -91,8 +89,8 @@ class WindowSettings:
 
     width: int = 1000
     height: int = 700
-    x: Optional[int] = None
-    y: Optional[int] = None
+    x: int | None = None
+    y: int | None = None
     maximized: bool = False
 
 
@@ -140,10 +138,10 @@ class Settings:
     close_to_tray_asked: bool = False  # Whether user has been asked about close behavior
 
     # UI preferences
-    sort_mode: int = 1  # 0=Name, 1=Viewers, 2=Playing, 3=Last Seen, 4=Time Live
+    sort_mode: SortMode = SortMode.VIEWERS
     hide_offline: bool = False
     favorites_only: bool = False
-    ui_style: int = 0  # 0=Default, 1=Compact 1, 2=Compact 2
+    ui_style: UIStyle = UIStyle.DEFAULT
     platform_colors: bool = True  # Color platform icons and channel names
 
     # Platform settings
@@ -160,7 +158,7 @@ class Settings:
     channel_icons: ChannelIconSettings = field(default_factory=ChannelIconSettings)
 
     @classmethod
-    def load(cls, path: Optional[Path] = None) -> "Settings":
+    def load(cls, path: Path | None = None) -> "Settings":
         """Load settings from file."""
         if path is None:
             path = get_config_dir() / "settings.json"
@@ -169,14 +167,14 @@ class Settings:
             return cls()
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             return cls._from_dict(data)
         except (json.JSONDecodeError, KeyError, TypeError):
             # Return default settings if file is corrupted
             return cls()
 
-    def save(self, path: Optional[Path] = None) -> None:
+    def save(self, path: Path | None = None) -> None:
         """Save settings to file."""
         if path is None:
             path = get_config_dir() / "settings.json"
@@ -201,15 +199,19 @@ class Settings:
         settings.close_to_tray_asked = data.get("close_to_tray_asked", settings.close_to_tray_asked)
 
         # UI preferences
-        old_sort_mode = data.get("sort_mode", settings.sort_mode)
+        old_sort_mode = data.get("sort_mode", settings.sort_mode.value)
         # Valid sort modes: 0=Name, 1=Viewers, 2=Playing, 3=Last Seen, 4=Time Live
-        if old_sort_mode in (0, 1, 2, 3, 4):
-            settings.sort_mode = old_sort_mode
-        else:
-            settings.sort_mode = 1  # Default to Viewers
+        try:
+            settings.sort_mode = SortMode(old_sort_mode)
+        except ValueError:
+            settings.sort_mode = SortMode.VIEWERS  # Default to Viewers
         settings.hide_offline = data.get("hide_offline", settings.hide_offline)
         settings.favorites_only = data.get("favorites_only", settings.favorites_only)
-        settings.ui_style = data.get("ui_style", settings.ui_style)
+        old_ui_style = data.get("ui_style", settings.ui_style.value)
+        try:
+            settings.ui_style = UIStyle(old_ui_style)
+        except ValueError:
+            settings.ui_style = UIStyle.DEFAULT
         settings.platform_colors = data.get("platform_colors", settings.platform_colors)
 
         # Twitch
@@ -309,10 +311,10 @@ class Settings:
             "autostart": self.autostart,
             "close_to_tray": self.close_to_tray,
             "close_to_tray_asked": self.close_to_tray_asked,
-            "sort_mode": self.sort_mode,
+            "sort_mode": self.sort_mode.value,
             "hide_offline": self.hide_offline,
             "favorites_only": self.favorites_only,
-            "ui_style": self.ui_style,
+            "ui_style": self.ui_style.value,
             "platform_colors": self.platform_colors,
             "twitch": {
                 "client_id": self.twitch.client_id,

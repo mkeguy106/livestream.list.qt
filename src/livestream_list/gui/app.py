@@ -3,15 +3,14 @@
 import asyncio
 import logging
 import sys
-from typing import Optional
+import weakref
 
-from PySide6.QtCore import QThread, Signal, QTimer, QObject
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon
 
 from ..__version__ import __version__
-from ..core.settings import Settings
 from ..core.monitor import StreamMonitor
+from ..core.settings import Settings
 from ..core.streamlink import StreamlinkLauncher
 from ..notifications.notifier import Notifier
 
@@ -38,7 +37,7 @@ class AsyncWorker(QThread):
             # Reset aiohttp sessions for this event loop
             if self.monitor:
                 for client in self.monitor._clients.values():
-                    client._session = None
+                    client.reset_session()
 
             result = loop.run_until_complete(self.coro_func())
             self.finished.emit(result)
@@ -58,12 +57,17 @@ class AsyncWorker(QThread):
         finally:
             if self.monitor:
                 for client in self.monitor._clients.values():
-                    client._session = None
+                    client.reset_session()
             loop.close()
 
 
 class NotificationBridge(QObject):
-    """Bridge for handling notifications from background threads."""
+    """Bridge for handling notifications from background threads.
+
+    This class queues notifications from background threads and processes them
+    on the main thread using a timer. It delegates actual notification sending
+    to the Notifier class to avoid code duplication.
+    """
 
     notification_received = Signal(object)  # Livestream
 
@@ -87,67 +91,16 @@ class NotificationBridge(QObject):
         pending = self._pending[:]
         self._pending.clear()
 
-        # Send notifications synchronously using notify-send to avoid event loop issues
-        # The desktop-notifier D-Bus backend has issues when run in a different event loop
+        # Delegate to Notifier's synchronous method (thread-safe, uses subprocess)
         for livestream in pending:
             try:
-                self._send_notification_sync(livestream)
+                self.notifier.send_notification_sync(livestream)
             except Exception as e:
                 logger.error(f"Notification error: {e}")
 
-    def _send_notification_sync(self, livestream, is_test=False):
-        """Send notification synchronously using notify-send."""
-        import subprocess
-        import shutil
-        import os
-
-        # Skip enabled check for test notifications
-        if not is_test and not self.notifier.settings.enabled:
-            return
-
-        # Check if channel is excluded (skip for test)
-        channel_key = livestream.channel.unique_key
-        if not is_test and channel_key in self.notifier.settings.excluded_channels:
-            return
-
-        # Store for Watch button callback
-        self.notifier._pending_streams[channel_key] = livestream
-
-        # Build notification content
-        title = f"{livestream.display_name} is live!"
-
-        body_parts = []
-        if self.notifier.settings.show_game and livestream.game:
-            body_parts.append(f"Playing: {livestream.game}")
-        if self.notifier.settings.show_title and livestream.title:
-            body_parts.append(livestream.title)
-
-        body = "\n".join(body_parts) if body_parts else "Stream is now live"
-
-        # Check if running in flatpak
-        is_flatpak = os.path.exists("/.flatpak-info")
-
-        # Use notify-send (via flatpak-spawn if in sandbox)
-        if is_flatpak:
-            cmd = ["flatpak-spawn", "--host", "notify-send", title, body, "--app-name=Livestream List (Qt)"]
-        elif shutil.which("notify-send"):
-            cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
-        else:
-            return
-
-        if self.notifier.settings.sound_enabled:
-            # Use string hint for sound-name (freedesktop notification spec)
-            cmd.extend(["--hint", "string:sound-name:message-new-instant"])
-
-        subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
     def send_test_notification(self, livestream):
         """Send a test notification (bypasses enabled check)."""
-        self._send_notification_sync(livestream, is_test=True)
+        self.notifier.send_notification_sync(livestream, is_test=True)
 
 
 class Application(QApplication):
@@ -156,6 +109,7 @@ class Application(QApplication):
     # Signals for cross-thread communication
     stream_online = Signal(object)  # Livestream
     refresh_complete = Signal()
+    refresh_error = Signal(str)  # Error message for failed refreshes
     status_changed = Signal(str)
     open_stream_requested = Signal(object)  # Livestream - for notification Watch button
 
@@ -169,22 +123,38 @@ class Application(QApplication):
         self.setOrganizationDomain("life.covert")
 
         # Core components
-        self.settings: Optional[Settings] = None
-        self.monitor: Optional[StreamMonitor] = None
-        self.notifier: Optional[Notifier] = None
-        self.streamlink: Optional[StreamlinkLauncher] = None
-        self.notification_bridge: Optional[NotificationBridge] = None
+        self.settings: Settings | None = None
+        self.monitor: StreamMonitor | None = None
+        self.notifier: Notifier | None = None
+        self.streamlink: StreamlinkLauncher | None = None
+        self.notification_bridge: NotificationBridge | None = None
 
         # UI components (set after window creation)
-        self.main_window = None
+        # Use weakref for main_window to avoid reference cycles
+        self._main_window_ref: weakref.ref | None = None
         self.tray_icon = None
 
         # Timers
-        self._refresh_timer: Optional[QTimer] = None
-        self._process_check_timer: Optional[QTimer] = None
+        self._refresh_timer: QTimer | None = None
+        self._process_check_timer: QTimer | None = None
 
         # Track active workers to prevent garbage collection
         self._active_workers = []
+
+    @property
+    def main_window(self):
+        """Get the main window (may be None if window was destroyed)."""
+        if self._main_window_ref is not None:
+            return self._main_window_ref()
+        return None
+
+    @main_window.setter
+    def main_window(self, window):
+        """Set the main window using a weak reference."""
+        if window is not None:
+            self._main_window_ref = weakref.ref(window)
+        else:
+            self._main_window_ref = None
 
     def initialize(self):
         """Initialize application components."""
@@ -242,15 +212,34 @@ class Application(QApplication):
 
         async def refresh():
             await self.monitor.refresh()
-            return self.monitor.livestreams
+            # Collect any error messages from livestreams
+            errors = []
+            for ls in self.monitor.livestreams:
+                if ls.error_message:
+                    errors.append(f"{ls.channel.platform.value}: {ls.error_message}")
+            return {"livestreams": self.monitor.livestreams, "errors": errors}
 
         def on_finished(result):
             self.refresh_complete.emit()
+            # Emit error signal if there were any errors
+            if result and isinstance(result, dict):
+                errors = result.get("errors", [])
+                if errors:
+                    # Show unique errors only
+                    unique_errors = list(set(errors))[:3]  # Limit to 3 unique errors
+                    error_msg = "; ".join(unique_errors)
+                    self.refresh_error.emit(error_msg)
+            if on_complete:
+                on_complete()
+
+        def on_error(error_msg):
+            self.refresh_error.emit(f"Refresh failed: {error_msg}")
             if on_complete:
                 on_complete()
 
         worker = AsyncWorker(refresh, self.monitor, parent=self)
         worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         if on_progress:
             worker.progress.connect(on_progress)
@@ -368,6 +357,10 @@ class Application(QApplication):
                 worker.wait(5000)  # Wait up to 5 seconds
         self._active_workers.clear()
 
+        # Flush any pending channel saves (debounced saves)
+        if self.monitor:
+            self.monitor.flush_pending_save()
+
         # Save settings
         self.save_settings()
 
@@ -380,7 +373,7 @@ def run() -> int:
     """Run the application."""
     # Import here to avoid circular imports
     from .main_window import MainWindow
-    from .tray import TrayIcon, is_tray_available, create_app_icon
+    from .tray import TrayIcon, create_app_icon, is_tray_available
 
     app = Application()
     app.initialize()

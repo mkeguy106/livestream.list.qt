@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
 
 
 class StreamPlatform(str, Enum):
@@ -32,14 +31,33 @@ class LaunchMethod(str, Enum):
     YT_DLP = "yt-dlp"  # Use player directly (mpv with yt-dlp backend)
 
 
+class UIStyle(int, Enum):
+    """UI style options for stream list display."""
+
+    DEFAULT = 0
+    COMPACT_1 = 1
+    COMPACT_2 = 2
+    COMPACT_3 = 3
+
+
+class SortMode(int, Enum):
+    """Sort mode options for stream list."""
+
+    NAME = 0
+    VIEWERS = 1
+    PLAYING = 2
+    LAST_SEEN = 3
+    TIME_LIVE = 4
+
+
 @dataclass
 class Channel:
     """Represents a monitored channel."""
 
     channel_id: str
     platform: StreamPlatform
-    display_name: Optional[str] = None
-    imported_by: Optional[str] = None
+    display_name: str | None = None
+    imported_by: str | None = None
     dont_notify: bool = False
     favorite: bool = False
     added_at: datetime = field(default_factory=datetime.now)
@@ -64,17 +82,17 @@ class Livestream:
 
     channel: Channel
     live: bool = False
-    title: Optional[str] = None
-    game: Optional[str] = None
+    title: str | None = None
+    game: str | None = None
     viewers: int = 0
-    start_time: Optional[datetime] = None
-    last_live_time: Optional[datetime] = None
-    thumbnail_url: Optional[str] = None
+    start_time: datetime | None = None
+    last_live_time: datetime | None = None
+    thumbnail_url: str | None = None
     is_partner: bool = False
-    language: Optional[str] = None
+    language: str | None = None
     is_mature: bool = False
-    error_message: Optional[str] = None
-    video_id: Optional[str] = None  # YouTube video ID for live chat
+    error_message: str | None = None
+    video_id: str | None = None  # YouTube video ID for live chat
 
     @property
     def display_name(self) -> str:

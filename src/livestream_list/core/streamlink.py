@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 import subprocess
-from typing import Optional, Callable
+from collections.abc import Callable
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
 from .settings import StreamlinkSettings
@@ -118,7 +118,7 @@ class StreamlinkLauncher:
         path = shutil.which(self.settings.path)
         return path is not None
 
-    def get_version(self) -> Optional[str]:
+    def get_version(self) -> str | None:
         """Get the installed streamlink version."""
         try:
             cmd = host_command([self.settings.path, "--version"])
@@ -140,7 +140,7 @@ class StreamlinkLauncher:
     def build_command(
         self,
         livestream: Livestream,
-        quality: Optional[StreamQuality] = None,
+        quality: StreamQuality | None = None,
     ) -> list[str]:
         """Build the streamlink command for a stream."""
         cmd = [self.settings.path]
@@ -196,8 +196,8 @@ class StreamlinkLauncher:
     def launch(
         self,
         livestream: Livestream,
-        quality: Optional[StreamQuality] = None,
-    ) -> Optional[subprocess.Popen]:
+        quality: StreamQuality | None = None,
+    ) -> subprocess.Popen | None:
         """Launch a stream using the configured method for the platform."""
         if not self.settings.enabled:
             logger.warning("Streamlink is disabled")
@@ -240,8 +240,8 @@ class StreamlinkLauncher:
     async def launch_async(
         self,
         livestream: Livestream,
-        quality: Optional[StreamQuality] = None,
-    ) -> Optional[asyncio.subprocess.Process]:
+        quality: StreamQuality | None = None,
+    ) -> asyncio.subprocess.Process | None:
         """Launch streamlink asynchronously."""
         if not self.settings.enabled:
             logger.warning("Streamlink is disabled")

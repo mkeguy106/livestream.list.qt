@@ -1,11 +1,11 @@
 """System tray icon for Livestream List using Qt's QSystemTrayIcon."""
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QPolygon
 from PySide6.QtCore import QPoint
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
 logger = logging.getLogger(__name__)
 

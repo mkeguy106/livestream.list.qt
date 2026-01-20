@@ -3,18 +3,21 @@
 import asyncio
 import json
 import logging
+import threading
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Callable, Optional
 
-from .models import Channel, Livestream, StreamPlatform
-from .settings import Settings, get_data_dir
 from ..api.base import BaseApiClient
+from ..api.kick import KickApiClient
 from ..api.twitch import TwitchApiClient
 from ..api.youtube import YouTubeApiClient
-from ..api.kick import KickApiClient
+from .models import Channel, Livestream, StreamPlatform
+from .settings import Settings, get_data_dir
 
 logger = logging.getLogger(__name__)
+
+# Debounce delay for saving channels (in seconds)
+SAVE_DEBOUNCE_DELAY = 2.0
 
 
 class StreamMonitor:
@@ -29,7 +32,7 @@ class StreamMonitor:
         self._livestreams: dict[str, Livestream] = {}
         self._clients: dict[StreamPlatform, BaseApiClient] = {}
         self._running = False
-        self._refresh_task: Optional[asyncio.Task] = None
+        self._refresh_task: asyncio.Task | None = None
 
         # Event callbacks
         self._on_stream_online: list[Callable[[Livestream], None]] = []
@@ -38,6 +41,11 @@ class StreamMonitor:
 
         # Track initial load to suppress startup notifications
         self._initial_load_complete = False
+
+        # Debounced save mechanism
+        self._save_timer: threading.Timer | None = None
+        self._save_lock = threading.Lock()
+        self._pending_save = False
 
         # Initialize API clients
         self._init_clients()
@@ -236,7 +244,7 @@ class StreamMonitor:
         """Check if we have any channels for a platform."""
         return any(c.platform == platform for c in self._channels.values())
 
-    async def add_channel(self, channel_id: str, platform: StreamPlatform) -> Optional[Channel]:
+    async def add_channel(self, channel_id: str, platform: StreamPlatform) -> Channel | None:
         """Add a channel to monitor."""
         client = self._clients[platform]
 
@@ -298,12 +306,87 @@ class StreamMonitor:
         """Set the notification preference for a channel."""
         if channel.unique_key in self._channels:
             self._channels[channel.unique_key].dont_notify = dont_notify
-            # Note: We don't save immediately to avoid excessive disk writes
+            self._schedule_debounced_save()
 
     def set_favorite(self, channel: Channel, favorite: bool) -> None:
         """Set the favorite status for a channel."""
         if channel.unique_key in self._channels:
             self._channels[channel.unique_key].favorite = favorite
+            self._schedule_debounced_save()
+
+    def _schedule_debounced_save(self) -> None:
+        """Schedule a debounced save operation.
+
+        This prevents excessive disk writes when multiple flag changes happen
+        in quick succession (e.g., bulk operations).
+        """
+        with self._save_lock:
+            # Cancel existing timer if any
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+
+            self._pending_save = True
+
+            # Schedule new save after delay
+            self._save_timer = threading.Timer(
+                SAVE_DEBOUNCE_DELAY,
+                self._execute_debounced_save
+            )
+            self._save_timer.daemon = True
+            self._save_timer.start()
+
+    def _execute_debounced_save(self) -> None:
+        """Execute the debounced save synchronously."""
+        with self._save_lock:
+            if not self._pending_save:
+                return
+            self._pending_save = False
+            self._save_timer = None
+
+        # Save synchronously (this runs in timer thread)
+        self._save_channels_sync()
+
+    def _save_channels_sync(self) -> None:
+        """Save channels to disk synchronously."""
+        path = get_data_dir() / "channels.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = []
+        for ch in self._channels.values():
+            ch_data = {
+                "channel_id": ch.channel_id,
+                "platform": ch.platform.value,
+                "display_name": ch.display_name,
+                "imported_by": ch.imported_by,
+                "dont_notify": ch.dont_notify,
+                "favorite": ch.favorite,
+                "added_at": ch.added_at.isoformat(),
+            }
+            # Save last_live_time from livestream if available
+            livestream = self._livestreams.get(ch.unique_key)
+            if livestream and livestream.last_live_time:
+                ch_data["last_live_time"] = livestream.last_live_time.isoformat()
+            data.append(ch_data)
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving channels: {e}")
+
+    def flush_pending_save(self) -> None:
+        """Immediately save any pending changes.
+
+        Call this on application shutdown to ensure no data is lost.
+        """
+        with self._save_lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+
+            if self._pending_save:
+                self._pending_save = False
+                self._save_channels_sync()
 
     async def save_channels(self) -> None:
         """Public method to save channels to disk."""
@@ -317,7 +400,7 @@ class StreamMonitor:
             return
 
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
 
             for ch_data in data:

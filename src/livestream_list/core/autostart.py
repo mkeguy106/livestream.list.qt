@@ -1,9 +1,7 @@
 """Autostart management for Livestream List."""
 
 import os
-import shutil
 from pathlib import Path
-
 
 DESKTOP_FILE_NAME = "life.covert.livestreamListQt.desktop"
 
@@ -54,7 +52,7 @@ def enable_autostart() -> bool:
         autostart_file = get_autostart_file()
         autostart_file.write_text(DESKTOP_FILE_CONTENT)
         return True
-    except (OSError, IOError):
+    except OSError:
         return False
 
 
@@ -68,7 +66,7 @@ def disable_autostart() -> bool:
         if autostart_file.exists():
             autostart_file.unlink()
         return True
-    except (OSError, IOError):
+    except OSError:
         return False
 
 

@@ -2,11 +2,9 @@
 
 import asyncio
 import logging
-import re
 import webbrowser
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
@@ -40,7 +38,7 @@ class TwitchApiClient(BaseApiClient):
         super().__init__()
         self.settings = settings
         self._user_cache: dict[str, dict[str, Any]] = {}
-        self._current_user_id: Optional[str] = None
+        self._current_user_id: str | None = None
 
     @property
     def platform(self) -> StreamPlatform:
@@ -182,7 +180,7 @@ class TwitchApiClient(BaseApiClient):
         """Set the access token manually."""
         self.settings.access_token = token
 
-    async def get_current_user(self) -> Optional[dict[str, Any]]:
+    async def get_current_user(self) -> dict[str, Any] | None:
         """Get the currently authenticated user."""
         if not await self.is_authorized():
             return None
@@ -205,7 +203,7 @@ class TwitchApiClient(BaseApiClient):
             pass
         return None
 
-    async def _get_user(self, login: str) -> Optional[dict[str, Any]]:
+    async def _get_user(self, login: str) -> dict[str, Any] | None:
         """Get user info by login name."""
         if login.lower() in self._user_cache:
             return self._user_cache[login.lower()]
@@ -239,7 +237,7 @@ class TwitchApiClient(BaseApiClient):
         except aiohttp.ClientError:
             return None
 
-    async def _get_user_gql(self, login: str) -> Optional[dict[str, Any]]:
+    async def _get_user_gql(self, login: str) -> dict[str, Any] | None:
         """Get user info via GraphQL (no auth required)."""
         query = """
         query GetUser($login: String!) {
@@ -279,7 +277,7 @@ class TwitchApiClient(BaseApiClient):
         except aiohttp.ClientError:
             return None
 
-    async def _get_stream_gql(self, login: str) -> Optional[dict[str, Any]]:
+    async def _get_stream_gql(self, login: str) -> dict[str, Any] | None:
         """Get stream info via GraphQL (no auth required)."""
         query = """
         query GetStream($login: String!) {
@@ -320,7 +318,7 @@ class TwitchApiClient(BaseApiClient):
         except aiohttp.ClientError:
             return None
 
-    async def _get_streams_gql_batch(self, logins: list[str]) -> dict[str, Optional[dict[str, Any]]]:
+    async def _get_streams_gql_batch(self, logins: list[str]) -> dict[str, dict[str, Any] | None]:
         """Get stream info for multiple channels via GraphQL in a single request."""
         if not logins:
             return {}
@@ -354,12 +352,16 @@ class TwitchApiClient(BaseApiClient):
 
         query = "query GetStreamsBatch { " + " ".join(queries) + " }"
 
-        try:
+        async def do_request() -> dict[str, dict[str, Any] | None]:
             async with self.session.post(
                 self.GQL_URL,
                 headers=self._get_gql_headers(),
                 json={"query": query},
             ) as resp:
+                if self._is_retryable_status(resp.status):
+                    raise aiohttp.ClientResponseError(
+                        resp.request_info, resp.history, status=resp.status
+                    )
                 if resp.status != 200:
                     logger.warning(f"GraphQL batch query failed with status {resp.status}")
                     return {}
@@ -368,13 +370,16 @@ class TwitchApiClient(BaseApiClient):
                 result_data = data.get("data", {})
 
                 # Map results back to login names
-                result: dict[str, Optional[dict[str, Any]]] = {}
+                result: dict[str, dict[str, Any] | None] = {}
                 for i, login in enumerate(logins):
                     result[login.lower()] = result_data.get(f"u{i}")
 
                 return result
-        except aiohttp.ClientError as e:
-            logger.warning(f"GraphQL batch query error: {e}")
+
+        try:
+            return await self._retry_with_backoff(do_request)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning(f"GraphQL batch query error after retries: {e}")
             return {}
 
     async def _get_users_by_ids(self, user_ids: list[str]) -> dict[str, dict[str, Any]]:
@@ -404,7 +409,7 @@ class TwitchApiClient(BaseApiClient):
 
         return result
 
-    async def get_channel_info(self, channel_id: str) -> Optional[Channel]:
+    async def get_channel_info(self, channel_id: str) -> Channel | None:
         """Get channel info by username."""
         user = await self._get_user(channel_id)
         if not user:
@@ -518,7 +523,7 @@ class TwitchApiClient(BaseApiClient):
 
         return result
 
-    async def get_followed_channels(self, user_id: Optional[str] = None) -> list[Channel]:
+    async def get_followed_channels(self, user_id: str | None = None) -> list[Channel]:
         """Get channels followed by a user. Uses current user if user_id is None."""
         if not await self.is_authorized():
             raise PermissionError("Twitch authorization required to get followed channels")
@@ -538,7 +543,7 @@ class TwitchApiClient(BaseApiClient):
             twitch_user_id = current_user["id"]
 
         channels: list[Channel] = []
-        cursor: Optional[str] = None
+        cursor: str | None = None
 
         while True:
             try:
@@ -585,7 +590,7 @@ class TwitchApiClient(BaseApiClient):
 
     async def get_top_streams(
         self,
-        game_id: Optional[str] = None,
+        game_id: str | None = None,
         limit: int = 25,
     ) -> list[Livestream]:
         """Get top live streams."""

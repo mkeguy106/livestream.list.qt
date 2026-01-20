@@ -1,8 +1,9 @@
 """Kick API client."""
 
+import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import aiohttp
 
@@ -52,7 +53,7 @@ class KickApiClient(BaseApiClient):
         """Kick doesn't require authentication for public data."""
         return True
 
-    async def get_channel_info(self, channel_id: str) -> Optional[Channel]:
+    async def get_channel_info(self, channel_id: str) -> Channel | None:
         """Get channel info by username."""
         try:
             url = f"{self.BASE_URL}/channels/{channel_id}"
@@ -79,7 +80,7 @@ class KickApiClient(BaseApiClient):
             logger.error(f"Kick: Network error getting channel {channel_id}: {e}")
             return None
 
-    async def _get_last_video_date(self, channel: Channel) -> Optional[datetime]:
+    async def _get_last_video_date(self, channel: Channel) -> datetime | None:
         """Get the start time of the most recent video/VOD."""
         try:
             async with self.session.get(
@@ -114,11 +115,16 @@ class KickApiClient(BaseApiClient):
 
     async def get_livestream(self, channel: Channel) -> Livestream:
         """Get livestream status for a channel."""
-        try:
+
+        async def do_request() -> Livestream:
             async with self.session.get(
                 f"{self.BASE_URL}/channels/{channel.channel_id}",
                 headers=self._get_headers(),
             ) as resp:
+                if self._is_retryable_status(resp.status):
+                    raise aiohttp.ClientResponseError(
+                        resp.request_info, resp.history, status=resp.status
+                    )
                 if resp.status != 200:
                     return Livestream(
                         channel=channel,
@@ -165,7 +171,9 @@ class KickApiClient(BaseApiClient):
                     is_mature=livestream_data.get("is_mature", False),
                 )
 
-        except aiohttp.ClientError as e:
+        try:
+            return await self._retry_with_backoff(do_request)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             return Livestream(
                 channel=channel,
                 live=False,
@@ -185,7 +193,7 @@ class KickApiClient(BaseApiClient):
 
     async def get_top_streams(
         self,
-        game_id: Optional[str] = None,
+        game_id: str | None = None,
         limit: int = 25,
     ) -> list[Livestream]:
         """Get top live streams."""

@@ -1,10 +1,10 @@
 """Desktop notification handler."""
 
-import asyncio
 import logging
+import os
 import shutil
 import subprocess
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from ..core.models import Livestream
 from ..core.settings import NotificationSettings
@@ -18,7 +18,7 @@ class Notifier:
     def __init__(
         self,
         settings: NotificationSettings,
-        on_open_stream: Optional[Callable[[Livestream], None]] = None,
+        on_open_stream: Callable[[Livestream], None] | None = None,
     ) -> None:
         self.settings = settings
         self.on_open_stream = on_open_stream
@@ -119,8 +119,8 @@ class Notifier:
         self,
         title: str,
         body: str,
-        channel_key: Optional[str] = None,
-        livestream: Optional[Livestream] = None,
+        channel_key: str | None = None,
+        livestream: Livestream | None = None,
     ) -> bool:
         """Send a notification using the configured backend."""
         if self._backend == "none":
@@ -132,7 +132,7 @@ class Notifier:
 
         try:
             if self._backend == "desktop-notifier" and self._notifier:
-                from desktop_notifier import Urgency, Button, Sound
+                from desktop_notifier import Button, Sound, Urgency
 
                 buttons = []
                 if self.on_open_stream and channel_key:
@@ -177,6 +177,60 @@ class Notifier:
                 self.on_open_stream(livestream)
             except Exception as e:
                 logger.error(f"Error handling watch callback: {e}")
+
+    def send_notification_sync(self, livestream: Livestream, is_test: bool = False) -> None:
+        """Send notification synchronously using notify-send.
+
+        This method is thread-safe and can be called from background threads.
+        It uses subprocess-based notification to avoid event loop issues.
+
+        Args:
+            livestream: The livestream to notify about.
+            is_test: If True, bypasses enabled check and exclusion list.
+        """
+        # Skip enabled check for test notifications
+        if not is_test and not self.settings.enabled:
+            return
+
+        # Check if channel is excluded (skip for test)
+        channel_key = livestream.channel.unique_key
+        if not is_test and channel_key in self.settings.excluded_channels:
+            return
+
+        # Store for Watch button callback
+        self._pending_streams[channel_key] = livestream
+
+        # Build notification content
+        title = f"{livestream.display_name} is live!"
+
+        body_parts = []
+        if self.settings.show_game and livestream.game:
+            body_parts.append(f"Playing: {livestream.game}")
+        if self.settings.show_title and livestream.title:
+            body_parts.append(livestream.title)
+
+        body = "\n".join(body_parts) if body_parts else "Stream is now live"
+
+        # Check if running in flatpak
+        is_flatpak = os.path.exists("/.flatpak-info")
+
+        # Use notify-send (via flatpak-spawn if in sandbox)
+        if is_flatpak:
+            cmd = ["flatpak-spawn", "--host", "notify-send", title, body, "--app-name=Livestream List (Qt)"]
+        elif shutil.which("notify-send"):
+            cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
+        else:
+            return
+
+        if self.settings.sound_enabled:
+            # Use string hint for sound-name (freedesktop notification spec)
+            cmd.extend(["--hint", "string:sound-name:message-new-instant"])
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     async def clear_all(self) -> None:
         """Clear all pending notifications."""
