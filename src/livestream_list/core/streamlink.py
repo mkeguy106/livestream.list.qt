@@ -153,10 +153,6 @@ class StreamlinkLauncher:
         if self.settings.player_args:
             cmd.extend(["--player-args", self.settings.player_args])
 
-        # Low latency mode
-        if self.settings.low_latency:
-            cmd.append("--twitch-low-latency")
-
         # Additional arguments
         if self.settings.additional_args:
             cmd.extend(self.settings.additional_args.split())

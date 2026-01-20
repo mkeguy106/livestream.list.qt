@@ -37,7 +37,6 @@ class StreamlinkSettings:
     player: str = "mpv"
     player_args: str = ""
     default_quality: StreamQuality = StreamQuality.SOURCE
-    low_latency: bool = False
     additional_args: str = ""
 
     # Per-platform launch method (streamlink or yt-dlp)
@@ -239,7 +238,6 @@ class Settings:
                 player=s.get("player", "mpv"),
                 player_args=s.get("player_args", ""),
                 default_quality=StreamQuality(s.get("default_quality", "best")),
-                low_latency=s.get("low_latency", False),
                 additional_args=s.get("additional_args", ""),
                 twitch_launch_method=LaunchMethod(s.get("twitch_launch_method", "streamlink")),
                 youtube_launch_method=LaunchMethod(s.get("youtube_launch_method", "yt-dlp")),
@@ -332,7 +330,6 @@ class Settings:
                 "player": self.streamlink.player,
                 "player_args": self.streamlink.player_args,
                 "default_quality": self.streamlink.default_quality.value,
-                "low_latency": self.streamlink.low_latency,
                 "additional_args": self.streamlink.additional_args,
                 "twitch_launch_method": self.streamlink.twitch_launch_method.value,
                 "youtube_launch_method": self.streamlink.youtube_launch_method.value,
