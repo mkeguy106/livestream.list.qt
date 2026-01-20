@@ -211,7 +211,7 @@ class Livestream:
                 return f"https://youtube.com/live_chat?v={self.video_id}"
             return ""  # No chat URL without video ID
         elif self.channel.platform == StreamPlatform.KICK:
-            return f"https://kick.com/{self.channel.channel_id}/chatroom"
+            return f"https://kick.com/popout/{self.channel.channel_id}/chat"
         return ""
 
     def set_offline(self) -> None:

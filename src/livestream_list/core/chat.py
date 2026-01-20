@@ -30,7 +30,7 @@ TWITCH_CHAT_URLS = {
     2: "https://www.twitch.tv/{channel}/chat",             # Default (legacy)
 }
 
-KICK_CHAT_URL = "https://kick.com/{channel}/chatroom"
+KICK_CHAT_URL = "https://kick.com/popout/{channel}/chat"
 YOUTUBE_CHAT_URL = "https://www.youtube.com/live_chat?v={video_id}"
 
 # Browser executable names by platform
