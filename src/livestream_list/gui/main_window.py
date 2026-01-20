@@ -964,8 +964,9 @@ class MainWindow(QMainWindow):
             self._import_from_file(file_path)
 
     def _import_from_file(self, file_path: str):
-        """Import channels from a file."""
+        """Import channels and settings from a file."""
         import json
+        from ..core.settings import Settings
         try:
             with open(file_path, 'r') as f:
                 data = json.load(f)
@@ -988,13 +989,41 @@ class MainWindow(QMainWindow):
                     self.app.monitor._livestreams[key] = Livestream(channel=channel)
                     imported += 1
 
+            # Import settings if present
+            settings_imported = False
+            if 'settings' in data:
+                imported_settings = data['settings']
+                # Preserve current auth tokens and window geometry
+                imported_settings['twitch'] = self.app.settings._to_dict().get('twitch', {})
+                imported_settings['youtube'] = self.app.settings._to_dict().get('youtube', {})
+                imported_settings['window'] = self.app.settings._to_dict().get('window', {})
+                # Also preserve close_to_tray_asked state
+                imported_settings['close_to_tray_asked'] = self.app.settings.close_to_tray_asked
+                # Apply imported settings
+                new_settings = Settings._from_dict(imported_settings)
+                # Copy all fields to current settings
+                for field_name in ['refresh_interval', 'minimize_to_tray', 'start_minimized',
+                                   'check_for_updates', 'autostart', 'close_to_tray',
+                                   'sort_mode', 'hide_offline', 'favorites_only', 'ui_style',
+                                   'platform_colors', 'streamlink', 'notifications', 'chat',
+                                   'channel_info', 'channel_icons']:
+                    if hasattr(new_settings, field_name):
+                        setattr(self.app.settings, field_name, getattr(new_settings, field_name))
+                self.app.save_settings()
+                settings_imported = True
+
             self.app.save_channels()
             self.refresh_stream_list()
 
             if imported > 0:
                 # Trigger refresh to check stream status of newly imported channels
-                self.set_status(f"Imported {imported} channels. Checking stream status...")
+                msg = f"Imported {imported} channels"
+                if settings_imported:
+                    msg += " and settings"
+                self.set_status(f"{msg}. Checking stream status...")
                 self.app.refresh(on_complete=lambda: self.set_status("Ready"))
+            elif settings_imported:
+                QMessageBox.information(self, "Import Complete", "Settings imported. No new channels.")
             else:
                 QMessageBox.information(self, "Import Complete", "No new channels imported.")
 
@@ -2340,11 +2369,17 @@ class ExportDialog(QDialog):
                 data["channels"].append(ch_data)
 
             if self.include_settings_cb.isChecked():
-                data["settings"] = {
-                    "refresh_interval": self.app.settings.refresh_interval,
-                    "ui_style": self.app.settings.ui_style,
-                    "platform_colors": self.app.settings.platform_colors,
-                }
+                # Export all settings except sensitive auth tokens
+                settings_dict = self.app.settings._to_dict()
+                # Remove sensitive data
+                if "twitch" in settings_dict:
+                    settings_dict["twitch"] = {}  # Don't export tokens
+                if "youtube" in settings_dict:
+                    settings_dict["youtube"] = {}  # Don't export API key
+                # Remove window geometry (machine-specific)
+                if "window" in settings_dict:
+                    del settings_dict["window"]
+                data["settings"] = settings_dict
 
             with open(file_path, 'w') as f:
                 json.dump(data, f, indent=2)
