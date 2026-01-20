@@ -8,6 +8,8 @@ Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-
 
 **Current state**: PySide6/Qt6 migration complete. Feature parity work in progress.
 
+**Requirements**: Python 3.10+, PySide6, aiohttp, yt-dlp
+
 ## Development Commands
 
 ```bash
@@ -34,6 +36,13 @@ mypy src/
 # Run tests (currently empty)
 pytest tests/
 ```
+
+### App Keyboard Shortcuts
+
+- `Ctrl+N` - Add channel
+- `Ctrl+R` / `F5` - Refresh
+- `Ctrl+,` - Preferences
+- `Ctrl+Q` - Quit
 
 ## Architecture
 
@@ -73,6 +82,14 @@ class AsyncWorker(QThread):
 - Use Qt Signals for cross-thread communication (thread-safe)
 - Always set `client._session = None` before/after async operations in threads
 
+### Data Flow
+
+1. `Application` (app.py) initializes `StreamMonitor` and `Settings`
+2. `StreamMonitor` owns API clients and channel/livestream state
+3. `AsyncWorker` runs async operations in background threads, emits Qt Signals on completion
+4. `MainWindow` receives signals and updates UI on the main thread
+5. Channels persist to `channels.json`, settings to `settings.json`
+
 ### API Clients
 
 - **Twitch**: Helix API (authenticated) + GraphQL (unauthenticated, for public data). GraphQL uses batched queries (up to 35 channels/request). GraphQL works without authentication.
@@ -91,11 +108,20 @@ class AsyncWorker(QThread):
 | `src/livestream_list/api/twitch.py` | Twitch Helix + GraphQL client |
 | `src/livestream_list/notifications/notifier.py` | Desktop notifications with Watch button |
 | `src/livestream_list/__version__.py` | Single source of truth for version |
+| `src/livestream_list/core/models.py` | Data classes: Channel, Livestream, StreamPlatform |
+| `src/livestream_list/core/streamlink.py` | Stream launch via streamlink or yt-dlp |
 
 ### Configuration Paths
 
 - Settings: `~/.config/livestream-list-qt/settings.json`
 - Channels: `~/.config/livestream-list-qt/channels.json`
+- Data dir: `~/.local/share/livestream-list-qt/`
+
+### Key Data Structures
+
+- **Channel**: `channel_id`, `platform` (enum), `display_name`, `favorite`, `dont_notify`
+- **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `start_time`, `last_live_time`
+- **unique_key**: `"{platform}:{channel_id}"` - used as dict key throughout
 
 ## Known Pitfalls
 
