@@ -30,6 +30,9 @@ pkill -9 -f livestream-list-qt 2>/dev/null; sleep 0.5
 # Lint
 ruff check src/
 
+# Lint with auto-fix
+ruff check src/ --fix
+
 # Type check
 mypy src/
 
@@ -39,13 +42,6 @@ pytest tests/
 # Run single test
 pytest tests/test_file.py::test_name -v
 ```
-
-### App Keyboard Shortcuts
-
-- `Ctrl+N` - Add channel
-- `Ctrl+R` / `F5` - Refresh
-- `Ctrl+,` - Preferences
-- `Ctrl+Q` - Quit
 
 ## Architecture
 
@@ -99,6 +95,13 @@ class AsyncWorker(QThread):
 - **YouTube**: yt-dlp subprocess (`yt-dlp --dump-json --no-download <url>`), batch size 5.
 - **Kick**: Direct REST API. Uses `start_time` field (not `created_at`) for stream duration.
 
+### Flatpak Support
+
+The app runs both natively and in Flatpak. Key patterns:
+- `is_flatpak()` in `chat.py` checks for `/.flatpak-info` or `FLATPAK_ID` env var
+- `flatpak-spawn --host` wraps commands to run on host (browser launch, streamlink)
+- Flatpak builds are the primary distribution method via GitHub releases
+
 ### Key Files
 
 | File | Purpose |
@@ -109,7 +112,9 @@ class AsyncWorker(QThread):
 | `src/livestream_list/core/monitor.py` | StreamMonitor - channel tracking, refresh logic |
 | `src/livestream_list/core/settings.py` | Settings persistence (JSON) |
 | `src/livestream_list/api/twitch.py` | Twitch Helix + GraphQL client |
+| `src/livestream_list/api/base.py` | Abstract base class for API clients with retry logic |
 | `src/livestream_list/notifications/notifier.py` | Desktop notifications with Watch button |
+| `src/livestream_list/core/chat.py` | Chat launcher for opening stream chat in browser |
 | `src/livestream_list/__version__.py` | Single source of truth for version |
 | `src/livestream_list/core/models.py` | Data classes: Channel, Livestream, StreamPlatform |
 | `src/livestream_list/core/streamlink.py` | Stream launch via streamlink or yt-dlp |
