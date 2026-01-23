@@ -306,6 +306,11 @@ class ChatWidget(QWidget):
         was_at_bottom = self._is_at_bottom()
         self._model.add_messages(filtered)
 
+        # Forward to any open user history dialogs
+        if self._history_dialogs:
+            for dialog in list(self._history_dialogs):
+                dialog.add_messages(filtered)
+
         if was_at_bottom or self._auto_scroll:
             self._scroll_to_bottom()
         else:
@@ -561,6 +566,8 @@ class UserHistoryDialog(QDialog):
         self.setWindowFlags(
             Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint
         )
+        self._user_id = user.id
+        self._user_platform = user.platform
         self.setWindowTitle(f"Chat History - {user.display_name}")
         self.setMinimumSize(400, 300)
         self.resize(450, 400)
@@ -570,8 +577,8 @@ class UserHistoryDialog(QDialog):
         layout.setSpacing(0)
 
         # Header
-        header = QLabel(f"  {user.display_name} — {len(messages)} messages")
-        header.setStyleSheet("""
+        self._header = QLabel(f"  {user.display_name} — {len(messages)} messages")
+        self._header.setStyleSheet("""
             QLabel {
                 background-color: #16213e;
                 color: #eee;
@@ -580,10 +587,11 @@ class UserHistoryDialog(QDialog):
                 font-size: 13px;
             }
         """)
-        layout.addWidget(header)
+        layout.addWidget(self._header)
+        self._display_name = user.display_name
 
         # Message list using the same delegate
-        self._model = ChatMessageModel(max_messages=len(messages), parent=self)
+        self._model = ChatMessageModel(max_messages=5000, parent=self)
         delegate = ChatMessageDelegate(settings, parent=self)
         delegate.set_emote_cache(emote_cache)
 
@@ -620,6 +628,30 @@ class UserHistoryDialog(QDialog):
                 background-color: #0f0f1a;
             }
         """)
+
+    def add_messages(self, messages: list[ChatMessage]) -> None:
+        """Add new messages from the tracked user (called by ChatWidget)."""
+        user_msgs = [
+            msg for msg in messages
+            if msg.user.id == self._user_id and msg.user.platform == self._user_platform
+        ]
+        if not user_msgs:
+            return
+
+        was_at_bottom = self._is_at_bottom()
+        self._model.add_messages(user_msgs)
+
+        # Update header count
+        count = self._model.rowCount()
+        self._header.setText(f"  {self._display_name} — {count} messages")
+
+        if was_at_bottom:
+            self._list_view.scrollToBottom()
+
+    def _is_at_bottom(self) -> bool:
+        """Check if the view is scrolled to the bottom."""
+        scrollbar = self._list_view.verticalScrollBar()
+        return scrollbar.value() >= scrollbar.maximum() - 10
 
     def _copy_selected_messages(self) -> None:
         """Copy selected messages to clipboard as text."""
