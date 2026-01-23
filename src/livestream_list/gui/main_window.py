@@ -1059,9 +1059,11 @@ class MainWindow(QMainWindow):
             if 'settings' in data:
                 imported_settings = data['settings']
                 # Preserve current auth tokens and window geometry
-                imported_settings['twitch'] = self.app.settings._to_dict().get('twitch', {})
-                imported_settings['youtube'] = self.app.settings._to_dict().get('youtube', {})
-                imported_settings['window'] = self.app.settings._to_dict().get('window', {})
+                current = self.app.settings._to_dict()
+                imported_settings['twitch'] = current.get('twitch', {})
+                imported_settings['youtube'] = current.get('youtube', {})
+                imported_settings['kick'] = current.get('kick', {})
+                imported_settings['window'] = current.get('window', {})
                 # Also preserve close_to_tray_asked state
                 imported_settings['close_to_tray_asked'] = self.app.settings.close_to_tray_asked
                 # Apply imported settings
@@ -2715,6 +2717,8 @@ class ExportDialog(QDialog):
                     settings_dict["twitch"] = {}  # Don't export tokens
                 if "youtube" in settings_dict:
                     settings_dict["youtube"] = {}  # Don't export API key
+                if "kick" in settings_dict:
+                    settings_dict["kick"] = {}  # Don't export tokens
                 # Remove window geometry (machine-specific)
                 if "window" in settings_dict:
                     del settings_dict["window"]
