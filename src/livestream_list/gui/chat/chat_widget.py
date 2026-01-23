@@ -73,6 +73,7 @@ class ChatWidget(QWidget):
         self._authenticated = authenticated
         self._auto_scroll = True
         self._resize_timer: QTimer | None = None
+        self._history_dialogs: set = set()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -538,7 +539,11 @@ class ChatWidget(QWidget):
             emote_cache=self._delegate._emote_cache,
             parent=self,
         )
-        dialog.exec()
+        # Non-modal: main window stays interactive, multiple dialogs allowed
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.destroyed.connect(lambda: self._history_dialogs.discard(dialog))
+        self._history_dialogs.add(dialog)
+        dialog.show()
 
 
 class UserHistoryDialog(QDialog):
@@ -553,6 +558,9 @@ class UserHistoryDialog(QDialog):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint
+        )
         self.setWindowTitle(f"Chat History - {user.display_name}")
         self.setMinimumSize(400, 300)
         self.resize(450, 400)
@@ -575,35 +583,63 @@ class UserHistoryDialog(QDialog):
         layout.addWidget(header)
 
         # Message list using the same delegate
-        model = ChatMessageModel(max_messages=len(messages), parent=self)
+        self._model = ChatMessageModel(max_messages=len(messages), parent=self)
         delegate = ChatMessageDelegate(settings, parent=self)
         delegate.set_emote_cache(emote_cache)
 
-        list_view = QListView()
-        list_view.setModel(model)
-        list_view.setItemDelegate(delegate)
-        list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        list_view.setWordWrap(True)
-        list_view.setUniformItemSizes(False)
-        list_view.setSpacing(0)
-        list_view.setStyleSheet("""
+        self._list_view = QListView()
+        self._list_view.setModel(self._model)
+        self._list_view.setItemDelegate(delegate)
+        self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        self._list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
+        self._list_view.setWordWrap(True)
+        self._list_view.setUniformItemSizes(False)
+        self._list_view.setSpacing(0)
+        self._list_view.setStyleSheet("""
             QListView {
                 background-color: #1a1a2e;
                 border: none;
                 padding: 4px;
             }
         """)
-        layout.addWidget(list_view)
+        layout.addWidget(self._list_view)
+
+        # Copy shortcut (Ctrl+C)
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
+        copy_shortcut.activated.connect(self._copy_selected_messages)
 
         # Populate
-        model.add_messages(messages)
+        self._model.add_messages(messages)
 
         # Scroll to bottom (most recent)
-        list_view.scrollToBottom()
+        self._list_view.scrollToBottom()
 
         self.setStyleSheet("""
             QDialog {
                 background-color: #0f0f1a;
             }
         """)
+
+    def _copy_selected_messages(self) -> None:
+        """Copy selected messages to clipboard as text."""
+        indexes = self._list_view.selectionModel().selectedIndexes()
+        if not indexes:
+            return
+
+        indexes.sort(key=lambda idx: idx.row())
+
+        lines: list[str] = []
+        for index in indexes:
+            message = index.data(MessageRole)
+            if not message or not isinstance(message, ChatMessage):
+                continue
+            name = message.user.display_name
+            if message.is_action:
+                lines.append(f"{name} {message.text}")
+            else:
+                lines.append(f"{name}: {message.text}")
+
+        if lines:
+            clipboard = QApplication.clipboard()
+            clipboard.setText("\n".join(lines))
