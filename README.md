@@ -26,7 +26,21 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - First-launch prompt to choose behavior (quit or run in background)
 - **Launch on Startup** - Option to start automatically when you log in
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
-- **Chat Integration** - Open stream chat in browser (Twitch, Kick, YouTube)
+- **Built-in Chat Client** - Native multi-channel chat with tabbed interface
+  - Twitch and Kick chat with full emote and badge rendering
+  - Emote support: Twitch, Kick native, 7TV, BTTV, FFZ
+  - Tab-completion for emotes (press Tab while typing)
+  - Tooltips on emotes and badges (shows name and provider)
+  - Click username to view user's chat history
+  - Right-click for user actions (block, open channel)
+  - Sub/resub/raid/gift alerts (USERNOTICE) with themed styling
+  - Hype Chat (paid pinned messages) with dismissable banner
+  - Pop-out chat tabs into standalone windows
+  - Customizable tab colors via color picker
+  - Twitch OAuth login for sending messages
+  - Kick OAuth 2.1 + PKCE login for sending messages
+  - Copy messages with Ctrl+C
+- **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
   - YouTube chat works when stream is live
@@ -120,14 +134,22 @@ python -m livestream_list
 - Click the stop button to close playback
 - Chat can auto-open when launching streams (configure in Preferences > Chat)
 
-### Chat Options
+### Chat
 
-Configure in Preferences > Chat:
-- **Browser**: System Default, Chrome, Chromium, Edge, or Firefox
+The app supports two chat modes (configurable in Preferences > Chat):
+
+**Built-in Chat** (recommended):
+- Click the chat icon on any live stream to open the built-in chat window
+- Tabbed interface for multiple channels simultaneously
+- Login to Twitch or Kick in Preferences > Accounts to send messages
+- Right-click tab to pop out into standalone window
+- Settings: font size, timestamps, emote providers, badge visibility, tab colors, max messages
+
+**Browser Chat**:
+- Opens chat in your system browser (Chrome, Firefox, etc.)
 - **Chat URL Type**: Popout (recommended), Embedded, or Default (legacy) - Twitch only
 - **Auto-open**: Automatically open chat when launching streams
-
-Supported platforms: Twitch (popout/embedded/default), Kick (chatroom), YouTube (live chat)
+- Supported: Twitch (popout/embedded/default), Kick (chatroom), YouTube (live chat)
 
 ## Configuration
 
