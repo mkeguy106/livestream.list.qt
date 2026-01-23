@@ -395,12 +395,14 @@ class ChatWidget(QWidget):
             message = index.data(MessageRole)
             if not message or not isinstance(message, ChatMessage):
                 continue
-            # Format: "username: message text" (emotes stay as text codes)
+            prefix = ""
+            if self.settings.show_timestamps:
+                prefix = f"[{message.timestamp.strftime('%H:%M')}] "
             name = message.user.display_name
             if message.is_action:
-                lines.append(f"{name} {message.text}")
+                lines.append(f"{prefix}{name} {message.text}")
             else:
-                lines.append(f"{name}: {message.text}")
+                lines.append(f"{prefix}{name}: {message.text}")
 
         if lines:
             clipboard = QApplication.clipboard()
@@ -568,6 +570,7 @@ class UserHistoryDialog(QDialog):
         )
         self._user_id = user.id
         self._user_platform = user.platform
+        self._settings = settings
         self.setWindowTitle(f"Chat History - {user.display_name}")
         self.setMinimumSize(400, 300)
         self.resize(450, 400)
@@ -666,11 +669,14 @@ class UserHistoryDialog(QDialog):
             message = index.data(MessageRole)
             if not message or not isinstance(message, ChatMessage):
                 continue
+            prefix = ""
+            if self._settings.show_timestamps:
+                prefix = f"[{message.timestamp.strftime('%H:%M')}] "
             name = message.user.display_name
             if message.is_action:
-                lines.append(f"{name} {message.text}")
+                lines.append(f"{prefix}{name} {message.text}")
             else:
-                lines.append(f"{name}: {message.text}")
+                lines.append(f"{prefix}{name}: {message.text}")
 
         if lines:
             clipboard = QApplication.clipboard()
