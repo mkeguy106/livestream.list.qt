@@ -330,6 +330,9 @@ class ChatWindow(QMainWindow):
             return
 
         widget = popout.take_widget()
+        # Disconnect closed signal so close() doesn't trigger chat disconnect
+        popout.closed.disconnect()
+        popout.close()
         if widget and channel_key in self._livestreams:
             livestream = self._livestreams[channel_key]
             platform = livestream.channel.platform
@@ -339,8 +342,7 @@ class ChatWindow(QMainWindow):
             widget.setParent(self._tab_widget)
             idx = self._tab_widget.addTab(widget, icon, tab_name)
             self._tab_widget.setCurrentIndex(idx)
-
-        popout.close()
+            widget.show()
         self.show()
         self.raise_()
 
@@ -388,9 +390,10 @@ class ChatPopoutWindow(QMainWindow):
         self.setMinimumSize(300, 350)
         self.resize(380, 550)
 
-        # Reparent widget
+        # Reparent widget and ensure it's visible
         widget.setParent(self)
         self.setCentralWidget(widget)
+        widget.show()
 
         # Add toolbar with pop-in button
         toolbar = self.addToolBar("Actions")
@@ -414,7 +417,9 @@ class ChatPopoutWindow(QMainWindow):
         widget = self._widget
         self._widget = None
         if widget:
-            self.setCentralWidget(QWidget())  # Replace with empty widget
+            # Detach widget from this window so closing doesn't destroy it
+            widget.setParent(None)
+            self.setCentralWidget(QWidget())
         return widget
 
     def closeEvent(self, event) -> None:  # noqa: N802
