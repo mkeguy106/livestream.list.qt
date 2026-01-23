@@ -1,0 +1,200 @@
+"""Emote picker popup with searchable grid."""
+
+import logging
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtWidgets import (
+    QGridLayout,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ...chat.models import ChatEmote
+
+logger = logging.getLogger(__name__)
+
+EMOTE_BUTTON_SIZE = 36
+GRID_COLUMNS = 8
+
+
+class EmotePickerWidget(QWidget):
+    """Searchable emote picker popup.
+
+    Shows emotes in a grid organized by provider tabs.
+    Clicking an emote inserts its code at the cursor position.
+    """
+
+    emote_selected = Signal(str)  # emote name/code
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._emotes: dict[str, list[ChatEmote]] = {}  # provider -> emotes
+        self._emote_cache: dict[str, QPixmap] = {}
+        self._all_buttons: list[tuple[QPushButton, ChatEmote]] = []
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        """Set up the picker UI."""
+        self.setWindowFlags(Qt.WindowType.Popup)
+        self.setFixedSize(320, 350)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
+        # Search bar
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Search emotes...")
+        self._search.textChanged.connect(self._on_search_changed)
+        self._search.setStyleSheet("""
+            QLineEdit {
+                background-color: #16213e;
+                border: 1px solid #333;
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: #eee;
+                font-size: 12px;
+            }
+        """)
+        layout.addWidget(self._search)
+
+        # Tab widget for providers
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background-color: #1a1a2e;
+            }
+            QTabBar::tab {
+                background-color: #16213e;
+                color: #aaa;
+                padding: 4px 8px;
+                font-size: 11px;
+                border: none;
+            }
+            QTabBar::tab:selected {
+                color: white;
+                border-bottom: 2px solid #6441a5;
+            }
+        """)
+        layout.addWidget(self._tabs)
+
+        # Window styling
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 6px;
+            }
+        """)
+
+    def set_emotes(self, emotes_by_provider: dict[str, list[ChatEmote]]) -> None:
+        """Set the available emotes, organized by provider."""
+        self._emotes = emotes_by_provider
+        self._rebuild_tabs()
+
+    def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
+        """Set the shared emote pixmap cache."""
+        self._emote_cache = cache
+
+    def show_picker(self, pos) -> None:
+        """Show the picker at the given position."""
+        self.move(pos)
+        self._search.clear()
+        self._search.setFocus()
+        self.show()
+
+    def _rebuild_tabs(self) -> None:
+        """Rebuild the tab widget with current emotes."""
+        self._tabs.clear()
+        self._all_buttons.clear()
+
+        # Provider display names
+        provider_names = {
+            "twitch": "Twitch",
+            "7tv": "7TV",
+            "bttv": "BTTV",
+            "ffz": "FFZ",
+        }
+
+        for provider, emotes in self._emotes.items():
+            if not emotes:
+                continue
+
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+            container = QWidget()
+            grid = QGridLayout(container)
+            grid.setSpacing(2)
+            grid.setContentsMargins(2, 2, 2, 2)
+
+            for i, emote in enumerate(emotes):
+                btn = self._create_emote_button(emote)
+                row = i // GRID_COLUMNS
+                col = i % GRID_COLUMNS
+                grid.addWidget(btn, row, col)
+                self._all_buttons.append((btn, emote))
+
+            scroll.setWidget(container)
+            tab_name = provider_names.get(provider, provider)
+            self._tabs.addTab(scroll, tab_name)
+
+    def _create_emote_button(self, emote: ChatEmote) -> QPushButton:
+        """Create a button for an emote."""
+        btn = QPushButton()
+        btn.setFixedSize(EMOTE_BUTTON_SIZE, EMOTE_BUTTON_SIZE)
+        btn.setToolTip(emote.name)
+
+        # Try to set icon from cache
+        cache_key = f"emote:{emote.provider}:{emote.id}"
+        pixmap = self._emote_cache.get(cache_key)
+        if pixmap and not pixmap.isNull():
+            btn.setIcon(QIcon(pixmap))
+            btn.setIconSize(pixmap.size())
+        else:
+            # Show name as fallback text
+            btn.setText(emote.name[:3])
+            btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 8px;
+                    color: #aaa;
+                }
+            """)
+
+        btn.setStyleSheet(
+            btn.styleSheet()
+            + """
+            QPushButton {
+                background-color: #16213e;
+                border: 1px solid transparent;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                border-color: #6441a5;
+                background-color: #1f2b4d;
+            }
+        """
+        )
+
+        btn.clicked.connect(lambda checked=False, name=emote.name: self._on_emote_clicked(name))
+        return btn
+
+    def _on_emote_clicked(self, name: str) -> None:
+        """Handle emote button click."""
+        self.emote_selected.emit(name)
+        self.hide()
+
+    def _on_search_changed(self, text: str) -> None:
+        """Filter emotes by search text."""
+        search = text.lower()
+        for btn, emote in self._all_buttons:
+            visible = not search or search in emote.name.lower()
+            btn.setVisible(visible)

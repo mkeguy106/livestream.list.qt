@@ -18,6 +18,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
+# Install with dev dependencies (ruff, mypy, pytest)
+pip install -e ".[dev]"
+
 # Run
 livestream-list-qt
 # or
@@ -33,6 +36,9 @@ ruff check src/
 # Lint with auto-fix
 ruff check src/ --fix
 
+# Format code
+ruff format src/
+
 # Type check
 mypy src/
 
@@ -42,6 +48,14 @@ pytest tests/
 # Run single test
 pytest tests/test_file.py::test_name -v
 ```
+
+### Ruff Configuration
+
+- Line length: 100
+- Target: Python 3.10
+- Selected rules: `E`, `F`, `I`, `N`, `W`, `UP`
+- pytest uses `asyncio_mode = "auto"` (no `@pytest.mark.asyncio` needed)
+- Build system: hatchling (version sourced from `__version__.py`)
 
 ## Architecture
 

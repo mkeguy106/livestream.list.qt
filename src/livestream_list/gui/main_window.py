@@ -1952,6 +1952,25 @@ class PreferencesDialog(QDialog):
         emote_row.addStretch()
         builtin_layout.addRow("Emote providers:", emote_row)
 
+        self.chat_name_colors_cb = QCheckBox("Use platform name colors")
+        self.chat_name_colors_cb.setChecked(
+            self.app.settings.chat.builtin.use_platform_name_colors
+        )
+        self.chat_name_colors_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_name_colors_cb)
+
+        self.tab_active_color_edit = QLineEdit()
+        self.tab_active_color_edit.setText(self.app.settings.chat.builtin.tab_active_color)
+        self.tab_active_color_edit.setMaximumWidth(100)
+        self.tab_active_color_edit.editingFinished.connect(self._on_chat_changed)
+        builtin_layout.addRow("Tab active color:", self.tab_active_color_edit)
+
+        self.tab_inactive_color_edit = QLineEdit()
+        self.tab_inactive_color_edit.setText(self.app.settings.chat.builtin.tab_inactive_color)
+        self.tab_inactive_color_edit.setMaximumWidth(100)
+        self.tab_inactive_color_edit.editingFinished.connect(self._on_chat_changed)
+        builtin_layout.addRow("Tab inactive color:", self.tab_inactive_color_edit)
+
         layout.addWidget(self.builtin_group)
 
         # Set initial visibility based on current mode
@@ -2155,6 +2174,15 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
+        self.app.settings.chat.builtin.use_platform_name_colors = (
+            self.chat_name_colors_cb.isChecked()
+        )
+        self.app.settings.chat.builtin.tab_active_color = (
+            self.tab_active_color_edit.text().strip() or "#6441a5"
+        )
+        self.app.settings.chat.builtin.tab_inactive_color = (
+            self.tab_inactive_color_edit.text().strip() or "#16213e"
+        )
         providers = []
         if self.emote_7tv_cb.isChecked():
             providers.append("7tv")
@@ -2164,6 +2192,9 @@ class PreferencesDialog(QDialog):
             providers.append("ffz")
         self.app.settings.chat.builtin.emote_providers = providers
         self.app.save_settings()
+        # Live-update chat window tab style if open
+        if hasattr(self.app, "chat_window") and self.app.chat_window:
+            self.app.chat_window.update_tab_style()
 
     def _on_twitch_login(self):
         """Handle Twitch login."""

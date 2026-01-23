@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from ..__version__ import __version__
+from ..chat.manager import ChatManager
 from ..core.monitor import StreamMonitor
 from ..core.settings import Settings
 from ..core.streamlink import StreamlinkLauncher
@@ -128,6 +129,8 @@ class Application(QApplication):
         self.notifier: Notifier | None = None
         self.streamlink: StreamlinkLauncher | None = None
         self.notification_bridge: NotificationBridge | None = None
+        self.chat_manager: ChatManager | None = None
+        self._chat_window = None  # Lazy-initialized ChatWindow
 
         # UI components (set after window creation)
         # Use weakref for main_window to avoid reference cycles
@@ -174,6 +177,9 @@ class Application(QApplication):
 
         # Set up notification bridge
         self.notification_bridge = NotificationBridge(self.notifier)
+
+        # Initialize chat manager
+        self.chat_manager = ChatManager(self.settings, parent=self)
 
         # Set up monitor callbacks
         self.monitor.on_stream_online(self._on_stream_online)
@@ -291,14 +297,15 @@ class Application(QApplication):
         if self.streamlink:
             self.streamlink.launch(livestream)
 
-            # Auto-open chat if enabled (also thread-safe - spawns browser)
+            # Auto-open chat if enabled (browser mode only - built-in handled on main thread)
             if self.settings and self.settings.chat.auto_open and self.settings.chat.enabled:
-                ch = livestream.channel
-                video_id = getattr(livestream, 'video_id', None) or ""
-                if self.main_window and hasattr(self.main_window, '_chat_launcher'):
-                    self.main_window._chat_launcher.open_chat(
-                        ch.channel_id, ch.platform.value, video_id
-                    )
+                if self.settings.chat.mode == "browser":
+                    ch = livestream.channel
+                    video_id = getattr(livestream, 'video_id', None) or ""
+                    if self.main_window and hasattr(self.main_window, '_chat_launcher'):
+                        self.main_window._chat_launcher.open_chat(
+                            ch.channel_id, ch.platform.value, video_id
+                        )
 
         # Schedule UI updates via signal (can be delayed, that's fine)
         self.open_stream_requested.emit(livestream)
@@ -309,6 +316,11 @@ class Application(QApplication):
             # Refresh will pick up playing state from streamlink.is_playing()
             self.main_window.refresh_stream_list()
             self.main_window.set_status(f"Playing {livestream.channel.display_name}")
+
+        # Open built-in chat on main thread (if enabled)
+        if (self.settings and self.settings.chat.auto_open and self.settings.chat.enabled
+                and self.settings.chat.mode == "builtin"):
+            self.open_builtin_chat(livestream)
 
     def _check_processes(self):
         """Check for dead stream processes and update UI."""
@@ -321,6 +333,17 @@ class Application(QApplication):
         """Remove worker from active list."""
         if worker in self._active_workers:
             self._active_workers.remove(worker)
+
+    def open_builtin_chat(self, livestream):
+        """Open the built-in chat window for a livestream."""
+        if not self.chat_manager:
+            return
+
+        if not self._chat_window:
+            from .chat.chat_window import ChatWindow
+            self._chat_window = ChatWindow(self.chat_manager, self.settings)
+
+        self._chat_window.open_chat(livestream)
 
     def save_settings(self):
         """Save current settings."""
@@ -350,6 +373,14 @@ class Application(QApplication):
         if self._process_check_timer:
             self._process_check_timer.stop()
             self._process_check_timer = None
+
+        # Disconnect all chat connections
+        if self.chat_manager:
+            self.chat_manager.disconnect_all()
+
+        # Save chat window state
+        if self._chat_window:
+            self._chat_window.save_window_state()
 
         # Wait for active workers to finish
         for worker in self._active_workers[:]:

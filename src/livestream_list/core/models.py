@@ -93,6 +93,7 @@ class Livestream:
     is_mature: bool = False
     error_message: str | None = None
     video_id: str | None = None  # YouTube video ID for live chat
+    chatroom_id: int | None = None  # Kick chatroom ID for built-in chat
 
     @property
     def display_name(self) -> str:

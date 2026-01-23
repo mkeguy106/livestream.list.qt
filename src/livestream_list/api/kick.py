@@ -163,6 +163,12 @@ class KickApiClient(BaseApiClient):
                 thumbnail = livestream_data.get("thumbnail")
                 thumbnail_url = thumbnail.get("url") if thumbnail else None
 
+                # Extract chatroom ID for built-in chat
+                chatroom_id = None
+                chatroom_data = data.get("chatroom", {})
+                if chatroom_data:
+                    chatroom_id = chatroom_data.get("id")
+
                 return Livestream(
                     channel=channel,
                     live=True,
@@ -173,6 +179,7 @@ class KickApiClient(BaseApiClient):
                     thumbnail_url=thumbnail_url,
                     language=livestream_data.get("language"),
                     is_mature=livestream_data.get("is_mature", False),
+                    chatroom_id=chatroom_id,
                 )
 
         try:

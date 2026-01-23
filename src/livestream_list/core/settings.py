@@ -118,6 +118,9 @@ class BuiltinChatSettings:
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
     show_alternating_rows: bool = True
     blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
+    tab_active_color: str = "#6441a5"
+    tab_inactive_color: str = "#16213e"
+    use_platform_name_colors: bool = True
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
 
 
@@ -320,6 +323,9 @@ class Settings:
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
                 blocked_users=builtin_data.get("blocked_users", []),
+                tab_active_color=builtin_data.get("tab_active_color", "#6441a5"),
+                tab_inactive_color=builtin_data.get("tab_inactive_color", "#16213e"),
+                use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 window=chat_window,
             )
             settings.chat = ChatSettings(
@@ -422,6 +428,9 @@ class Settings:
                     "emote_providers": self.chat.builtin.emote_providers,
                     "show_alternating_rows": self.chat.builtin.show_alternating_rows,
                     "blocked_users": self.chat.builtin.blocked_users,
+                    "tab_active_color": self.chat.builtin.tab_active_color,
+                    "tab_inactive_color": self.chat.builtin.tab_inactive_color,
+                    "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
                     "window": {
                         "width": self.chat.builtin.window.width,
                         "height": self.chat.builtin.window.height,

@@ -132,11 +132,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
         bold_font.setBold(True)
         painter.setFont(bold_font)
 
-        user_color = (
-            QColor(message.user.color)
-            if message.user.color
-            else QColor(180, 130, 255)
-        )
+        if self.settings.use_platform_name_colors:
+            user_color = (
+                QColor(message.user.color)
+                if message.user.color
+                else QColor(180, 130, 255)
+            )
+        else:
+            user_color = option.palette.text().color()
         painter.setPen(highlight_color if is_selected else user_color)
 
         name_text = message.user.display_name
@@ -338,7 +341,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
         line_height = max(fm.height(), badge_size) + padding_v
 
         # Calculate total text width to determine line wrapping
-        available_width = max(option.rect.width() - PADDING_H * 2, 200)
+        rect_width = option.rect.width()
+        if rect_width <= 0:
+            # Fallback: use parent viewport width when option rect is unset
+            parent = self.parent()
+            if parent and hasattr(parent, "viewport"):
+                rect_width = parent.viewport().width()
+            else:
+                rect_width = 400
+        available_width = max(rect_width - PADDING_H * 2, 200)
 
         # Prefix width (timestamp + badges + username)
         prefix_width = 0

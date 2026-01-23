@@ -15,6 +15,9 @@ from .models import ChatEmote, ChatMessage
 
 logger = logging.getLogger(__name__)
 
+# Fallback Twitch client ID (same as api.twitch.DEFAULT_CLIENT_ID)
+_DEFAULT_TWITCH_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
+
 
 class ChatConnectionWorker(QThread):
     """Worker thread that runs a chat connection's async event loop."""
@@ -243,6 +246,8 @@ class ChatManager(QObject):
     moderation_received = Signal(str, object)  # channel_key, ModerationEvent
     # Emitted when emote cache is updated (widgets should repaint)
     emote_cache_updated = Signal()
+    # Emitted when auth state changes (True = authenticated)
+    auth_state_changed = Signal(bool)
 
     def __init__(self, settings: Settings, parent: QObject | None = None):
         super().__init__(parent)
@@ -368,8 +373,8 @@ class ChatManager(QObject):
                     continue
                 # Mark as seen (will be re-queued when badge map arrives)
                 self._queued_badge_urls.add(badge_key)
-                # Only download if we have the correct URL from the API
-                badge_url = self._badge_url_map.get(badge.id)
+                # Use URL from badge API map, fall back to badge.image_url if set
+                badge_url = self._badge_url_map.get(badge.id) or badge.image_url
                 if badge_url:
                     self._download_queue.append((badge_key, badge_url))
 
@@ -401,7 +406,7 @@ class ChatManager(QObject):
             channel_id=channel_id,
             providers=providers if self.settings.chat.builtin.show_emotes else [],
             oauth_token=self.settings.twitch.access_token,
-            client_id=self.settings.twitch.client_id,
+            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
             parent=self,
         )
         worker.emotes_fetched.connect(self._on_emotes_fetched)

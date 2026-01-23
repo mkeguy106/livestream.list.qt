@@ -2,8 +2,8 @@
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -14,14 +14,33 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...chat.models import ChatMessage, ModerationEvent
+from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
+from .emote_completer import EmoteCompleter
 from .message_delegate import ChatMessageDelegate
 from .message_model import ChatMessageModel, MessageRole
 from .user_popup import UserContextMenu
 
 logger = logging.getLogger(__name__)
+
+
+class ChatInput(QLineEdit):
+    """Custom QLineEdit that routes key events to the emote completer."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._completer: EmoteCompleter | None = None
+
+    def set_completer(self, completer: EmoteCompleter) -> None:
+        """Set the emote completer to route key events to."""
+        self._completer = completer
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Route navigation keys to the completer first."""
+        if self._completer and self._completer.handle_key_press(event.key()):
+            return
+        super().keyPressEvent(event)
 
 
 class ChatWidget(QWidget):
@@ -39,13 +58,16 @@ class ChatWidget(QWidget):
         channel_key: str,
         livestream: Livestream,
         settings: BuiltinChatSettings,
+        authenticated: bool = False,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.channel_key = channel_key
         self.livestream = livestream
         self.settings = settings
+        self._authenticated = authenticated
         self._auto_scroll = True
+        self._resize_timer: QTimer | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -104,8 +126,7 @@ class ChatWidget(QWidget):
         input_layout.setContentsMargins(4, 4, 4, 4)
         input_layout.setSpacing(4)
 
-        self._input = QLineEdit()
-        self._input.setPlaceholderText("Send a message...")
+        self._input = ChatInput()
         self._input.setStyleSheet("""
             QLineEdit {
                 background-color: #16213e;
@@ -146,6 +167,13 @@ class ChatWidget(QWidget):
 
         layout.addLayout(input_layout)
 
+        # Emote autocomplete
+        self._completer = EmoteCompleter(self._input, parent=self)
+        self._input.set_completer(self._completer)
+
+        # Auth gating
+        self.set_authenticated(self._authenticated)
+
         # Context menu for user interaction
         self._list_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list_view.customContextMenuRequested.connect(self._on_context_menu)
@@ -182,9 +210,24 @@ class ChatWidget(QWidget):
         """Apply a moderation event to the message list."""
         self._model.apply_moderation(event)
 
+    def set_authenticated(self, state: bool) -> None:
+        """Enable or disable the input based on authentication state."""
+        self._authenticated = state
+        self._input.setEnabled(state)
+        self._send_button.setEnabled(state)
+        if state:
+            self._input.setPlaceholderText("Send a message...")
+        else:
+            self._input.setPlaceholderText("Log in to Twitch to chat")
+
     def set_emote_cache(self, cache: dict) -> None:
-        """Set the shared emote cache on the delegate."""
+        """Set the shared emote cache on the delegate and completer."""
         self._delegate.set_emote_cache(cache)
+        self._completer.set_emote_cache(cache)
+
+    def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
+        """Set the emote map for autocomplete."""
+        self._completer.set_emotes(emote_map)
 
     def repaint_messages(self) -> None:
         """Trigger a repaint of visible messages (e.g. after emotes load)."""
@@ -268,6 +311,16 @@ class ChatWidget(QWidget):
         """Invalidate item layout cache on resize to prevent text overlap."""
         super().resizeEvent(event)
         self._list_view.scheduleDelayedItemsLayout()
+        # Debounce full relayout to avoid spam during drag-resize
+        if self._resize_timer is None:
+            self._resize_timer = QTimer(self)
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._on_resize_debounced)
+        self._resize_timer.start(30)
+
+    def _on_resize_debounced(self) -> None:
+        """Force full relayout after resize settles."""
+        self._model.layoutChanged.emit()
 
     def _on_scroll_changed(self, value: int) -> None:
         """Track scroll position for auto-scroll behavior."""
