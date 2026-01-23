@@ -51,6 +51,12 @@ class ChatMessage:
     is_action: bool = False  # /me messages
     is_moderated: bool = False  # Strikethrough + 50% opacity (NOT deleted)
     is_first_message: bool = False
+    is_system: bool = False  # USERNOTICE (sub, raid, etc.)
+    system_text: str = ""  # System message text (e.g., "UserX subscribed!")
+    is_hype_chat: bool = False  # Paid pinned message
+    hype_chat_amount: str = ""
+    hype_chat_currency: str = ""
+    hype_chat_level: str = ""
 
 
 @dataclass

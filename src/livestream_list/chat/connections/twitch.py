@@ -161,41 +161,30 @@ class TwitchChatConnection(BaseChatConnection):
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._should_stop = False
+        self._auth_failed = False
+        self._can_send = False  # Set True only if token has chat:edit scope
         self._message_batch: list[ChatMessage] = []
         self._last_flush: float = 0
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a Twitch channel's chat via IRC WebSocket."""
         self._should_stop = False
+        self._auth_failed = False
         channel = channel_id.lower()
 
         try:
-            self._session = aiohttp.ClientSession()
-            self._ws = await self._session.ws_connect(TWITCH_IRC_WS_URL)
+            await self._connect_with_auth(channel, channel_id)
 
-            # Request capabilities
-            for cap in IRC_CAPS:
-                await self._ws.send_str(f"CAP REQ :{cap}")
-
-            # Authenticate
-            if self._oauth_token:
-                await self._ws.send_str(f"PASS oauth:{self._oauth_token}")
-                # Extract nick from token (we'll get it from GLOBALUSERSTATE)
-                self._nick = "justinfan" + str(hash(self._oauth_token) % 100000)
-            else:
-                # Anonymous connection (read-only)
-                self._nick = f"justinfan{int(time.time()) % 100000}"
-
-            await self._ws.send_str(f"NICK {self._nick}")
-
-            # Join channel
-            await self._ws.send_str(f"JOIN #{channel}")
-
-            self._set_connected(channel_id)
-            self._last_flush = time.monotonic()
-
-            # Message loop
-            await self._read_loop()
+            # If auth failed, reconnect anonymously for read-only
+            if self._auth_failed:
+                logger.warning(
+                    f"Twitch auth failed for #{channel}, reconnecting anonymously"
+                )
+                await self._cleanup()
+                self._auth_failed = False
+                self._should_stop = False
+                self._oauth_token = ""  # Disable sending
+                await self._connect_with_auth(channel, channel_id)
 
         except Exception as e:
             if not self._should_stop:
@@ -203,6 +192,71 @@ class TwitchChatConnection(BaseChatConnection):
         finally:
             await self._cleanup()
             self._set_disconnected()
+
+    async def _validate_token(self) -> str | None:
+        """Validate OAuth token and return the login name, or None on failure.
+
+        Also sets self._can_send based on whether chat:edit scope is present.
+        """
+        if not self._oauth_token:
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://id.twitch.tv/oauth2/validate",
+                    headers={"Authorization": f"OAuth {self._oauth_token}"},
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        login = data.get("login", "")
+                        scopes = data.get("scopes", [])
+                        if login:
+                            self._can_send = "chat:edit" in scopes
+                            logger.info(
+                                f"Twitch token validated: {login} "
+                                f"(scopes: {scopes}, can_send: {self._can_send})"
+                            )
+                            return login
+                    logger.warning(
+                        f"Twitch token validation failed (status={resp.status})"
+                    )
+        except Exception as e:
+            logger.warning(f"Twitch token validation error: {e}")
+        return None
+
+    async def _connect_with_auth(self, channel: str, channel_id: str) -> None:
+        """Establish IRC connection with current auth state."""
+        self._session = aiohttp.ClientSession()
+        self._ws = await self._session.ws_connect(TWITCH_IRC_WS_URL)
+
+        # Request capabilities
+        for cap in IRC_CAPS:
+            await self._ws.send_str(f"CAP REQ :{cap}")
+
+        # Authenticate: validate token to get username, fall back to anonymous
+        if self._oauth_token:
+            login = await self._validate_token()
+            if login:
+                await self._ws.send_str(f"PASS oauth:{self._oauth_token}")
+                self._nick = login
+            else:
+                # Token invalid - connect anonymously
+                self._oauth_token = ""
+                self._nick = f"justinfan{int(time.time()) % 100000}"
+        else:
+            self._nick = f"justinfan{int(time.time()) % 100000}"
+
+        logger.info(f"Twitch IRC: connecting as {self._nick} to #{channel}")
+        await self._ws.send_str(f"NICK {self._nick}")
+
+        # Join channel
+        await self._ws.send_str(f"JOIN #{channel}")
+
+        self._set_connected(channel_id)
+        self._last_flush = time.monotonic()
+
+        # Message loop
+        await self._read_loop()
 
     async def disconnect(self) -> None:
         """Disconnect from the channel."""
@@ -215,8 +269,11 @@ class TwitchChatConnection(BaseChatConnection):
         if not self._ws or self._ws.closed or not self._channel_id:
             return False
 
-        if not self._oauth_token:
-            self._emit_error("Cannot send messages without authentication")
+        if not self._can_send:
+            self._emit_error(
+                "Cannot send: missing chat:edit scope. "
+                "Please re-login to Twitch via Preferences."
+            )
             return False
 
         try:
@@ -228,11 +285,15 @@ class TwitchChatConnection(BaseChatConnection):
 
     async def _read_loop(self) -> None:
         """Main read loop for incoming IRC messages."""
+        msg_count = 0
         async for msg in self._ws:
             if self._should_stop:
                 break
 
             if msg.type == aiohttp.WSMsgType.TEXT:
+                msg_count += 1
+                if msg_count <= 3:
+                    logger.info(f"Twitch IRC raw [{msg_count}]: {msg.data[:200]}")
                 for line in msg.data.split("\r\n"):
                     if line:
                         await self._handle_message(line)
@@ -272,9 +333,14 @@ class TwitchChatConnection(BaseChatConnection):
             display_name = parsed["tags"].get("display-name", "")
             if display_name:
                 self._nick = display_name.lower()
+        elif command == "NOTICE":
+            text = parsed.get("trailing", "")
+            if "Login" in text and ("unsuccessful" in text or "failed" in text):
+                logger.warning(f"Twitch IRC: auth failed: {text}")
+                self._auth_failed = True
+                self._should_stop = True  # Break out of _read_loop
         elif command == "USERNOTICE":
-            # Sub/raid/etc - could be handled for display
-            pass
+            self._handle_usernotice(parsed)
 
     def _handle_privmsg(self, parsed: dict) -> None:
         """Handle a PRIVMSG (chat message)."""
@@ -321,6 +387,23 @@ class TwitchChatConnection(BaseChatConnection):
         else:
             timestamp = datetime.now(timezone.utc)
 
+        # Hype Chat (paid pinned message) detection
+        is_hype_chat = False
+        hype_chat_amount = ""
+        hype_chat_currency = ""
+        hype_chat_level = ""
+        if tags.get("pinned-chat-paid-amount"):
+            is_hype_chat = True
+            raw_amount = tags.get("pinned-chat-paid-amount", "0")
+            exponent = int(tags.get("pinned-chat-paid-exponent", "0"))
+            hype_chat_currency = tags.get("pinned-chat-paid-currency", "USD")
+            hype_chat_level = tags.get("pinned-chat-paid-level", "ONE")
+            # Convert raw amount using exponent (e.g., 500 with exp 2 = 5.00)
+            if exponent > 0:
+                hype_chat_amount = f"{int(raw_amount) / (10 ** exponent):.{exponent}f}"
+            else:
+                hype_chat_amount = raw_amount
+
         message = ChatMessage(
             id=tags.get("id", str(uuid.uuid4())),
             user=user,
@@ -330,6 +413,10 @@ class TwitchChatConnection(BaseChatConnection):
             emote_positions=emote_positions,
             is_action=is_action,
             is_first_message=tags.get("first-msg", "0") == "1",
+            is_hype_chat=is_hype_chat,
+            hype_chat_amount=hype_chat_amount,
+            hype_chat_currency=hype_chat_currency,
+            hype_chat_level=hype_chat_level,
         )
 
         self._message_batch.append(message)
@@ -362,6 +449,59 @@ class TwitchChatConnection(BaseChatConnection):
             target_user_id=tags.get("login", ""),
         )
         self._emit_moderation(event)
+
+    def _handle_usernotice(self, parsed: dict) -> None:
+        """Handle USERNOTICE (subs, resubs, gift subs, raids, announcements)."""
+        tags = parsed["tags"]
+        user_text = parsed.get("trailing", "")  # Optional custom message from user
+
+        # System message (e.g., "UserX subscribed for 3 months!")
+        system_msg = tags.get("system-msg", "").replace("\\s", " ")
+
+        # Parse user info (same as PRIVMSG)
+        user_id = tags.get("user-id", "")
+        display_name = tags.get("display-name", "")
+        username = parsed["prefix"].split("!")[0] if "!" in parsed["prefix"] else ""
+        color = tags.get("color", None)
+        badges = parse_badges(tags.get("badges", ""))
+
+        user = ChatUser(
+            id=user_id,
+            name=username,
+            display_name=display_name or username,
+            platform=StreamPlatform.TWITCH,
+            color=color if color else None,
+            badges=badges,
+        )
+
+        # Parse emotes from user's custom message (if any)
+        emote_positions = parse_emote_positions(tags.get("emotes", "")) if user_text else []
+        for start, end, emote in emote_positions:
+            if start < len(user_text) and end <= len(user_text):
+                emote.name = user_text[start:end]
+
+        # Timestamp
+        tmi_sent = tags.get("tmi-sent-ts", "")
+        if tmi_sent:
+            try:
+                timestamp = datetime.fromtimestamp(int(tmi_sent) / 1000, tz=timezone.utc)
+            except (ValueError, OSError):
+                timestamp = datetime.now(timezone.utc)
+        else:
+            timestamp = datetime.now(timezone.utc)
+
+        message = ChatMessage(
+            id=tags.get("id", str(uuid.uuid4())),
+            user=user,
+            text=user_text,
+            timestamp=timestamp,
+            platform=StreamPlatform.TWITCH,
+            emote_positions=emote_positions,
+            is_system=True,
+            system_text=system_msg,
+        )
+
+        self._message_batch.append(message)
 
     def _flush_batch(self) -> None:
         """Emit batched messages and reset."""

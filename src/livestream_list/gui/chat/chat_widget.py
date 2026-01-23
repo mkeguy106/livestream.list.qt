@@ -3,13 +3,16 @@
 import logging
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QListView,
     QPushButton,
+    QStyleOptionViewItem,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +55,7 @@ class ChatWidget(QWidget):
 
     message_sent = Signal(str, str)  # channel_key, text
     popout_requested = Signal(str)  # channel_key
+    settings_clicked = Signal()
 
     def __init__(
         self,
@@ -90,6 +94,10 @@ class ChatWidget(QWidget):
         self._list_view.setUniformItemSizes(False)
         self._list_view.setSpacing(0)
 
+        # Enable mouse tracking for emote tooltips
+        self._list_view.viewport().setMouseTracking(True)
+        self._list_view.viewport().installEventFilter(self)
+
         # Style the list
         self._list_view.setStyleSheet("""
             QListView {
@@ -100,6 +108,38 @@ class ChatWidget(QWidget):
         """)
 
         layout.addWidget(self._list_view)
+
+        # Hype chat pinned banner (hidden by default)
+        self._hype_banner = QWidget()
+        self._hype_banner.setStyleSheet("""
+            QWidget {
+                background-color: #3a3000;
+                border: 1px solid #6a5a00;
+                border-radius: 4px;
+            }
+        """)
+        hype_layout = QHBoxLayout(self._hype_banner)
+        hype_layout.setContentsMargins(8, 4, 4, 4)
+        hype_layout.setSpacing(6)
+        self._hype_label = QLabel()
+        self._hype_label.setStyleSheet("color: #ffd700; font-size: 11px; border: none;")
+        self._hype_label.setWordWrap(True)
+        hype_layout.addWidget(self._hype_label, 1)
+        hype_dismiss = QPushButton("\u2715")
+        hype_dismiss.setFixedSize(20, 20)
+        hype_dismiss.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #aaa;
+                border: none;
+                font-size: 12px;
+            }
+            QPushButton:hover { color: #fff; }
+        """)
+        hype_dismiss.clicked.connect(self._dismiss_hype_banner)
+        hype_layout.addWidget(hype_dismiss)
+        self._hype_banner.hide()
+        layout.addWidget(self._hype_banner)
 
         # New messages indicator (hidden by default)
         self._new_msg_button = QPushButton("New messages")
@@ -165,7 +205,42 @@ class ChatWidget(QWidget):
         self._send_button.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_button)
 
+        self._settings_button = QPushButton("\u2699")
+        self._settings_button.setFixedSize(28, 28)
+        self._settings_button.setToolTip("Chat settings")
+        self._settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #aaa;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #2a2a4a;
+                color: #eee;
+            }
+        """)
+        self._settings_button.clicked.connect(self.settings_clicked.emit)
+        input_layout.addWidget(self._settings_button)
+
         layout.addLayout(input_layout)
+
+        # Auth feedback banner (shown when not authenticated)
+        self._auth_banner = QLabel("Not logged in \u2014 chat is read-only")
+        self._auth_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._auth_banner.setStyleSheet("""
+            QLabel {
+                background-color: #2a1a0a;
+                color: #f0a030;
+                border: 1px solid #503010;
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+        """)
+        self._auth_banner.hide()
+        layout.addWidget(self._auth_banner)
 
         # Emote autocomplete
         self._completer = EmoteCompleter(self._input, parent=self)
@@ -198,6 +273,15 @@ class ChatWidget(QWidget):
         if not filtered:
             return
 
+        # Show hype chat banner for paid pinned messages
+        for msg in filtered:
+            if msg.is_hype_chat:
+                amount_str = f"{msg.hype_chat_currency} {msg.hype_chat_amount}"
+                self._hype_label.setText(
+                    f"<b>{msg.user.display_name}</b> \u2014 {amount_str}: {msg.text}"
+                )
+                self._hype_banner.show()
+
         was_at_bottom = self._is_at_bottom()
         self._model.add_messages(filtered)
 
@@ -217,8 +301,15 @@ class ChatWidget(QWidget):
         self._send_button.setEnabled(state)
         if state:
             self._input.setPlaceholderText("Send a message...")
+            self._auth_banner.hide()
         else:
             self._input.setPlaceholderText("Log in to Twitch to chat")
+            self._auth_banner.show()
+
+    def show_error(self, message: str) -> None:
+        """Show an error message in the auth banner."""
+        self._auth_banner.setText(message)
+        self._auth_banner.show()
 
     def set_emote_cache(self, cache: dict) -> None:
         """Set the shared emote cache on the delegate and completer."""
@@ -330,3 +421,49 @@ class ChatWidget(QWidget):
             self._new_msg_button.hide()
         else:
             self._auto_scroll = False
+
+    def _dismiss_hype_banner(self) -> None:
+        """Dismiss the hype chat pinned banner."""
+        self._hype_banner.hide()
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle tooltip events on the list view viewport for emote/badge tooltips."""
+        if obj is self._list_view.viewport() and isinstance(event, QHelpEvent):
+            index = self._list_view.indexAt(event.pos())
+            if index.isValid():
+                message = index.data(MessageRole)
+                if message and isinstance(message, ChatMessage):
+                    option = QStyleOptionViewItem()
+                    self._list_view.initViewItemOption(option)
+                    option.rect = self._list_view.visualRect(index)
+                    viewport = self._list_view.viewport()
+                    tip_pos = event.globalPos()
+
+                    # Check badges
+                    badge = self._delegate._get_badge_at_position(
+                        event.pos(), option, message
+                    )
+                    if badge:
+                        QToolTip.showText(tip_pos, badge.name, viewport)
+                        return True
+
+                    # Check emotes
+                    if message.emote_positions:
+                        emote = self._delegate._get_emote_at_position(
+                            event.pos(), option, message
+                        )
+                        if emote:
+                            providers = {
+                                "twitch": "Twitch", "7tv": "7TV",
+                                "bttv": "BTTV", "ffz": "FFZ",
+                            }
+                            provider = providers.get(emote.provider, emote.provider)
+                            QToolTip.showText(
+                                tip_pos,
+                                f"{emote.name}\n({provider})",
+                                viewport,
+                            )
+                            return True
+            QToolTip.hideText()
+            return True
+        return super().eventFilter(obj, event)

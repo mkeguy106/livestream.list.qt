@@ -1,11 +1,13 @@
 """Custom delegate for painting chat messages."""
 
-from PySide6.QtCore import QModelIndex, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPixmap
+from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QHelpEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QToolTip,
     QWidget,
 )
 
@@ -17,7 +19,7 @@ from .message_model import MessageRole
 PADDING_H = 8
 BADGE_SPACING = 2
 USERNAME_SPACING = 4
-TIMESTAMP_WIDTH = 50
+TIMESTAMP_PADDING = 6  # Small gap after timestamp text
 
 # Mod-related badge names
 MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
@@ -69,6 +71,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
         is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
         if is_selected:
             painter.fillRect(option.rect, option.palette.highlight())
+        elif message.is_system:
+            painter.fillRect(option.rect, QColor(100, 50, 150, 40))
+        elif message.is_hype_chat:
+            painter.fillRect(option.rect, QColor(200, 170, 50, 30))
+            # Left accent bar for hype chat
+            accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
+            painter.fillRect(accent_rect, QColor(218, 165, 32))
         elif self.settings.show_alternating_rows and index.row() % 2 == 1:
             painter.fillRect(option.rect, QColor(255, 255, 255, 15))
 
@@ -101,12 +110,35 @@ class ChatMessageDelegate(QStyledItemDelegate):
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             painter.setFont(ts_font)
+            ts_width = QFontMetrics(ts_font).horizontalAdvance(ts_text) + TIMESTAMP_PADDING
             painter.drawText(
-                x, y, TIMESTAMP_WIDTH, line_height, ALIGN_LEFT_VCENTER, ts_text
+                x, y, ts_width, line_height, ALIGN_LEFT_VCENTER, ts_text
             )
-            x += TIMESTAMP_WIDTH + USERNAME_SPACING
-            available_width -= TIMESTAMP_WIDTH + USERNAME_SPACING
+            x += ts_width
+            available_width -= ts_width
             painter.setFont(font)
+
+        # System message text (USERNOTICE - subs, raids, etc.)
+        if message.is_system and message.system_text:
+            italic_font = QFont(font)
+            italic_font.setItalic(True)
+            painter.setFont(italic_font)
+            painter.setPen(highlight_color if is_selected else QColor(190, 150, 255))
+            sys_text = message.system_text
+            sys_width = QFontMetrics(italic_font).horizontalAdvance(sys_text)
+            remaining = available_width - (x - rect.x())
+            painter.drawText(
+                x, y, remaining, line_height * 2, ALIGN_WRAP, sys_text
+            )
+            painter.setFont(font)
+            # If there's user text, move to next line
+            if message.text:
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                painter.restore()
+                return
 
         # Badges
         if self.settings.show_badges and message.user.badges:
@@ -354,7 +386,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Prefix width (timestamp + badges + username)
         prefix_width = 0
         if self.settings.show_timestamps:
-            prefix_width += TIMESTAMP_WIDTH + USERNAME_SPACING
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            prefix_width += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
         if self.settings.show_badges and message.user.badges:
             badge_count = len(message.user.badges)
             if not self.settings.show_mod_badges:
@@ -383,8 +417,167 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if text_width > content_width:
             lines = max(1, int(text_width / content_width) + 1)
 
+        # System messages need extra lines for system_text
+        extra_lines = 0
+        if message.is_system and message.system_text:
+            sys_font = QFont(font)
+            sys_font.setItalic(True)
+            sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+            sys_available = max(available_width - prefix_width, 200)
+            extra_lines = max(1, int(sys_width / sys_available) + 1) if sys_available > 0 else 1
+            if not message.text:
+                lines = 0  # Only system text, no user message line
+
         height = max(
-            line_height * lines + padding_v * 2,
+            line_height * (lines + extra_lines) + padding_v * 2,
             emote_height + padding_v * 2,
         )
         return QSize(available_width, height)
+
+    def helpEvent(  # noqa: N802
+        self, event: QHelpEvent, view: QAbstractItemView,
+        option: QStyleOptionViewItem, index: QModelIndex,
+    ) -> bool:
+        """Show emote tooltip on hover."""
+        if not isinstance(event, QHelpEvent):
+            return super().helpEvent(event, view, option, index)
+
+        message: ChatMessage | None = index.data(MessageRole)
+        if not message or not message.emote_positions:
+            QToolTip.hideText()
+            return True
+
+        emote = self._get_emote_at_position(event.pos(), option, message)
+        if emote:
+            provider_names = {"twitch": "Twitch", "7tv": "7TV", "bttv": "BTTV", "ffz": "FFZ"}
+            provider = provider_names.get(emote.provider, emote.provider)
+            QToolTip.showText(event.globalPos(), f"{emote.name}\n({provider})")
+        else:
+            QToolTip.hideText()
+        return True
+
+    def _get_emote_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
+        """Find which emote (if any) is at the given position."""
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        x = rect.x()
+        y = rect.y()
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+
+        badge_size = self._get_badge_size(fm)
+        emote_height = self._get_emote_height(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Skip timestamp
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+
+        # Skip system text lines
+        if message.is_system and message.system_text:
+            if message.text:
+                sys_font = QFont(font)
+                sys_font.setItalic(True)
+                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+                remaining = rect.width() - (x - rect.x())
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                return None
+
+        # Skip badges
+        if self.settings.show_badges and message.user.badges:
+            for badge in message.user.badges:
+                if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+                    continue
+                x += badge_size + BADGE_SPACING
+
+        # Skip username
+        bold_font = QFont(font)
+        bold_font.setBold(True)
+        suffix = " " if message.is_action else ": "
+        name_text = message.user.display_name + suffix
+        x += QFontMetrics(bold_font).horizontalAdvance(name_text)
+
+        # Now walk through text + emotes
+        text = message.text
+        last_end = 0
+
+        for start, end, emote in message.emote_positions:
+            # Text before emote
+            if start > last_end:
+                segment = text[last_end:start]
+                x += fm.horizontalAdvance(segment)
+
+            # Emote rect
+            emote_key = f"emote:{emote.provider}:{emote.id}"
+            pixmap = self._emote_cache.get(emote_key)
+            if pixmap and not pixmap.isNull():
+                smooth = Qt.TransformationMode.SmoothTransformation
+                scaled = pixmap.scaledToHeight(emote_height, smooth)
+                emote_w = scaled.width()
+            else:
+                emote_text = text[start:end] if end <= len(text) else emote.name
+                emote_w = fm.horizontalAdvance(emote_text)
+
+            emote_y = y + (line_height - emote_height) // 2
+            emote_rect = QRect(int(x), int(emote_y), int(emote_w), emote_height)
+            if emote_rect.contains(pos):
+                return emote
+            x += emote_w
+            last_end = end
+
+        return None
+
+    def _get_badge_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
+        """Find which badge (if any) is at the given position."""
+        if not self.settings.show_badges or not message.user.badges:
+            return None
+
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        x = rect.x()
+        y = rect.y()
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+
+        badge_size = self._get_badge_size(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Skip timestamp
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+
+        # Skip system text lines
+        if message.is_system and message.system_text:
+            if message.text:
+                sys_font = QFont(font)
+                sys_font.setItalic(True)
+                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+                remaining = rect.width() - (x - rect.x())
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                return None
+
+        # Check each badge
+        badge_y = y + (line_height - badge_size) // 2
+        for badge in message.user.badges:
+            if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+                continue
+            badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
+            if badge_rect.contains(pos):
+                return badge
+            x += badge_size + BADGE_SPACING
+
+        return None

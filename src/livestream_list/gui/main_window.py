@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -58,10 +59,22 @@ PLATFORM_COLORS = {
 
 # UI style configurations
 UI_STYLES = {
-    UIStyle.DEFAULT: {"name": "Default", "margin_v": 4, "margin_h": 12, "spacing": 10, "icon_size": 16},
-    UIStyle.COMPACT_1: {"name": "Compact 1", "margin_v": 4, "margin_h": 12, "spacing": 8, "icon_size": 14},
-    UIStyle.COMPACT_2: {"name": "Compact 2", "margin_v": 2, "margin_h": 6, "spacing": 4, "icon_size": 12},
-    UIStyle.COMPACT_3: {"name": "Compact 3", "margin_v": 1, "margin_h": 4, "spacing": 2, "icon_size": 10},
+    UIStyle.DEFAULT: {
+        "name": "Default", "margin_v": 4, "margin_h": 12,
+        "spacing": 10, "icon_size": 16,
+    },
+    UIStyle.COMPACT_1: {
+        "name": "Compact 1", "margin_v": 4, "margin_h": 12,
+        "spacing": 8, "icon_size": 14,
+    },
+    UIStyle.COMPACT_2: {
+        "name": "Compact 2", "margin_v": 2, "margin_h": 6,
+        "spacing": 4, "icon_size": 12,
+    },
+    UIStyle.COMPACT_3: {
+        "name": "Compact 3", "margin_v": 1, "margin_h": 4,
+        "spacing": 2, "icon_size": 10,
+    },
 }
 
 
@@ -650,7 +663,11 @@ class MainWindow(QMainWindow):
             elif self._name_filter:
                 self.all_offline_label.setText(f"No channels match '{self._name_filter}'")
             elif self._platform_filter:
-                platform_name = self._platform_filter.value if hasattr(self._platform_filter, 'value') else str(self._platform_filter)
+                platform_name = (
+                    self._platform_filter.value
+                    if hasattr(self._platform_filter, 'value')
+                    else str(self._platform_filter)
+                )
                 self.all_offline_label.setText(f"No {platform_name} channels")
             else:
                 self.all_offline_label.setText("No channels to show")
@@ -720,7 +737,10 @@ class MainWindow(QMainWindow):
             elif sort_mode == SortMode.LAST_SEEN:
                 if ls.live and ls.start_time:
                     # Live streams: sort by time live (longest first = earliest start_time)
-                    start = ls.start_time if ls.start_time.tzinfo else ls.start_time.replace(tzinfo=timezone.utc)
+                    start = (
+                        ls.start_time if ls.start_time.tzinfo
+                        else ls.start_time.replace(tzinfo=timezone.utc)
+                    )
                     return (live, start.timestamp())
                 else:
                     # Offline streams: sort by last seen (most recent first)
@@ -855,7 +875,8 @@ class MainWindow(QMainWindow):
 
         # Update UI after short delay
         QTimer.singleShot(500, self.refresh_stream_list)
-        QTimer.singleShot(1000, lambda: self.set_status(f"Playing {livestream.channel.display_name}"))
+        name = livestream.channel.display_name
+        QTimer.singleShot(1000, lambda: self.set_status(f"Playing {name}"))
 
     def _on_stop_stream(self, channel_key: str):
         """Handle stopping a stream."""
@@ -979,12 +1000,16 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             self.refresh_stream_list()
 
-    def show_preferences_dialog(self):
+    def show_preferences_dialog(self, initial_tab: int = 0):
         """Show the preferences dialog."""
-        dialog = PreferencesDialog(self, self.app)
+        dialog = PreferencesDialog(self, self.app, initial_tab=initial_tab)
         dialog.exec()
         self._apply_settings()
         self.refresh_stream_list()
+
+    def _show_chat_preferences(self):
+        """Open preferences dialog directly on the Chat tab."""
+        self.show_preferences_dialog(initial_tab=2)
 
     def show_export_dialog(self):
         """Show the export dialog."""
@@ -1063,14 +1088,17 @@ class MainWindow(QMainWindow):
                 self.set_status(f"{msg}. Checking stream status...")
                 self.app.refresh(on_complete=lambda: self.set_status("Ready"))
             elif settings_imported:
-                QMessageBox.information(self, "Import Complete", "Settings imported. No new channels.")
+                QMessageBox.information(
+                    self, "Import Complete",
+                    "Settings imported. No new channels.",
+                )
             else:
                 QMessageBox.information(self, "Import Complete", "No new channels imported.")
 
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import: {e}")
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         """Handle window close event."""
         # First-time close prompt
         if not self.app.settings.close_to_tray_asked and self.app.tray_icon:
@@ -1111,6 +1139,9 @@ class MainWindow(QMainWindow):
             # windows stay mapped and retain their geometry when restored.
             self.showMinimized()
         else:
+            # Close the chat window if it's open
+            if hasattr(self.app, "_chat_window") and self.app._chat_window:
+                self.app._chat_window.close()
             # Save window geometry before quitting
             self._save_window_geometry()
             event.accept()
@@ -1383,7 +1414,7 @@ class AddChannelDialog(QDialog):
         # Auto-paste from clipboard on dialog open
         self._try_paste_clipboard()
 
-    def eventFilter(self, obj, event):
+    def eventFilter(self, obj, event):  # noqa: N802
         """Handle focus events for auto-paste."""
         from PySide6.QtCore import QEvent
         if obj == self.channel_edit and event.type() == QEvent.FocusIn:
@@ -1519,6 +1550,10 @@ class AddChannelDialog(QDialog):
         dialog.exec()
         self._update_twitch_status()
 
+        # Reconnect chat with new token/scopes
+        if self.app.settings.twitch.access_token and self.app.chat_manager:
+            self.app.chat_manager.reconnect_twitch()
+
         # Suppress notifications for any channels imported during login
         added = getattr(dialog, '_added_count', 0)
         if added > 0:
@@ -1565,7 +1600,7 @@ class AddChannelDialog(QDialog):
 class PreferencesDialog(QDialog):
     """Preferences dialog with multiple tabs."""
 
-    def __init__(self, parent, app: "Application"):
+    def __init__(self, parent, app: "Application", initial_tab: int = 0):
         super().__init__(parent)
         self.app = app
 
@@ -1594,6 +1629,9 @@ class PreferencesDialog(QDialog):
         # Accounts tab
         accounts_tab = self._create_accounts_tab()
         tabs.addTab(accounts_tab, "Accounts")
+
+        if initial_tab:
+            tabs.setCurrentIndex(initial_tab)
 
         # Close button
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
@@ -1959,17 +1997,47 @@ class PreferencesDialog(QDialog):
         self.chat_name_colors_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_name_colors_cb)
 
+        # Tab active color with swatch
+        active_row = QHBoxLayout()
+        self.tab_active_swatch = QPushButton()
+        self.tab_active_swatch.setFixedSize(24, 24)
+        self.tab_active_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        active_row.addWidget(self.tab_active_swatch)
         self.tab_active_color_edit = QLineEdit()
         self.tab_active_color_edit.setText(self.app.settings.chat.builtin.tab_active_color)
         self.tab_active_color_edit.setMaximumWidth(100)
         self.tab_active_color_edit.editingFinished.connect(self._on_chat_changed)
-        builtin_layout.addRow("Tab active color:", self.tab_active_color_edit)
+        self.tab_active_color_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.tab_active_swatch, t)
+        )
+        active_row.addWidget(self.tab_active_color_edit)
+        active_row.addStretch()
+        self.tab_active_swatch.clicked.connect(
+            lambda: self._pick_color(self.tab_active_color_edit, self.tab_active_swatch)
+        )
+        self._update_swatch(self.tab_active_swatch, self.tab_active_color_edit.text())
+        builtin_layout.addRow("Tab active color:", active_row)
 
+        # Tab inactive color with swatch
+        inactive_row = QHBoxLayout()
+        self.tab_inactive_swatch = QPushButton()
+        self.tab_inactive_swatch.setFixedSize(24, 24)
+        self.tab_inactive_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        inactive_row.addWidget(self.tab_inactive_swatch)
         self.tab_inactive_color_edit = QLineEdit()
         self.tab_inactive_color_edit.setText(self.app.settings.chat.builtin.tab_inactive_color)
         self.tab_inactive_color_edit.setMaximumWidth(100)
         self.tab_inactive_color_edit.editingFinished.connect(self._on_chat_changed)
-        builtin_layout.addRow("Tab inactive color:", self.tab_inactive_color_edit)
+        self.tab_inactive_color_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.tab_inactive_swatch, t)
+        )
+        inactive_row.addWidget(self.tab_inactive_color_edit)
+        inactive_row.addStretch()
+        self.tab_inactive_swatch.clicked.connect(
+            lambda: self._pick_color(self.tab_inactive_color_edit, self.tab_inactive_swatch)
+        )
+        self._update_swatch(self.tab_inactive_swatch, self.tab_inactive_color_edit.text())
+        builtin_layout.addRow("Tab inactive color:", inactive_row)
 
         layout.addWidget(self.builtin_group)
 
@@ -2193,8 +2261,31 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.emote_providers = providers
         self.app.save_settings()
         # Live-update chat window tab style if open
-        if hasattr(self.app, "chat_window") and self.app.chat_window:
-            self.app.chat_window.update_tab_style()
+        if self.app._chat_window:
+            self.app._chat_window.update_tab_style()
+
+    def _update_swatch(self, button: QPushButton, hex_color: str) -> None:
+        """Update a color swatch button's background from a hex string."""
+        color = QColor(hex_color)
+        if color.isValid():
+            button.setStyleSheet(
+                f"background-color: {hex_color}; border: 1px solid #666; border-radius: 3px;"
+            )
+        else:
+            button.setStyleSheet(
+                "background-color: #333; border: 1px solid #666; border-radius: 3px;"
+            )
+
+    def _pick_color(self, line_edit: QLineEdit, swatch: QPushButton) -> None:
+        """Open a color picker dialog and update the line edit and swatch."""
+        current = QColor(line_edit.text().strip())
+        if not current.isValid():
+            current = QColor("#6441a5")
+        color = QColorDialog.getColor(current, self, "Pick a color")
+        if color.isValid():
+            line_edit.setText(color.name())
+            self._update_swatch(swatch, color.name())
+            self._on_chat_changed()
 
     def _on_twitch_login(self):
         """Handle Twitch login."""
@@ -2202,6 +2293,10 @@ class PreferencesDialog(QDialog):
         dialog.exec()
         self._update_twitch_status()
         self._update_account_buttons()
+
+        # Reconnect chat with new token/scopes
+        if self.app.settings.twitch.access_token and self.app.chat_manager:
+            self.app.chat_manager.reconnect_twitch()
 
         # Suppress notifications for any channels imported during login
         added = getattr(dialog, '_added_count', 0)
@@ -2260,7 +2355,10 @@ class ImportFollowsDialog(QDialog):
     login_complete = Signal()
     import_complete = Signal(list)
 
-    def __init__(self, parent, app: "Application", platform: StreamPlatform, start_import: bool = False):
+    def __init__(
+        self, parent, app: "Application",
+        platform: StreamPlatform, start_import: bool = False,
+    ):
         super().__init__(parent)
         self.app = app
         self.platform = platform
@@ -2281,7 +2379,10 @@ class ImportFollowsDialog(QDialog):
         login_layout = QVBoxLayout(login_page)
         login_layout.setAlignment(Qt.AlignCenter)
 
-        login_label = QLabel(f"Log in to {platform.value.title()} to import your followed channels.")
+        login_label = QLabel(
+            f"Log in to {platform.value.title()} to import "
+            "your followed channels."
+        )
         login_label.setAlignment(Qt.AlignCenter)
         login_layout.addWidget(login_label)
 
@@ -2296,7 +2397,10 @@ class ImportFollowsDialog(QDialog):
         waiting_layout = QVBoxLayout(waiting_page)
         waiting_layout.setAlignment(Qt.AlignCenter)
 
-        waiting_label = QLabel("Waiting for authorization...\nPlease complete login in your browser.")
+        waiting_label = QLabel(
+            "Waiting for authorization...\n"
+            "Please complete login in your browser."
+        )
         waiting_label.setAlignment(Qt.AlignCenter)
         waiting_layout.addWidget(waiting_label)
 
@@ -2307,7 +2411,10 @@ class ImportFollowsDialog(QDialog):
         ready_layout = QVBoxLayout(ready_page)
         ready_layout.setAlignment(Qt.AlignCenter)
 
-        ready_label = QLabel(f"You're logged in to {platform.value.title()}!\nReady to import your followed channels.")
+        ready_label = QLabel(
+            f"You're logged in to {platform.value.title()}!\n"
+            "Ready to import your followed channels."
+        )
         ready_label.setAlignment(Qt.AlignCenter)
         ready_layout.addWidget(ready_label)
 
