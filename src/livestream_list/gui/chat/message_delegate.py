@@ -449,7 +449,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         emote = self._get_emote_at_position(event.pos(), option, message)
         if emote:
-            provider_names = {"twitch": "Twitch", "7tv": "7TV", "bttv": "BTTV", "ffz": "FFZ"}
+            provider_names = {
+                "twitch": "Twitch", "kick": "Kick",
+                "7tv": "7TV", "bttv": "BTTV", "ffz": "FFZ",
+            }
             provider = provider_names.get(emote.provider, emote.provider)
             QToolTip.showText(event.globalPos(), f"{emote.name}\n({provider})")
         else:

@@ -10,6 +10,61 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
+# HTML page for Kick OAuth code flow - shows success and closes
+KICK_CALLBACK_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Kick Authorization</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background: #0e0e10;
+            color: #efeff1;
+        }
+        .container { text-align: center; padding: 2rem; }
+        h1 { color: #53fc18; }
+        .success { color: #00ff7f; }
+        .error { color: #ff4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Livestream List</h1>
+        <p id="status" class="success">Authorization received! You can close this window.</p>
+    </div>
+</body>
+</html>
+"""
+
+KICK_ERROR_HTML = """<!DOCTYPE html>
+<html>
+<head>
+    <title>Kick Authorization Failed</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; margin: 0; background: #0e0e10; color: #efeff1;
+        }
+        .container { text-align: center; padding: 2rem; }
+        h1 { color: #53fc18; }
+        .error { color: #ff4444; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Livestream List</h1>
+        <p class="error">Authorization failed: {error}</p>
+    </div>
+</body>
+</html>
+"""
+
 # HTML page served to capture OAuth token from URL fragment (Twitch implicit flow)
 CALLBACK_HTML = """<!DOCTYPE html>
 <html>
@@ -50,7 +105,8 @@ CALLBACK_HTML = """<!DOCTYPE html>
 
             if (error) {
                 statusEl.className = 'error';
-                statusEl.textContent = 'Authorization failed: ' + (params.get('error_description') || error);
+                statusEl.textContent = 'Auth failed: ' +
+                    (params.get('error_description') || error);
                 return;
             }
 
@@ -60,7 +116,8 @@ CALLBACK_HTML = """<!DOCTYPE html>
                     .then(response => {
                         if (response.ok) {
                             statusEl.className = 'success';
-                            statusEl.textContent = 'Authorization successful! You can close this window.';
+                            statusEl.textContent =
+                                'Success! You can close this window.';
                         } else {
                             throw new Error('Server error');
                         }
@@ -98,12 +155,33 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         params = parse_qs(parsed.query)
 
         if parsed.path == "/redirect":
-            # Twitch implicit flow - token will be in URL fragment
-            # Serve HTML that extracts it via JavaScript
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(CALLBACK_HTML.encode())
+            # Check if this is a code flow (Kick) or implicit flow (Twitch)
+            code = params.get("code", [None])[0]
+            error = params.get("error", [None])[0]
+
+            if error:
+                # OAuth error
+                desc = params.get("error_description", [error])[0]
+                html = KICK_ERROR_HTML.format(error=desc)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(html.encode())
+            elif code:
+                # Authorization code flow (Kick) - code in query param
+                if self.server.code_callback:
+                    self.server.code_callback(code)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(KICK_CALLBACK_HTML.encode())
+            else:
+                # Twitch implicit flow - token will be in URL fragment
+                # Serve HTML that extracts it via JavaScript
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(CALLBACK_HTML.encode())
 
         elif parsed.path == "/token":
             # Receive the token from JavaScript (Twitch flow)
@@ -138,7 +216,9 @@ class OAuthServer:
         self._server: HTTPServer | None = None
         self._thread: Thread | None = None
         self._token: str | None = None
+        self._code: str | None = None
         self._token_event = threading.Event()
+        self._code_event = threading.Event()
 
     @property
     def port(self) -> int:
@@ -153,9 +233,14 @@ class OAuthServer:
         return f"http://localhost:{self.port}/redirect"
 
     def _on_token(self, token: str) -> None:
-        """Callback when token is received."""
+        """Callback when token is received (implicit flow)."""
         self._token = token
         self._token_event.set()
+
+    def _on_code(self, code: str) -> None:
+        """Callback when authorization code is received (code flow)."""
+        self._code = code
+        self._code_event.set()
 
     def start(self) -> None:
         """Start the OAuth server."""
@@ -167,6 +252,7 @@ class OAuthServer:
 
         self._server = ReuseAddrHTTPServer(("localhost", self._port), OAuthCallbackHandler)
         self._server.token_callback = self._on_token
+        self._server.code_callback = self._on_code
 
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
@@ -202,6 +288,27 @@ class OAuthServer:
             )
             if got_token:
                 return self._token
+            return None
+        finally:
+            self.stop()
+
+    async def wait_for_code(self, timeout: float = 300) -> str | None:
+        """
+        Wait for the authorization code to be received (code flow).
+
+        Args:
+            timeout: Maximum seconds to wait.
+
+        Returns:
+            The authorization code, or None if timed out.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            got_code = await loop.run_in_executor(
+                None, lambda: self._code_event.wait(timeout=timeout)
+            )
+            if got_code:
+                return self._code
             return None
         finally:
             self.stop()

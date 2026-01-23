@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -9,7 +10,8 @@ from datetime import datetime, timezone
 import aiohttp
 
 from ...core.models import StreamPlatform
-from ..models import ChatBadge, ChatMessage, ChatUser, ModerationEvent
+from ...core.settings import KickSettings
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,24 @@ PUSHER_WS_URL = "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679"
 PUSHER_PARAMS = "?protocol=7&client=js&version=8.3.0&flash=false"
 
 KICK_API_BASE = "https://kick.com/api/v2"
+KICK_OAUTH_BASE = "https://id.kick.com"
+KICK_EMOTE_URL = "https://files.kick.com/emotes/{id}/fullsize"
+KICK_BADGE_BASE = "https://www.kickdatabase.com/kickBadges"
+
+# Static badge URLs for system badges (not provided by Kick API)
+KICK_SYSTEM_BADGES: dict[str, str] = {
+    "broadcaster": f"{KICK_BADGE_BASE}/broadcaster.svg",
+    "moderator": f"{KICK_BADGE_BASE}/moderator.svg",
+    "vip": f"{KICK_BADGE_BASE}/vip.svg",
+    "og": f"{KICK_BADGE_BASE}/og.svg",
+    "founder": f"{KICK_BADGE_BASE}/founder.svg",
+    "staff": f"{KICK_BADGE_BASE}/staff.svg",
+    "verified": f"{KICK_BADGE_BASE}/verified.svg",
+    "sub_gifter": f"{KICK_BADGE_BASE}/subGifter.svg",
+}
+
+# Matches [emote:ID:name] in Kick message content
+KICK_EMOTE_RE = re.compile(r"\[emote:(\d+):([^\]]+)\]")
 
 
 class KickChatConnection(BaseChatConnection):
@@ -28,13 +48,16 @@ class KickChatConnection(BaseChatConnection):
     channel's chatroom, and receives/sends messages.
     """
 
-    def __init__(self, auth_token: str = "", parent=None):
+    def __init__(self, kick_settings: KickSettings | None = None, parent=None):
         super().__init__(parent)
-        self._auth_token = auth_token
+        self._kick_settings = kick_settings
+        self._auth_token = kick_settings.access_token if kick_settings else ""
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._should_stop = False
         self._chatroom_id: int | None = None
+        self._broadcaster_user_id: int | None = None
+        self._badge_url_map: dict[str, str] = {}  # badge_type -> image_url
         self._message_batch: list[ChatMessage] = []
         self._last_flush: float = 0
 
@@ -101,32 +124,116 @@ class KickChatConnection(BaseChatConnection):
     async def send_message(self, text: str) -> bool:
         """Send a message to the connected Kick channel.
 
-        Requires authentication token.
+        Uses the official Kick public API with OAuth bearer token.
+        Automatically refreshes the token on 401 and retries once.
         """
         if not self._auth_token:
             self._emit_error("Cannot send messages without Kick authentication")
             return False
 
-        if not self._chatroom_id:
+        if not self._broadcaster_user_id:
+            self._emit_error("Unknown broadcaster ID")
             return False
 
+        result = await self._do_send(text)
+        if result is None:
+            # 401 - try refreshing token and retry
+            if await self._refresh_auth_token():
+                result = await self._do_send(text)
+                if result is None:
+                    self._emit_error("Send failed after token refresh (401)")
+                    return False
+                return result
+            else:
+                self._emit_error("Authentication expired - please re-login to Kick")
+                return False
+        return result
+
+    async def _do_send(self, text: str) -> bool | None:
+        """Attempt to send a message. Returns None on 401 (needs refresh)."""
         try:
-            url = f"{KICK_API_BASE}/messages/send/{self._chatroom_id}"
+            url = "https://api.kick.com/public/v1/chat"
             headers = {
                 "Authorization": f"Bearer {self._auth_token}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             }
-            payload = {"content": text, "type": "message"}
+            payload = {
+                "broadcaster_user_id": int(self._broadcaster_user_id),
+                "content": text,
+                "type": "user",
+            }
+            logger.debug(f"Kick send_message payload: {payload}")
 
             async with self._session.post(url, json=payload, headers=headers) as resp:
-                return resp.status == 200
+                if resp.status in (200, 201):
+                    data = await resp.json()
+                    is_sent = data.get("data", {}).get("is_sent", False)
+                    if not is_sent:
+                        logger.warning(f"Kick chat send returned is_sent=False: {data}")
+                    return is_sent
+                if resp.status == 401:
+                    body = await resp.text()
+                    logger.warning(f"Kick chat send got 401: {body}")
+                    return None  # Signal to refresh and retry
+                body = await resp.text()
+                logger.error(
+                    f"Kick chat send failed ({resp.status}): {body}"
+                )
+                self._emit_error(f"Send failed ({resp.status})")
+                return False
         except Exception as e:
             self._emit_error(f"Failed to send message: {e}")
             return False
 
+    async def _refresh_auth_token(self) -> bool:
+        """Refresh the OAuth access token using the refresh token."""
+        if not self._kick_settings or not self._kick_settings.refresh_token:
+            logger.warning("No refresh token available for Kick")
+            return False
+
+        from ..auth.kick_auth import DEFAULT_KICK_CLIENT_ID, DEFAULT_KICK_CLIENT_SECRET
+
+        client_id = self._kick_settings.client_id or DEFAULT_KICK_CLIENT_ID
+        client_secret = self._kick_settings.client_secret or DEFAULT_KICK_CLIENT_SECRET
+
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": self._kick_settings.refresh_token,
+        }
+
+        try:
+            async with self._session.post(
+                f"{KICK_OAUTH_BASE}/oauth/token",
+                data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    logger.error(f"Kick token refresh failed ({resp.status}): {body}")
+                    return False
+
+                token_data = await resp.json()
+                new_token = token_data.get("access_token", "")
+                if not new_token:
+                    return False
+
+                # Update local token and persist to settings
+                self._auth_token = new_token
+                self._kick_settings.access_token = new_token
+                new_refresh = token_data.get("refresh_token")
+                if new_refresh:
+                    self._kick_settings.refresh_token = new_refresh
+                logger.info("Kick token refreshed successfully")
+                return True
+        except Exception as e:
+            logger.error(f"Kick token refresh error: {e}")
+            return False
+
     async def _fetch_chatroom_id(self, channel_id: str) -> int | None:
-        """Fetch the chatroom ID for a channel from the Kick API."""
+        """Fetch the chatroom ID and badge URLs for a channel from the Kick API."""
         try:
             url = f"{KICK_API_BASE}/channels/{channel_id}"
             headers = {
@@ -137,6 +244,24 @@ class KickChatConnection(BaseChatConnection):
                 if resp.status != 200:
                     return None
                 data = await resp.json()
+
+                # Store broadcaster user ID for sending messages
+                self._broadcaster_user_id = data.get("user_id")
+                logger.debug(
+                    f"Kick channel {channel_id}: broadcaster_user_id={self._broadcaster_user_id}"
+                )
+
+                # Extract subscriber badge URLs
+                for badge in data.get("subscriber_badges", []):
+                    months = badge.get("months", 0)
+                    badge_img = badge.get("badge_image", {})
+                    src = badge_img.get("src", "")
+                    if src:
+                        self._badge_url_map[f"subscriber/{months}"] = src
+                        # Also map generic "subscriber" to the first badge
+                        if "subscriber" not in self._badge_url_map:
+                            self._badge_url_map["subscriber"] = src
+
                 chatroom = data.get("chatroom", {})
                 return chatroom.get("id")
         except Exception as e:
@@ -205,11 +330,18 @@ class KickChatConnection(BaseChatConnection):
         badges = []
         for badge_data in badges_data:
             badge_type = badge_data.get("type", "")
+            # Try image from event data, then fetched channel map, then static map
+            image_url = (
+                badge_data.get("image", {}).get("src", "")
+                or self._badge_url_map.get(badge_type, "")
+                or KICK_SYSTEM_BADGES.get(badge_type, "")
+            )
+            badge_name = badge_data.get("text", badge_type.replace("_", " ").title())
             badges.append(
                 ChatBadge(
                     id=badge_type,
-                    name=badge_type,
-                    image_url=badge_data.get("image", {}).get("src", ""),
+                    name=badge_name,
+                    image_url=image_url,
                 )
             )
 
@@ -235,12 +367,39 @@ class KickChatConnection(BaseChatConnection):
         else:
             timestamp = datetime.now(timezone.utc)
 
+        # Parse emotes from content: [emote:ID:name] → rendered emote
+        raw_content = data.get("content", "")
+        emote_positions: list[tuple[int, int, ChatEmote]] = []
+        text_parts: list[str] = []
+        last_end = 0
+
+        for match in KICK_EMOTE_RE.finditer(raw_content):
+            emote_id = match.group(1)
+            emote_name = match.group(2)
+            # Add text before this emote
+            text_parts.append(raw_content[last_end:match.start()])
+            start = len("".join(text_parts))
+            text_parts.append(emote_name)
+            end = start + len(emote_name)
+            emote = ChatEmote(
+                id=emote_id,
+                name=emote_name,
+                url_template=KICK_EMOTE_URL.format(id=emote_id),
+                provider="kick",
+            )
+            emote_positions.append((start, end, emote))
+            last_end = match.end()
+
+        text_parts.append(raw_content[last_end:])
+        text = "".join(text_parts)
+
         message = ChatMessage(
             id=str(data.get("id", uuid.uuid4())),
             user=user,
-            text=data.get("content", ""),
+            text=text,
             timestamp=timestamp,
             platform=StreamPlatform.KICK,
+            emote_positions=emote_positions,
         )
 
         self._message_batch.append(message)

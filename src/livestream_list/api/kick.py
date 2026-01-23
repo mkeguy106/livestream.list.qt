@@ -65,7 +65,10 @@ class KickApiClient(BaseApiClient):
                 logger.info(f"Kick: Response status {resp.status} for {channel_id}")
                 if resp.status != 200:
                     text = await resp.text()
-                    logger.warning(f"Kick: Failed to get channel {channel_id}: HTTP {resp.status}, body: {text[:500]}")
+                    logger.warning(
+                        f"Kick: Failed to get channel {channel_id}: "
+                        f"HTTP {resp.status}, body: {text[:500]}"
+                    )
                     return None
 
                 data = await resp.json()

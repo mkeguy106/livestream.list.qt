@@ -2095,9 +2095,21 @@ class PreferencesDialog(QDialog):
         # Kick group
         kick_group = QGroupBox("Kick")
         kick_layout = QVBoxLayout(kick_group)
-        kick_label = QLabel("No login required. Add channels manually.")
-        kick_label.setStyleSheet("color: gray;")
-        kick_layout.addWidget(kick_label)
+
+        self.kick_status = QLabel("Status: Not logged in")
+        self.kick_status.setStyleSheet("color: gray;")
+        kick_layout.addWidget(self.kick_status)
+
+        kick_buttons = QHBoxLayout()
+        self.kick_login_btn = QPushButton("Login to Kick")
+        self.kick_login_btn.clicked.connect(self._on_kick_login)
+        kick_buttons.addWidget(self.kick_login_btn)
+        self.kick_logout_btn = QPushButton("Logout")
+        self.kick_logout_btn.clicked.connect(self._on_kick_logout)
+        kick_buttons.addWidget(self.kick_logout_btn)
+        kick_buttons.addStretch()
+        kick_layout.addLayout(kick_buttons)
+
         layout.addWidget(kick_group)
 
         layout.addStretch()
@@ -2119,6 +2131,17 @@ class PreferencesDialog(QDialog):
         self.twitch_login_btn.setVisible(not is_logged_in)
         self.twitch_import_btn.setVisible(is_logged_in)
         self.twitch_logout_btn.setVisible(is_logged_in)
+
+        # Kick
+        kick_logged_in = bool(self.app.settings.kick.access_token)
+        self.kick_login_btn.setVisible(not kick_logged_in)
+        self.kick_logout_btn.setVisible(kick_logged_in)
+        if kick_logged_in:
+            self.kick_status.setText("Status: Logged in")
+            self.kick_status.setStyleSheet("color: green;")
+        else:
+            self.kick_status.setText("Status: Not logged in")
+            self.kick_status.setStyleSheet("color: gray;")
 
     def _on_autostart_changed(self, state):
         enabled = (state == Qt.CheckState.Checked.value)
@@ -2320,6 +2343,49 @@ class PreferencesDialog(QDialog):
         self.app.save_settings()
         self._update_twitch_status()
         self._update_account_buttons()
+
+    def _on_kick_login(self):
+        """Handle Kick OAuth login."""
+        self.kick_status.setText("Status: Waiting for authorization...")
+        self.kick_status.setStyleSheet("color: orange;")
+        self.kick_login_btn.setEnabled(False)
+
+        async def do_login():
+            from ..chat.auth.kick_auth import KickAuthFlow
+
+            auth = KickAuthFlow(self.app.settings.kick)
+            success = await auth.authenticate(timeout=120)
+            if success:
+                self.app.save_settings()
+            return success
+
+        from .app import AsyncWorker
+
+        worker = AsyncWorker(do_login, parent=self)
+        worker.finished.connect(self._on_kick_login_done)
+        worker.error.connect(self._on_kick_login_error)
+        worker.start()
+
+    def _on_kick_login_done(self, success):
+        """Handle Kick login result."""
+        self.kick_login_btn.setEnabled(True)
+        self._update_account_buttons()
+        if success:
+            self.app.chat_manager.reconnect_kick()
+
+    def _on_kick_login_error(self, error_msg):
+        """Handle Kick login error."""
+        self.kick_login_btn.setEnabled(True)
+        self.kick_status.setText(f"Error: {error_msg}")
+        self.kick_status.setStyleSheet("color: red;")
+
+    def _on_kick_logout(self):
+        """Handle Kick logout."""
+        self.app.settings.kick.access_token = ""
+        self.app.settings.kick.refresh_token = ""
+        self.app.save_settings()
+        self._update_account_buttons()
+        self.app.chat_manager.reconnect_kick()
 
     def _on_import_follows(self):
         """Handle import follows."""

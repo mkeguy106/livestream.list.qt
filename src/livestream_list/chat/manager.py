@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtGui import QPixmap
@@ -11,7 +13,7 @@ from ..core.settings import Settings
 from .connections.base import BaseChatConnection
 from .emotes.cache import EmoteCache, EmoteLoaderWorker
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider
-from .models import ChatEmote, ChatMessage
+from .models import ChatEmote, ChatMessage, ChatUser
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +84,20 @@ class EmoteFetchWorker(QThread):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            emotes = loop.run_until_complete(self._fetch_all())
+            # Resolve numeric Twitch user ID if needed (for 7TV/BTTV/FFZ APIs)
+            resolved_id = self.channel_id
+            if self.platform == "twitch":
+                numeric_id = loop.run_until_complete(self._resolve_twitch_user_id())
+                if numeric_id:
+                    resolved_id = numeric_id
+
+            emotes = loop.run_until_complete(self._fetch_all(resolved_id))
             self.emotes_fetched.emit(self.channel_key, emotes)
 
             # Fetch Twitch badges (try authenticated API first, fall back to public)
             if self.platform == "twitch":
+                # Use resolved numeric ID for badge API too
+                self._resolved_broadcaster_id = resolved_id
                 badge_map = loop.run_until_complete(self._fetch_twitch_badges())
                 if badge_map:
                     self.badges_fetched.emit(self.channel_key, badge_map)
@@ -95,7 +106,45 @@ class EmoteFetchWorker(QThread):
         finally:
             loop.close()
 
-    async def _fetch_all(self) -> list[ChatEmote]:
+    async def _resolve_twitch_user_id(self) -> str | None:
+        """Resolve a Twitch login name to numeric user ID via Helix API."""
+        import aiohttp
+
+        if not self.oauth_token or not self.client_id:
+            return None
+
+        # If channel_id is already numeric, no need to resolve
+        if self.channel_id.isdigit():
+            return self.channel_id
+
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.oauth_token}",
+                "Client-Id": self.client_id,
+            }
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(
+                    "https://api.twitch.tv/helix/users",
+                    params={"login": self.channel_id},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        users = data.get("data", [])
+                        if users:
+                            user_id = users[0].get("id", "")
+                            if user_id:
+                                logger.debug(
+                                    f"Resolved Twitch login '{self.channel_id}' "
+                                    f"to user ID {user_id}"
+                                )
+                                return user_id
+        except Exception as e:
+            logger.debug(f"Failed to resolve Twitch user ID for {self.channel_id}: {e}")
+
+        return None
+
+    async def _fetch_all(self, channel_id: str) -> list[ChatEmote]:
         """Fetch global + channel emotes from all providers."""
         all_emotes: list[ChatEmote] = []
 
@@ -119,7 +168,7 @@ class EmoteFetchWorker(QThread):
                 logger.debug(f"Failed to fetch global emotes from {name}: {e}")
 
             try:
-                channel_emotes = await provider.get_channel_emotes(self.platform, self.channel_id)
+                channel_emotes = await provider.get_channel_emotes(self.platform, channel_id)
                 all_emotes.extend(channel_emotes)
                 logger.debug(f"Fetched {len(channel_emotes)} channel emotes from {name}")
             except Exception as e:
@@ -167,10 +216,13 @@ class EmoteFetchWorker(QThread):
                                 f"Helix badge API returned {resp.status}, trying public API"
                             )
 
-                    # Channel badges
+                    # Channel badges (use resolved numeric ID)
+                    broadcaster_id = getattr(
+                        self, '_resolved_broadcaster_id', self.channel_id
+                    )
                     async with session.get(
                         "https://api.twitch.tv/helix/chat/badges",
-                        params={"broadcaster_id": self.channel_id},
+                        params={"broadcaster_id": broadcaster_id},
                         timeout=aiohttp.ClientTimeout(total=15),
                     ) as resp:
                         if resp.status == 200:
@@ -248,12 +300,15 @@ class ChatManager(QObject):
     emote_cache_updated = Signal()
     # Emitted when auth state changes (True = authenticated)
     auth_state_changed = Signal(bool)
+    # Emitted on connection errors (channel_key, error_message)
+    chat_error = Signal(str, str)
 
     def __init__(self, settings: Settings, parent: QObject | None = None):
         super().__init__(parent)
         self.settings = settings
         self._workers: dict[str, ChatConnectionWorker] = {}
         self._connections: dict[str, BaseChatConnection] = {}
+        self._livestreams: dict[str, Livestream] = {}
         self._emote_fetch_workers: dict[str, EmoteFetchWorker] = {}
 
         # Emote cache shared across all widgets
@@ -290,20 +345,40 @@ class ChatManager(QObject):
             self.chat_opened.emit(channel_key, livestream)
             return
 
+        self._livestreams[channel_key] = livestream
+        self._start_connection(channel_key, livestream)
+
+        # Start emote fetching for this channel
+        self._fetch_emotes_for_channel(channel_key, livestream)
+
+        self.chat_opened.emit(channel_key, livestream)
+
+    def _start_connection(
+        self, channel_key: str, livestream: Livestream,
+    ) -> None:
+        """Create and start a chat connection for a channel."""
         connection = self._create_connection(livestream.channel.platform)
         if not connection:
-            logger.warning(f"No chat connection available for {livestream.channel.platform}")
+            logger.warning(
+                f"No chat connection for {livestream.channel.platform}"
+            )
             return
 
         # Wire connection signals
         connection.messages_received.connect(
-            lambda msgs, key=channel_key: self._on_messages_received(key, msgs)
+            lambda msgs, key=channel_key: (
+                self._on_messages_received(key, msgs)
+            )
         )
         connection.moderation_event.connect(
-            lambda evt, key=channel_key: self.moderation_received.emit(key, evt)
+            lambda evt, key=channel_key: (
+                self.moderation_received.emit(key, evt)
+            )
         )
         connection.error.connect(
-            lambda msg, key=channel_key: logger.error(f"Chat error for {key}: {msg}")
+            lambda msg, key=channel_key: (
+                self._on_connection_error(key, msg)
+            )
         )
 
         self._connections[channel_key] = connection
@@ -313,15 +388,78 @@ class ChatManager(QObject):
 
         # Start worker thread
         worker = ChatConnectionWorker(
-            connection, livestream.channel.channel_id, parent=self, **kwargs
+            connection, livestream.channel.channel_id,
+            parent=self, **kwargs,
         )
         self._workers[channel_key] = worker
         worker.start()
 
-        # Start emote fetching for this channel
-        self._fetch_emotes_for_channel(channel_key, livestream)
+    def reconnect_twitch(self) -> None:
+        """Reconnect all Twitch chat connections with the current token.
 
-        self.chat_opened.emit(channel_key, livestream)
+        Call this after re-login to pick up new OAuth scopes.
+        """
+        twitch_keys = [
+            key for key, ls in self._livestreams.items()
+            if ls.channel.platform == StreamPlatform.TWITCH
+        ]
+        if not twitch_keys:
+            return
+
+        logger.info(
+            f"Reconnecting {len(twitch_keys)} Twitch chats "
+            "with updated token"
+        )
+
+        for key in twitch_keys:
+            # Stop old worker/connection
+            worker = self._workers.pop(key, None)
+            if worker:
+                worker.stop()
+                worker.wait(3000)
+            self._connections.pop(key, None)
+
+            # Restart with new token
+            livestream = self._livestreams[key]
+            self._start_connection(key, livestream)
+
+        self.auth_state_changed.emit(
+            bool(self.settings.twitch.access_token)
+        )
+
+    def reconnect_kick(self) -> None:
+        """Reconnect all Kick chat connections with the current token.
+
+        Call this after login to enable sending messages.
+        """
+        kick_keys = [
+            key for key, ls in self._livestreams.items()
+            if ls.channel.platform == StreamPlatform.KICK
+        ]
+        if not kick_keys:
+            # No active Kick chats, just emit auth change
+            self.auth_state_changed.emit(
+                bool(self.settings.kick.access_token)
+            )
+            return
+
+        logger.info(
+            f"Reconnecting {len(kick_keys)} Kick chats with updated token"
+        )
+
+        for key in kick_keys:
+            worker = self._workers.pop(key, None)
+            if worker:
+                worker.stop()
+                worker.wait(3000)
+            self._connections.pop(key, None)
+
+            livestream = self._livestreams[key]
+            self._start_connection(key, livestream)
+
+        self.auth_state_changed.emit(
+            bool(self.settings.kick.access_token)
+        )
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
@@ -331,6 +469,7 @@ class ChatManager(QObject):
             worker.wait(3000)
 
         self._connections.pop(channel_key, None)
+        self._livestreams.pop(channel_key, None)
 
         # Clean up emote fetch worker
         fetch_worker = self._emote_fetch_workers.pop(channel_key, None)
@@ -343,12 +482,38 @@ class ChatManager(QObject):
         """Send a message to a channel's chat."""
         connection = self._connections.get(channel_key)
         if not connection or not connection.is_connected:
-            logger.warning(f"Cannot send message: not connected to {channel_key}")
+            logger.warning(
+                f"Cannot send message: not connected to {channel_key}"
+            )
             return
 
         worker = self._workers.get(channel_key)
         if worker and worker._loop:
-            asyncio.run_coroutine_threadsafe(connection.send_message(text), worker._loop)
+            asyncio.run_coroutine_threadsafe(
+                connection.send_message(text), worker._loop
+            )
+
+            # Local echo: Twitch doesn't echo your own messages back.
+            # Kick DOES echo via websocket, so skip local echo for Kick.
+            livestream = self._livestreams.get(channel_key)
+            if livestream and livestream.channel.platform != StreamPlatform.KICK:
+                nick = getattr(connection, '_nick', 'You')
+                local_msg = ChatMessage(
+                    id=str(uuid.uuid4()),
+                    user=ChatUser(
+                        id="self",
+                        name=nick,
+                        display_name=nick,
+                        platform=livestream.channel.platform,
+                        color=None,
+                        badges=[],
+                    ),
+                    text=text,
+                    timestamp=datetime.now(timezone.utc),
+                    platform=livestream.channel.platform,
+                )
+                # Route through _on_messages_received for emote matching
+                self._on_messages_received(channel_key, [local_msg])
 
     def disconnect_all(self) -> None:
         """Disconnect all active chat connections."""
@@ -361,6 +526,11 @@ class ChatManager(QObject):
         conn = self._connections.get(channel_key)
         return conn.is_connected if conn else False
 
+    def _on_connection_error(self, channel_key: str, message: str) -> None:
+        """Handle connection error - log and forward to UI."""
+        logger.error(f"Chat error for {channel_key}: {message}")
+        self.chat_error.emit(channel_key, message)
+
     def _on_messages_received(self, channel_key: str, messages: list) -> None:
         """Handle incoming messages - queue badge/emote downloads, then forward."""
         for msg in messages:
@@ -370,6 +540,9 @@ class ChatManager(QObject):
             for badge in msg.user.badges:
                 badge_key = f"badge:{badge.id}"
                 if self._emote_cache.has(badge_key) or badge_key in self._queued_badge_urls:
+                    # Ensure loaded into memory if only on disk
+                    if badge_key not in self._emote_cache.pixmap_dict:
+                        self._emote_cache.get(badge_key)
                     continue
                 # Mark as seen (will be re-queued when badge map arrives)
                 self._queued_badge_urls.add(badge_key)
@@ -378,7 +551,11 @@ class ChatManager(QObject):
                 if badge_url:
                     self._download_queue.append((badge_key, badge_url))
 
-            # Queue Twitch-native emote downloads
+            # Match third-party emotes (7TV, BTTV, FFZ) in message text
+            if self._emote_map:
+                self._match_third_party_emotes(msg)
+
+            # Queue emote image downloads (native + third-party)
             for start, end, emote in msg.emote_positions:
                 emote_key = f"emote:{emote.provider}:{emote.id}"
                 if not self._emote_cache.has(emote_key) and not self._emote_cache.is_pending(
@@ -387,12 +564,58 @@ class ChatManager(QObject):
                     url = emote.url_template.replace("{size}", "2.0")
                     self._emote_cache.mark_pending(emote_key)
                     self._download_queue.append((emote_key, url))
+                elif emote_key not in self._emote_cache.pixmap_dict:
+                    # Cached on disk but not in memory - load it
+                    self._emote_cache.get(emote_key)
 
         # Start downloading if we have items queued
         if self._download_queue:
             self._start_downloads()
 
         self.messages_received.emit(channel_key, messages)
+
+    def _match_third_party_emotes(self, msg: ChatMessage) -> None:
+        """Scan message text for third-party emote names and add to emote_positions."""
+        text = msg.text
+        if not text:
+            return
+
+        # Build set of character positions already claimed by native emotes
+        claimed: set[int] = set()
+        for start, end, _ in msg.emote_positions:
+            claimed.update(range(start, end))
+
+        # Split text into words and match against emote map
+        new_positions: list[tuple[int, int, ChatEmote]] = []
+        i = 0
+        while i < len(text):
+            # Skip whitespace
+            if text[i] == " ":
+                i += 1
+                continue
+
+            # Find word boundary
+            j = i
+            while j < len(text) and text[j] != " ":
+                j += 1
+
+            # Check if this word position is already claimed
+            if i not in claimed:
+                word = text[i:j]
+                emote = self._emote_map.get(word)
+                if emote:
+                    new_positions.append((i, j, emote))
+
+            i = j
+
+        if new_positions:
+            # Merge with existing positions and sort by start
+            msg.emote_positions = sorted(
+                msg.emote_positions + new_positions, key=lambda x: x[0]
+            )
+            logger.debug(
+                f"Matched {len(new_positions)} 3rd-party emotes in message"
+            )
 
     def _fetch_emotes_for_channel(self, channel_key: str, livestream: Livestream) -> None:
         """Kick off async emote/badge fetching for a channel."""
@@ -421,16 +644,22 @@ class ChatManager(QObject):
                 continue
             self._emote_map[emote.name] = emote
 
-            # Queue image download
+            # Queue image download (or load from disk cache)
             emote_key = f"emote:{emote.provider}:{emote.id}"
             if not self._emote_cache.has(emote_key) and not self._emote_cache.is_pending(emote_key):
                 self._emote_cache.mark_pending(emote_key)
                 self._download_queue.append((emote_key, emote.url_template))
+            elif emote_key not in self._emote_cache.pixmap_dict:
+                # Cached on disk but not in memory - load it now
+                self._emote_cache.get(emote_key)
 
         logger.info(
             f"Loaded {len(emotes)} third-party emotes for {channel_key}, "
             f"total emote map: {len(self._emote_map)}"
         )
+
+        # Notify widgets immediately so autocomplete has the emote map
+        self.emote_cache_updated.emit()
 
         # Start downloading
         if self._download_queue:
@@ -445,6 +674,9 @@ class ChatManager(QObject):
         requeue_count = 0
         for badge_key in list(self._queued_badge_urls):
             if self._emote_cache.has(badge_key):
+                # Ensure loaded into memory if only on disk
+                if badge_key not in self._emote_cache.pixmap_dict:
+                    self._emote_cache.get(badge_key)
                 continue
             # Extract badge_id from "badge:name/version"
             badge_id = badge_key.removeprefix("badge:")
@@ -511,7 +743,10 @@ class ChatManager(QObject):
         elif platform == StreamPlatform.KICK:
             from .connections.kick import KickChatConnection
 
-            return KickChatConnection(parent=self)
+            return KickChatConnection(
+                kick_settings=self.settings.kick,
+                parent=self,
+            )
         elif platform == StreamPlatform.YOUTUBE:
             from .connections.youtube import YouTubeChatConnection
 

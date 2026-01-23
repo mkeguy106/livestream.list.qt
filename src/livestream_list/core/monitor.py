@@ -424,7 +424,9 @@ class StreamMonitor:
                 # Restore last_live_time if saved
                 if "last_live_time" in ch_data:
                     try:
-                        livestream.last_live_time = datetime.fromisoformat(ch_data["last_live_time"])
+                        livestream.last_live_time = datetime.fromisoformat(
+                            ch_data["last_live_time"]
+                        )
                     except ValueError:
                         pass
                 self._livestreams[channel.unique_key] = livestream

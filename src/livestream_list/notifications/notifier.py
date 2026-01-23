@@ -216,7 +216,10 @@ class Notifier:
 
         # Use notify-send (via flatpak-spawn if in sandbox)
         if is_flatpak:
-            cmd = ["flatpak-spawn", "--host", "notify-send", title, body, "--app-name=Livestream List (Qt)"]
+            cmd = [
+                "flatpak-spawn", "--host", "notify-send",
+                title, body, "--app-name=Livestream List (Qt)",
+            ]
         elif shutil.which("notify-send"):
             cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
         else:

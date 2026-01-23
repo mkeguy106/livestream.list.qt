@@ -116,6 +116,24 @@ The app runs both natively and in Flatpak. Key patterns:
 - `flatpak-spawn --host` wraps commands to run on host (browser launch, streamlink)
 - Flatpak builds are the primary distribution method via GitHub releases
 
+### Built-in Chat System
+
+The app has a built-in chat client (alternative to opening browser popout chat).
+
+**Architecture**:
+- `ChatManager` (QObject) orchestrates connections, emote loading, and message routing via Qt Signals
+- Each platform has a `BaseChatConnection` subclass running in a `ChatConnectionWorker` (QThread with its own event loop)
+- `ChatWindow` (QMainWindow) holds a `QTabWidget` of `ChatWidget` instances (one per channel)
+- `ChatMessageDelegate` (QStyledItemDelegate) renders messages with badges, emotes, colors
+
+**Twitch chat**: IRC over WebSocket (`wss://irc-ws.chat.twitch.tv`). Uses OAuth implicit flow for auth. Handles PRIVMSG, USERNOTICE (subs/raids), and CLEARCHAT/CLEARMSG moderation.
+
+**Kick chat**: Pusher WebSocket for reading (`wss://ws-us2.pusher.com`). Uses OAuth 2.1 + PKCE for auth. Sends messages via official API (`POST https://api.kick.com/public/v1/chat`). Kick echoes your own messages back via websocket (no local echo needed, unlike Twitch).
+
+**Kick OAuth**: App credentials hardcoded (`DEFAULT_KICK_CLIENT_ID`/`SECRET` in `chat/auth/kick_auth.py`). Requires `chat:write` and `user:read` scopes enabled in Kick Developer Portal. Uses port 65432 for redirect (`http://localhost:65432/redirect`). Auto-refreshes expired tokens on 401.
+
+**Emotes**: Supports Twitch, Kick native, 7TV, BTTV, FFZ. Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
+
 ### Key Files
 
 | File | Purpose |
@@ -123,6 +141,16 @@ The app runs both natively and in Flatpak. Key patterns:
 | `src/livestream_list/gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
 | `src/livestream_list/gui/main_window.py` | QMainWindow, StreamRow widget, all dialogs |
 | `src/livestream_list/gui/tray.py` | QSystemTrayIcon for system tray |
+| `src/livestream_list/gui/chat/chat_window.py` | Chat QMainWindow with tabbed channels, popout support |
+| `src/livestream_list/gui/chat/chat_widget.py` | Single-channel chat widget (message list + input) |
+| `src/livestream_list/gui/chat/message_delegate.py` | Custom delegate for rendering chat messages |
+| `src/livestream_list/chat/manager.py` | ChatManager - connection lifecycle, emote loading, message routing |
+| `src/livestream_list/chat/connections/twitch.py` | Twitch IRC WebSocket connection |
+| `src/livestream_list/chat/connections/kick.py` | Kick Pusher WebSocket + public API message sending |
+| `src/livestream_list/chat/auth/kick_auth.py` | Kick OAuth 2.1 + PKCE flow |
+| `src/livestream_list/chat/models.py` | ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses |
+| `src/livestream_list/chat/emotes/cache.py` | Shared emote/badge pixmap cache |
+| `src/livestream_list/api/oauth_server.py` | Local HTTP server for OAuth callbacks (both implicit + code flows) |
 | `src/livestream_list/core/monitor.py` | StreamMonitor - channel tracking, refresh logic |
 | `src/livestream_list/core/settings.py` | Settings persistence (JSON) |
 | `src/livestream_list/api/twitch.py` | Twitch Helix + GraphQL client |
@@ -160,6 +188,10 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | offset-naive/offset-aware datetime mismatch | Use `datetime.now(timezone.utc)` |
 | Kick wrong duration | Use `start_time` field, add UTC timezone to parsed datetime |
 | OAuth login UI not updating | Use Qt Signal instead of QTimer.singleShot from background thread |
+| Kick chat send 401 | Token expired; auto-refresh handles it. If persists, re-login (check `chat:write` scope in Dev Portal) |
+| auth_state_changed affects wrong platform | Handler must check each widget's platform, not apply blindly |
+| Kick shows duplicate messages on send | Don't use local echo for Kick (it echoes via websocket unlike Twitch) |
+| `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 
 ## CI/CD - Self-Hosted Runner
 

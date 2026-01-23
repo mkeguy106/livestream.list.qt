@@ -24,7 +24,7 @@ DEFAULT_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
 GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
 # OAuth settings
-OAUTH_SCOPES = "user:read:follows"
+OAUTH_SCOPES = "user:read:follows chat:read chat:edit"
 
 
 class TwitchApiClient(BaseApiClient):
@@ -517,7 +517,10 @@ class TwitchApiClient(BaseApiClient):
                                 )
                             except ValueError:
                                 pass
-                        result.append(Livestream(channel=channel, live=False, last_live_time=last_live_time))
+                        result.append(Livestream(
+                            channel=channel, live=False,
+                            last_live_time=last_live_time,
+                        ))
                 else:
                     result.append(Livestream(channel=channel, live=False))
 

@@ -201,8 +201,9 @@ class EmoteCompleter(QWidget):
 
     def _position_popup(self) -> None:
         """Position the popup above the input widget."""
-        input_rect = self._input.geometry()
-        global_pos = self._input.mapToGlobal(input_rect.topLeft())
+        from PySide6.QtCore import QPoint
+
+        global_pos = self._input.mapToGlobal(QPoint(0, 0))
         # Show above the input
         height = min(self._list.count() * 28 + 8, 300)
         self.setFixedHeight(height)

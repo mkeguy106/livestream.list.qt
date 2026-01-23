@@ -68,7 +68,9 @@ class BaseApiClient(ABC):
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_delay: float = DEFAULT_BASE_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
-        retryable_exceptions: tuple[type[Exception], ...] = (aiohttp.ClientError, asyncio.TimeoutError),
+        retryable_exceptions: tuple[type[Exception], ...] = (
+            aiohttp.ClientError, asyncio.TimeoutError,
+        ),
     ) -> T:
         """Execute an operation with exponential backoff retry.
 

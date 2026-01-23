@@ -342,6 +342,10 @@ class Application(QApplication):
         if not self._chat_window:
             from .chat.chat_window import ChatWindow
             self._chat_window = ChatWindow(self.chat_manager, self.settings)
+            if self.main_window:
+                self._chat_window.chat_settings_requested.connect(
+                    self.main_window._show_chat_preferences
+                )
 
         self._chat_window.open_chat(livestream)
 
@@ -434,7 +438,10 @@ def run() -> int:
             on_open=restore_window,
             on_quit=main_window._quit_app,
             get_notifications_enabled=lambda: app.settings.notifications.enabled,
-            set_notifications_enabled=lambda enabled: setattr(app.settings.notifications, 'enabled', enabled) or app.save_settings(),
+            set_notifications_enabled=lambda enabled: (
+                setattr(app.settings.notifications, 'enabled', enabled)
+                or app.save_settings()
+            ),
         )
         tray.show()
         app.tray_icon = tray

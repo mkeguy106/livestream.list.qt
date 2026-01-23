@@ -303,7 +303,11 @@ class ChatWidget(QWidget):
             self._input.setPlaceholderText("Send a message...")
             self._auth_banner.hide()
         else:
-            self._input.setPlaceholderText("Log in to Twitch to chat")
+            platform_name = self.livestream.channel.platform.value.title()
+            self._input.setPlaceholderText(f"Log in to {platform_name} to chat")
+            self._auth_banner.setText(
+                f"Not logged in \u2014 {platform_name} chat is read-only"
+            )
             self._auth_banner.show()
 
     def show_error(self, message: str) -> None:
@@ -454,8 +458,8 @@ class ChatWidget(QWidget):
                         )
                         if emote:
                             providers = {
-                                "twitch": "Twitch", "7tv": "7TV",
-                                "bttv": "BTTV", "ffz": "FFZ",
+                                "twitch": "Twitch", "kick": "Kick",
+                                "7tv": "7TV", "bttv": "BTTV", "ffz": "FFZ",
                             }
                             provider = providers.get(emote.provider, emote.provider)
                             QToolTip.showText(

@@ -74,13 +74,12 @@ class YouTubeSettings:
 
 @dataclass
 class KickSettings:
-    """Kick API settings.
+    """Kick API settings for OAuth authentication."""
 
-    Note: Kick's API doesn't support importing follows,
-    so no authentication tokens are needed.
-    """
-
-    pass
+    client_id: str = ""
+    client_secret: str = ""
+    access_token: str = ""
+    refresh_token: str = ""
 
 
 @dataclass
@@ -260,8 +259,15 @@ class Settings:
         if "youtube" in data:
             settings.youtube = YouTubeSettings(api_key=data["youtube"].get("api_key", ""))
 
-        # Kick - no settings needed currently
-        settings.kick = KickSettings()
+        # Kick
+        if "kick" in data:
+            k = data["kick"]
+            settings.kick = KickSettings(
+                client_id=k.get("client_id", ""),
+                client_secret=k.get("client_secret", ""),
+                access_token=k.get("access_token", ""),
+                refresh_token=k.get("refresh_token", ""),
+            )
 
         # Streamlink
         if "streamlink" in data:
@@ -383,7 +389,12 @@ class Settings:
             "youtube": {
                 "api_key": self.youtube.api_key,
             },
-            "kick": {},
+            "kick": {
+                "client_id": self.kick.client_id,
+                "client_secret": self.kick.client_secret,
+                "access_token": self.kick.access_token,
+                "refresh_token": self.kick.refresh_token,
+            },
             "streamlink": {
                 "enabled": self.streamlink.enabled,
                 "path": self.streamlink.path,

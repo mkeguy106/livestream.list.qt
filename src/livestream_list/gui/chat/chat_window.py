@@ -50,6 +50,8 @@ class ChatWindow(QMainWindow):
 
     # Emitted when window is closed by user (hides, doesn't destroy)
     window_hidden = Signal()
+    # Emitted when a widget's gear icon is clicked
+    chat_settings_requested = Signal()
 
     def __init__(
         self,
@@ -138,6 +140,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.chat_closed.connect(self._on_chat_closed)
         self.chat_manager.emote_cache_updated.connect(self._on_emote_cache_updated)
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
+        self.chat_manager.chat_error.connect(self._on_chat_error)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -174,8 +177,11 @@ class ChatWindow(QMainWindow):
 
         self._livestreams[channel_key] = livestream
 
-        # Create chat widget
-        authenticated = bool(self.settings.twitch.access_token)
+        # Create chat widget - check auth based on platform
+        if livestream.channel.platform == StreamPlatform.KICK:
+            authenticated = bool(self.settings.kick.access_token)
+        else:
+            authenticated = bool(self.settings.twitch.access_token)
         widget = ChatWidget(
             channel_key=channel_key,
             livestream=livestream,
@@ -185,6 +191,7 @@ class ChatWindow(QMainWindow):
         )
         widget.message_sent.connect(self._on_message_sent)
         widget.popout_requested.connect(self._on_popout_requested)
+        widget.settings_clicked.connect(self.chat_settings_requested.emit)
 
         # Set shared emote cache and emote map on the widget
         widget.set_emote_cache(self.chat_manager.emote_cache.pixmap_dict)
@@ -266,10 +273,21 @@ class ChatWindow(QMainWindow):
         popout_action.triggered.connect(lambda: self._on_popout_requested(widget.channel_key))
         menu.exec(tab_bar.mapToGlobal(pos))
 
-    def _on_auth_state_changed(self, authenticated: bool) -> None:
-        """Update all widgets when auth state changes."""
+    def _on_auth_state_changed(self, _authenticated: bool) -> None:
+        """Update all widgets when auth state changes (platform-aware)."""
         for widget in self._widgets.values():
-            widget.set_authenticated(authenticated)
+            platform = widget.livestream.channel.platform
+            if platform == StreamPlatform.KICK:
+                auth = bool(self.settings.kick.access_token)
+            else:
+                auth = bool(self.settings.twitch.access_token)
+            widget.set_authenticated(auth)
+
+    def _on_chat_error(self, channel_key: str, message: str) -> None:
+        """Show a chat error in the relevant widget."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.show_error(message)
 
     def _on_popout_requested(self, channel_key: str) -> None:
         """Pop out a chat widget into its own window."""
