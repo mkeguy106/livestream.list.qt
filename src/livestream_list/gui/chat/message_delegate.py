@@ -459,6 +459,55 @@ class ChatMessageDelegate(QStyledItemDelegate):
             QToolTip.hideText()
         return True
 
+    def _get_username_rect(
+        self, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> QRect:
+        """Get the bounding rect of the username in a message item."""
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        x = rect.x()
+        y = rect.y()
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+
+        badge_size = self._get_badge_size(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Skip timestamp
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+
+        # Skip system text lines
+        if message.is_system and message.system_text:
+            if message.text:
+                sys_font = QFont(font)
+                sys_font.setItalic(True)
+                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+                remaining = rect.width() - (x - rect.x())
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                return QRect()
+
+        # Skip badges
+        if self.settings.show_badges and message.user.badges:
+            for badge in message.user.badges:
+                if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+                    continue
+                x += badge_size + BADGE_SPACING
+
+        # Username rect
+        bold_font = QFont(font)
+        bold_font.setBold(True)
+        name_text = message.user.display_name
+        name_width = QFontMetrics(bold_font).horizontalAdvance(name_text)
+        return QRect(int(x), int(y), int(name_width), line_height)
+
     def _get_emote_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
         """Find which emote (if any) is at the given position."""
         padding_v = self.settings.line_spacing

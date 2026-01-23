@@ -2,10 +2,11 @@
 
 import logging
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -455,8 +456,26 @@ class ChatWidget(QWidget):
         self._hype_banner.hide()
 
     def eventFilter(self, obj, event):  # noqa: N802
-        """Handle tooltip events on the list view viewport for emote/badge tooltips."""
-        if obj is self._list_view.viewport() and isinstance(event, QHelpEvent):
+        """Handle tooltip and click events on the list view viewport."""
+        if obj is not self._list_view.viewport():
+            return super().eventFilter(obj, event)
+
+        # Username click → show user's chat history
+        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+            if event.button() == Qt.MouseButton.LeftButton:
+                index = self._list_view.indexAt(event.pos())
+                if index.isValid():
+                    message = index.data(MessageRole)
+                    if message and isinstance(message, ChatMessage):
+                        option = QStyleOptionViewItem()
+                        self._list_view.initViewItemOption(option)
+                        option.rect = self._list_view.visualRect(index)
+                        name_rect = self._delegate._get_username_rect(option, message)
+                        if name_rect.isValid() and name_rect.contains(event.pos()):
+                            self._show_user_history(message.user)
+                            return True
+
+        if isinstance(event, QHelpEvent):
             index = self._list_view.indexAt(event.pos())
             if index.isValid():
                 message = index.data(MessageRole)
@@ -495,3 +514,96 @@ class ChatWidget(QWidget):
             QToolTip.hideText()
             return True
         return super().eventFilter(obj, event)
+
+    def _show_user_history(self, user) -> None:
+        """Show a popup with all messages from this user in the current chat."""
+        from ...chat.models import ChatUser
+
+        if not isinstance(user, ChatUser):
+            return
+
+        # Collect all messages from this user
+        user_messages = [
+            msg for msg in self._model._messages
+            if msg.user.id == user.id and msg.user.platform == user.platform
+        ]
+
+        if not user_messages:
+            return
+
+        dialog = UserHistoryDialog(
+            user=user,
+            messages=user_messages,
+            settings=self.settings,
+            emote_cache=self._delegate._emote_cache,
+            parent=self,
+        )
+        dialog.exec()
+
+
+class UserHistoryDialog(QDialog):
+    """Dialog showing all messages from a specific user in the current chat session."""
+
+    def __init__(
+        self,
+        user,
+        messages: list[ChatMessage],
+        settings: BuiltinChatSettings,
+        emote_cache: dict,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle(f"Chat History - {user.display_name}")
+        self.setMinimumSize(400, 300)
+        self.resize(450, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header
+        header = QLabel(f"  {user.display_name} — {len(messages)} messages")
+        header.setStyleSheet("""
+            QLabel {
+                background-color: #16213e;
+                color: #eee;
+                padding: 8px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+        layout.addWidget(header)
+
+        # Message list using the same delegate
+        model = ChatMessageModel(max_messages=len(messages), parent=self)
+        delegate = ChatMessageDelegate(settings, parent=self)
+        delegate.set_emote_cache(emote_cache)
+
+        list_view = QListView()
+        list_view.setModel(model)
+        list_view.setItemDelegate(delegate)
+        list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        list_view.setWordWrap(True)
+        list_view.setUniformItemSizes(False)
+        list_view.setSpacing(0)
+        list_view.setStyleSheet("""
+            QListView {
+                background-color: #1a1a2e;
+                border: none;
+                padding: 4px;
+            }
+        """)
+        layout.addWidget(list_view)
+
+        # Populate
+        model.add_messages(messages)
+
+        # Scroll to bottom (most recent)
+        list_view.scrollToBottom()
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0f0f1a;
+            }
+        """)
