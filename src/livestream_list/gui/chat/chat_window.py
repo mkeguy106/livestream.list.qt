@@ -138,6 +138,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.moderation_received.connect(self._on_moderation_received)
         self.chat_manager.chat_opened.connect(self._on_chat_opened)
         self.chat_manager.chat_closed.connect(self._on_chat_closed)
+        self.chat_manager.chat_connected.connect(self._on_chat_connected)
         self.chat_manager.emote_cache_updated.connect(self._on_emote_cache_updated)
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
         self.chat_manager.chat_error.connect(self._on_chat_error)
@@ -222,6 +223,12 @@ class ChatWindow(QMainWindow):
         popout = self._popout_windows.pop(channel_key, None)
         if popout:
             popout.close()
+
+    def _on_chat_connected(self, channel_key: str) -> None:
+        """Handle a chat connection being established."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_connected()
 
     def _on_messages_received(self, channel_key: str, messages: list) -> None:
         """Route messages to the correct chat widget."""

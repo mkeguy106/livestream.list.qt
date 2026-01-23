@@ -109,6 +109,25 @@ class ChatWidget(QWidget):
 
         layout.addWidget(self._list_view)
 
+        # Connecting indicator (shown until connection is established)
+        self._connecting_label = QLabel("Connecting to chat...")
+        self._connecting_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._connecting_label.setStyleSheet("""
+            QLabel {
+                background-color: #1a1a2e;
+                color: #888;
+                font-size: 13px;
+            }
+        """)
+        self._connecting_label.setSizePolicy(
+            self._connecting_label.sizePolicy().horizontalPolicy(),
+            self._list_view.sizePolicy().verticalPolicy(),
+        )
+        layout.addWidget(self._connecting_label)
+        self._list_view.hide()
+
         # Hype chat pinned banner (hidden by default)
         self._hype_banner = QWidget()
         self._hype_banner.setStyleSheet("""
@@ -293,6 +312,11 @@ class ChatWidget(QWidget):
     def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to the message list."""
         self._model.apply_moderation(event)
+
+    def set_connected(self) -> None:
+        """Hide the connecting indicator and show the message list."""
+        self._connecting_label.hide()
+        self._list_view.show()
 
     def set_authenticated(self, state: bool) -> None:
         """Enable or disable the input based on authentication state."""

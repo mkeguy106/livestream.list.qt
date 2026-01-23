@@ -300,6 +300,8 @@ class ChatManager(QObject):
     emote_cache_updated = Signal()
     # Emitted when auth state changes (True = authenticated)
     auth_state_changed = Signal(bool)
+    # Emitted when a connection is established (channel_key)
+    chat_connected = Signal(str)
     # Emitted on connection errors (channel_key, error_message)
     chat_error = Signal(str, str)
 
@@ -379,6 +381,9 @@ class ChatManager(QObject):
             lambda msg, key=channel_key: (
                 self._on_connection_error(key, msg)
             )
+        )
+        connection.connected.connect(
+            lambda key=channel_key: self.chat_connected.emit(key)
         )
 
         self._connections[channel_key] = connection
