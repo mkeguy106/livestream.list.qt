@@ -2,11 +2,16 @@
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
     QMainWindow,
-    QTabWidget,
+    QPushButton,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -30,7 +35,6 @@ def _create_dot_icon(color: QColor, size: int = 12) -> QIcon:
     """Create a small colored dot icon for tab indicators."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
-    from PySide6.QtGui import QPainter
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -41,10 +45,304 @@ def _create_dot_icon(color: QColor, size: int = 12) -> QIcon:
     return QIcon(pixmap)
 
 
+class _TabButton(QWidget):
+    """Individual tab button with icon, label, and close button."""
+
+    clicked = Signal()
+    close_clicked = Signal()
+
+    def __init__(
+        self, icon: QIcon | None, text: str, closable: bool = True, parent=None
+    ):
+        super().__init__(parent)
+        self._active = False
+        self._text = text
+        self._icon = icon
+        self._active_color = "#1a3a6b"
+        self._inactive_color = "#16213e"
+        self._hover = False
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 4, 4)
+        layout.setSpacing(4)
+
+        # Icon label
+        if icon:
+            icon_label = QLabel()
+            icon_label.setPixmap(icon.pixmap(QSize(12, 12)))
+            icon_label.setFixedSize(14, 14)
+            icon_label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            icon_label.setStyleSheet("background: transparent;")
+            layout.addWidget(icon_label)
+
+        # Text label
+        self._label = QLabel(text)
+        self._label.setStyleSheet("color: #ccc; background: transparent;")
+        layout.addWidget(self._label)
+
+        # Close button
+        if closable:
+            close_btn = QPushButton("\u00d7")
+            close_btn.setFixedSize(18, 18)
+            close_btn.setStyleSheet("""
+                QPushButton {
+                    color: #888;
+                    background: transparent;
+                    border: none;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 0;
+                }
+                QPushButton:hover {
+                    color: white;
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border-radius: 9px;
+                }
+            """)
+            close_btn.clicked.connect(self.close_clicked.emit)
+            layout.addWidget(close_btn)
+
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._update_style()
+
+    def set_colors(self, active_color: str, inactive_color: str) -> None:
+        """Update tab colors."""
+        self._active_color = active_color
+        self._inactive_color = inactive_color
+        self._update_style()
+
+    def set_active(self, active: bool) -> None:
+        """Set whether this tab is the active/selected one."""
+        self._active = active
+        self._update_style()
+
+    def _update_style(self) -> None:
+        if self._active:
+            bg = self._active_color
+            text_color = "white"
+        else:
+            bg = self._inactive_color
+            text_color = "#ccc"
+        self.setStyleSheet(f"""
+            _TabButton {{
+                background-color: {bg};
+                border: none;
+                border-radius: 0px;
+            }}
+        """)
+        self._label.setStyleSheet(f"color: {text_color}; background: transparent;")
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        if not self._active:
+            self.setStyleSheet("""
+                _TabButton {
+                    background-color: #1f2b4d;
+                    border: none;
+                }
+            """)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self._update_style()
+        super().leaveEvent(event)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Enable stylesheet backgrounds on custom QWidget subclass."""
+        from PySide6.QtWidgets import QStyle, QStyleOption
+
+        opt = QStyleOption()
+        opt.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class _FlowTabBar(QWidget):
+    """Container that positions tab buttons in a wrapping flow layout."""
+
+    tab_clicked = Signal(int)
+    tab_close_requested = Signal(int)
+    context_menu_requested = Signal(int, object)  # index, QPoint(global)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tabs: list[_TabButton] = []
+        self._active_color = "#1a3a6b"
+        self._inactive_color = "#16213e"
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setMinimumHeight(30)
+        self.setStyleSheet("background-color: #0e1525;")
+
+    def add_tab(self, icon: QIcon | None, text: str) -> int:
+        """Add a new tab button, return its index."""
+        btn = _TabButton(icon, text, closable=True, parent=self)
+        btn.set_colors(self._active_color, self._inactive_color)
+        idx = len(self._tabs)
+        btn.clicked.connect(lambda i=idx: self.tab_clicked.emit(i))
+        btn.close_clicked.connect(lambda i=idx: self.tab_close_requested.emit(i))
+        self._tabs.append(btn)
+        btn.show()
+        self._relayout()
+        return idx
+
+    def remove_tab(self, index: int) -> None:
+        """Remove a tab button at index."""
+        if 0 <= index < len(self._tabs):
+            btn = self._tabs.pop(index)
+            btn.deleteLater()
+            # Reconnect signals with corrected indices
+            for i, tab in enumerate(self._tabs):
+                tab.clicked.disconnect()
+                tab.close_clicked.disconnect()
+                tab.clicked.connect(lambda idx=i: self.tab_clicked.emit(idx))
+                tab.close_clicked.connect(lambda idx=i: self.tab_close_requested.emit(idx))
+            self._relayout()
+
+    def set_current(self, index: int) -> None:
+        """Set which tab is visually active."""
+        for i, tab in enumerate(self._tabs):
+            tab.set_active(i == index)
+
+    def set_colors(self, active_color: str, inactive_color: str) -> None:
+        """Update colors on all tab buttons and store for new tabs."""
+        self._active_color = active_color
+        self._inactive_color = inactive_color
+        for tab in self._tabs:
+            tab.set_colors(active_color, inactive_color)
+
+    def count(self) -> int:
+        return len(self._tabs)
+
+    def tab_at(self, pos) -> int:
+        """Find which tab index is at a local position, or -1."""
+        for i, tab in enumerate(self._tabs):
+            if tab.geometry().contains(pos):
+                return i
+        return -1
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _relayout(self) -> None:
+        """Position tab buttons in a wrapping flow layout."""
+        if not self._tabs:
+            self.setFixedHeight(30)
+            return
+
+        x = 2
+        y = 2
+        row_height = 0
+        available_width = self.width() - 4
+
+        for tab in self._tabs:
+            tab_size = tab.sizeHint()
+            w = tab_size.width()
+            h = tab_size.height()
+
+            if x + w > available_width and x > 2:
+                # Wrap to next row
+                x = 2
+                y += row_height + 2
+                row_height = 0
+
+            tab.move(x, y)
+            tab.resize(w, h)
+            x += w + 2
+            row_height = max(row_height, h)
+
+        total_height = y + row_height + 4
+        self.setFixedHeight(max(30, total_height))
+
+    def _on_context_menu(self, pos) -> None:
+        index = self.tab_at(pos)
+        if index >= 0:
+            self.context_menu_requested.emit(index, self.mapToGlobal(pos))
+
+
+class FlowTabWidget(QWidget):
+    """Tab widget with wrapping multi-row tab bar."""
+
+    tabCloseRequested = Signal(int)  # noqa: N815
+    currentChanged = Signal(int)  # noqa: N815
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_index = -1
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._tab_bar = _FlowTabBar(self)
+        self._tab_bar.tab_clicked.connect(self.setCurrentIndex)
+        self._tab_bar.tab_close_requested.connect(self.tabCloseRequested.emit)
+        layout.addWidget(self._tab_bar)
+
+        self._stack = QStackedWidget(self)
+        self._stack.setStyleSheet("background-color: #1a1a2e;")
+        layout.addWidget(self._stack)
+
+    def tabBar(self) -> _FlowTabBar:  # noqa: N802
+        """Return the tab bar for context menu support."""
+        return self._tab_bar
+
+    def addTab(self, widget: QWidget, icon: QIcon, label: str) -> int:  # noqa: N802
+        """Add a tab with icon and label, return the index."""
+        stack_idx = self._stack.addWidget(widget)
+        self._tab_bar.add_tab(icon, label)
+        self.setCurrentIndex(stack_idx)
+        return stack_idx
+
+    def removeTab(self, index: int) -> None:  # noqa: N802
+        """Remove tab at index."""
+        if 0 <= index < self._stack.count():
+            widget = self._stack.widget(index)
+            self._stack.removeWidget(widget)
+            self._tab_bar.remove_tab(index)
+            # Update current index
+            if self._stack.count() == 0:
+                self._current_index = -1
+            elif index <= self._current_index:
+                new_idx = max(0, self._current_index - 1)
+                self.setCurrentIndex(new_idx)
+
+    def indexOf(self, widget: QWidget) -> int:  # noqa: N802
+        """Return index of widget, or -1."""
+        return self._stack.indexOf(widget)
+
+    def widget(self, index: int) -> QWidget | None:
+        """Return widget at index."""
+        return self._stack.widget(index)
+
+    def count(self) -> int:
+        """Return number of tabs."""
+        return self._stack.count()
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802
+        """Set the active tab."""
+        if 0 <= index < self._stack.count():
+            self._current_index = index
+            self._stack.setCurrentIndex(index)
+            self._tab_bar.set_current(index)
+            self.currentChanged.emit(index)
+
+    def setTabColors(self, active_color: str, inactive_color: str) -> None:  # noqa: N802
+        """Update tab button colors."""
+        self._tab_bar.set_colors(active_color, inactive_color)
+
+
 class ChatWindow(QMainWindow):
     """Main chat window with tabbed channels.
 
-    Manages multiple ChatWidgets in a QTabWidget, handles opening/closing
+    Manages multiple ChatWidgets in a FlowTabWidget, handles opening/closing
     chat tabs, and coordinates with the ChatManager.
     """
 
@@ -80,21 +378,19 @@ class ChatWindow(QMainWindow):
         if ws.x is not None and ws.y is not None:
             self.move(ws.x, ws.y)
 
-        # Tab widget
-        self._tab_widget = QTabWidget()
-        self._tab_widget.setTabsClosable(True)
-        self._tab_widget.setMovable(True)
-        self._tab_widget.setDocumentMode(True)
+        # Flow tab widget (wraps tabs to multiple rows)
+        self._tab_widget = FlowTabWidget()
         self._tab_widget.tabCloseRequested.connect(self._on_tab_close)
-
-        self._tab_widget.setStyleSheet(self._build_tab_stylesheet())
+        self._tab_widget.setTabColors(
+            self.settings.chat.builtin.tab_active_color,
+            self.settings.chat.builtin.tab_inactive_color,
+        )
 
         self.setCentralWidget(self._tab_widget)
 
         # Tab bar context menu for pop-out
         tab_bar = self._tab_widget.tabBar()
-        tab_bar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        tab_bar.customContextMenuRequested.connect(self._on_tab_context_menu)
+        tab_bar.context_menu_requested.connect(self._on_tab_context_menu)
 
         # Window styling
         self.setStyleSheet("""
@@ -103,34 +399,12 @@ class ChatWindow(QMainWindow):
             }
         """)
 
-    def _build_tab_stylesheet(self) -> str:
-        """Build the tab stylesheet using current color settings."""
-        active_color = self.settings.chat.builtin.tab_active_color
-        inactive_color = self.settings.chat.builtin.tab_inactive_color
-        return f"""
-            QTabWidget::pane {{
-                border: none;
-                background-color: #1a1a2e;
-            }}
-            QTabBar::tab {{
-                background-color: {inactive_color};
-                color: #ccc;
-                padding: 6px 12px;
-                border: none;
-                margin-right: 1px;
-            }}
-            QTabBar::tab:selected {{
-                background-color: {active_color};
-                color: white;
-            }}
-            QTabBar::tab:hover {{
-                background-color: #1f2b4d;
-            }}
-        """
-
     def update_tab_style(self) -> None:
-        """Refresh tab stylesheet from current settings (call after prefs change)."""
-        self._tab_widget.setStyleSheet(self._build_tab_stylesheet())
+        """Refresh tab colors from current settings (call after prefs change)."""
+        self._tab_widget.setTabColors(
+            self.settings.chat.builtin.tab_active_color,
+            self.settings.chat.builtin.tab_inactive_color,
+        )
 
     def _connect_signals(self) -> None:
         """Connect ChatManager signals."""
@@ -224,6 +498,12 @@ class ChatWindow(QMainWindow):
         if popout:
             popout.close()
 
+        # Hide window when no tabs remain
+        if self._tab_widget.count() == 0 and not self._popout_windows:
+            self.save_window_state()
+            self.hide()
+            self.window_hidden.emit()
+
     def _on_chat_connected(self, channel_key: str) -> None:
         """Handle a chat connection being established."""
         widget = self._widgets.get(channel_key)
@@ -262,14 +542,9 @@ class ChatWindow(QMainWindow):
         if isinstance(widget, ChatWidget):
             self.close_chat(widget.channel_key)
 
-    def _on_tab_context_menu(self, pos) -> None:
+    def _on_tab_context_menu(self, index: int, global_pos) -> None:
         """Show context menu on tab bar right-click."""
         from PySide6.QtWidgets import QMenu
-
-        tab_bar = self._tab_widget.tabBar()
-        index = tab_bar.tabAt(pos)
-        if index < 0:
-            return
 
         widget = self._tab_widget.widget(index)
         if not isinstance(widget, ChatWidget):
@@ -278,7 +553,7 @@ class ChatWindow(QMainWindow):
         menu = QMenu(self)
         popout_action = menu.addAction("Pop Out")
         popout_action.triggered.connect(lambda: self._on_popout_requested(widget.channel_key))
-        menu.exec(tab_bar.mapToGlobal(pos))
+        menu.exec(global_pos)
 
     def _on_auth_state_changed(self, _authenticated: bool) -> None:
         """Update all widgets when auth state changes (platform-aware)."""
