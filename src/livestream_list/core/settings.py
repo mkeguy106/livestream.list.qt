@@ -95,14 +95,43 @@ class WindowSettings:
 
 
 @dataclass
+class ChatWindowSettings:
+    """Chat window position/size persistence."""
+
+    width: int = 400
+    height: int = 600
+    x: int | None = None
+    y: int | None = None
+
+
+@dataclass
+class BuiltinChatSettings:
+    """Settings for the built-in chat client."""
+
+    font_size: int = 13
+    show_timestamps: bool = False
+    show_badges: bool = True
+    show_mod_badges: bool = True
+    show_emotes: bool = True
+    line_spacing: int = 4
+    max_messages: int = 5000
+    emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
+    show_alternating_rows: bool = True
+    blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
+    window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
+
+
+@dataclass
 class ChatSettings:
     """Chat-related settings."""
 
     enabled: bool = True
+    mode: str = "browser"  # "browser" or "builtin"
     browser: str = "default"  # default, chrome, chromium, edge, firefox
     url_type: int = 0  # 0=Popout, 1=Embedded, 2=Default (legacy)
     auto_open: bool = False  # Auto-open chat when launching stream
     new_window: bool = True  # Open chat in new window instead of tab
+    builtin: BuiltinChatSettings = field(default_factory=BuiltinChatSettings)
 
 
 @dataclass
@@ -272,12 +301,35 @@ class Settings:
         # Chat
         if "chat" in data:
             c = data["chat"]
+            builtin_data = c.get("builtin", {})
+            window_data = builtin_data.get("window", {})
+            chat_window = ChatWindowSettings(
+                width=window_data.get("width", 400),
+                height=window_data.get("height", 600),
+                x=window_data.get("x"),
+                y=window_data.get("y"),
+            )
+            builtin = BuiltinChatSettings(
+                font_size=builtin_data.get("font_size", 13),
+                show_timestamps=builtin_data.get("show_timestamps", False),
+                show_badges=builtin_data.get("show_badges", True),
+                show_mod_badges=builtin_data.get("show_mod_badges", True),
+                show_emotes=builtin_data.get("show_emotes", True),
+                line_spacing=builtin_data.get("line_spacing", 4),
+                max_messages=builtin_data.get("max_messages", 5000),
+                emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
+                show_alternating_rows=builtin_data.get("show_alternating_rows", True),
+                blocked_users=builtin_data.get("blocked_users", []),
+                window=chat_window,
+            )
             settings.chat = ChatSettings(
                 enabled=c.get("enabled", True),
+                mode=c.get("mode", "browser"),
                 browser=c.get("browser", "default"),
                 url_type=c.get("url_type", 0),
                 auto_open=c.get("auto_open", False),
                 new_window=c.get("new_window", True),
+                builtin=builtin,
             )
 
         # Channel info
@@ -354,10 +406,29 @@ class Settings:
             },
             "chat": {
                 "enabled": self.chat.enabled,
+                "mode": self.chat.mode,
                 "browser": self.chat.browser,
                 "url_type": self.chat.url_type,
                 "auto_open": self.chat.auto_open,
                 "new_window": self.chat.new_window,
+                "builtin": {
+                    "font_size": self.chat.builtin.font_size,
+                    "show_timestamps": self.chat.builtin.show_timestamps,
+                    "show_badges": self.chat.builtin.show_badges,
+                    "show_mod_badges": self.chat.builtin.show_mod_badges,
+                    "show_emotes": self.chat.builtin.show_emotes,
+                    "line_spacing": self.chat.builtin.line_spacing,
+                    "max_messages": self.chat.builtin.max_messages,
+                    "emote_providers": self.chat.builtin.emote_providers,
+                    "show_alternating_rows": self.chat.builtin.show_alternating_rows,
+                    "blocked_users": self.chat.builtin.blocked_users,
+                    "window": {
+                        "width": self.chat.builtin.window.width,
+                        "height": self.chat.builtin.window.height,
+                        "x": self.chat.builtin.window.x,
+                        "y": self.chat.builtin.window.y,
+                    },
+                },
             },
             "channel_info": {
                 "show_live_duration": self.channel_info.show_live_duration,

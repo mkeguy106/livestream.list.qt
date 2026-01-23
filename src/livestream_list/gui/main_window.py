@@ -836,8 +836,9 @@ class MainWindow(QMainWindow):
         def launch():
             try:
                 self.app.streamlink.launch(livestream)
-                # Also open chat if auto-open enabled
-                if self.app.settings.chat.auto_open and self.app.settings.chat.enabled:
+                # Open browser chat if auto-open enabled and in browser mode
+                if (self.app.settings.chat.auto_open and self.app.settings.chat.enabled
+                        and self.app.settings.chat.mode == "browser"):
                     ch = livestream.channel
                     video_id = getattr(livestream, 'video_id', None) or ""
                     self._chat_launcher.open_chat(ch.channel_id, ch.platform.value, video_id)
@@ -846,6 +847,11 @@ class MainWindow(QMainWindow):
 
         thread = threading.Thread(target=launch, daemon=True)
         thread.start()
+
+        # Auto-open built-in chat on main thread (if enabled)
+        if (self.app.settings.chat.auto_open and self.app.settings.chat.enabled
+                and self.app.settings.chat.mode == "builtin" and self.app.chat_manager):
+            self.app.open_builtin_chat(livestream)
 
         # Update UI after short delay
         QTimer.singleShot(500, self.refresh_stream_list)
@@ -878,7 +884,23 @@ class MainWindow(QMainWindow):
 
     def _on_open_chat(self, channel_id: str, platform: str, video_id: str):
         """Handle opening chat."""
+        if self.app.settings.chat.mode == "builtin" and self.app.chat_manager:
+            # Find the livestream for this channel
+            livestream = self._find_livestream(channel_id, platform)
+            if livestream:
+                self.app.open_builtin_chat(livestream)
+            return
         self._chat_launcher.open_chat(channel_id, platform, video_id)
+
+    def _find_livestream(self, channel_id: str, platform: str) -> "Livestream | None":
+        """Find a livestream by channel_id and platform."""
+        if not self.app.monitor:
+            return None
+        key = f"{platform}:{channel_id}"
+        for ls in self.app.monitor.livestreams:
+            if ls.channel.unique_key == key:
+                return ls
+        return None
 
     def _on_open_browser(self, channel_id: str, platform: str):
         """Handle opening in browser."""
@@ -1832,7 +1854,14 @@ class PreferencesDialog(QDialog):
         # Chat client type dropdown
         self.chat_client_combo = QComboBox()
         self.chat_client_combo.addItem("Browser", "browser")
-        # Future: add more chat clients here (e.g., "Chatterino", "Custom")
+        self.chat_client_combo.addItem("Built-in", "builtin")
+
+        current_mode = self.app.settings.chat.mode
+        for i in range(self.chat_client_combo.count()):
+            if self.chat_client_combo.itemData(i) == current_mode:
+                self.chat_client_combo.setCurrentIndex(i)
+                break
+
         self.chat_client_combo.currentIndexChanged.connect(self._on_chat_client_changed)
         client_layout.addRow("Client:", self.chat_client_combo)
 
@@ -1861,6 +1890,76 @@ class PreferencesDialog(QDialog):
         client_layout.addRow(self.new_window_cb)
 
         layout.addWidget(client_group)
+
+        # Built-in chat settings group (shown when Built-in is selected)
+        self.builtin_group = QGroupBox("Built-in Chat Settings")
+        builtin_layout = QFormLayout(self.builtin_group)
+
+        self.chat_font_spin = QSpinBox()
+        self.chat_font_spin.setRange(4, 24)
+        self.chat_font_spin.setValue(self.app.settings.chat.builtin.font_size)
+        self.chat_font_spin.valueChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow("Font size:", self.chat_font_spin)
+
+        self.chat_spacing_spin = QSpinBox()
+        self.chat_spacing_spin.setRange(0, 12)
+        self.chat_spacing_spin.setSuffix(" px")
+        self.chat_spacing_spin.setValue(self.app.settings.chat.builtin.line_spacing)
+        self.chat_spacing_spin.valueChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow("Line spacing:", self.chat_spacing_spin)
+
+        self.chat_timestamps_cb = QCheckBox("Show timestamps")
+        self.chat_timestamps_cb.setChecked(self.app.settings.chat.builtin.show_timestamps)
+        self.chat_timestamps_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_timestamps_cb)
+
+        self.chat_badges_cb = QCheckBox("Show badges")
+        self.chat_badges_cb.setChecked(self.app.settings.chat.builtin.show_badges)
+        self.chat_badges_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_badges_cb)
+
+        self.chat_mod_badges_cb = QCheckBox("Show mod/VIP badges")
+        self.chat_mod_badges_cb.setChecked(self.app.settings.chat.builtin.show_mod_badges)
+        self.chat_mod_badges_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_mod_badges_cb)
+
+        self.chat_emotes_cb = QCheckBox("Show emotes")
+        self.chat_emotes_cb.setChecked(self.app.settings.chat.builtin.show_emotes)
+        self.chat_emotes_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_emotes_cb)
+
+        self.chat_alt_rows_cb = QCheckBox("Alternating row colors")
+        self.chat_alt_rows_cb.setChecked(self.app.settings.chat.builtin.show_alternating_rows)
+        self.chat_alt_rows_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_alt_rows_cb)
+
+        # Emote provider checkboxes
+        emote_providers = self.app.settings.chat.builtin.emote_providers
+        self.emote_7tv_cb = QCheckBox("7TV")
+        self.emote_7tv_cb.setChecked("7tv" in emote_providers)
+        self.emote_7tv_cb.stateChanged.connect(self._on_chat_changed)
+        self.emote_bttv_cb = QCheckBox("BTTV")
+        self.emote_bttv_cb.setChecked("bttv" in emote_providers)
+        self.emote_bttv_cb.stateChanged.connect(self._on_chat_changed)
+        self.emote_ffz_cb = QCheckBox("FFZ")
+        self.emote_ffz_cb.setChecked("ffz" in emote_providers)
+        self.emote_ffz_cb.stateChanged.connect(self._on_chat_changed)
+
+        emote_row = QHBoxLayout()
+        emote_row.addWidget(self.emote_7tv_cb)
+        emote_row.addWidget(self.emote_bttv_cb)
+        emote_row.addWidget(self.emote_ffz_cb)
+        emote_row.addStretch()
+        builtin_layout.addRow("Emote providers:", emote_row)
+
+        layout.addWidget(self.builtin_group)
+
+        # Set initial visibility based on current mode
+        show_browser = (current_mode == "browser")
+        self.browser_label.setVisible(show_browser)
+        self.browser_combo.setVisible(show_browser)
+        self.new_window_cb.setVisible(show_browser)
+        self.builtin_group.setVisible(not show_browser)
 
         layout.addStretch()
         return widget
@@ -2040,11 +2139,30 @@ class PreferencesDialog(QDialog):
         self.browser_label.setVisible(show_browser)
         self.browser_combo.setVisible(show_browser)
         self.new_window_cb.setVisible(show_browser)
+        self.builtin_group.setVisible(not show_browser)
+        self._on_chat_changed()
 
     def _on_chat_changed(self):
+        self.app.settings.chat.mode = self.chat_client_combo.currentData()
         self.app.settings.chat.auto_open = self.chat_auto_cb.isChecked()
         self.app.settings.chat.browser = self.browser_combo.currentData()
         self.app.settings.chat.new_window = self.new_window_cb.isChecked()
+        # Built-in chat settings
+        self.app.settings.chat.builtin.font_size = self.chat_font_spin.value()
+        self.app.settings.chat.builtin.line_spacing = self.chat_spacing_spin.value()
+        self.app.settings.chat.builtin.show_timestamps = self.chat_timestamps_cb.isChecked()
+        self.app.settings.chat.builtin.show_badges = self.chat_badges_cb.isChecked()
+        self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
+        self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
+        self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
+        providers = []
+        if self.emote_7tv_cb.isChecked():
+            providers.append("7tv")
+        if self.emote_bttv_cb.isChecked():
+            providers.append("bttv")
+        if self.emote_ffz_cb.isChecked():
+            providers.append("ffz")
+        self.app.settings.chat.builtin.emote_providers = providers
         self.app.save_settings()
 
     def _on_twitch_login(self):
