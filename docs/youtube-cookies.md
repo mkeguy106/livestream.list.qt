@@ -1,8 +1,25 @@
 # How to Get YouTube Cookies for Chat
 
-To send messages in YouTube live chat, you need to provide your YouTube/Google browser cookies. These cookies authenticate you with YouTube's internal API without needing a Google Cloud project.
+To send messages in YouTube live chat, you need to authenticate with your Google account. The app uses browser cookies to authenticate with YouTube's internal API.
 
-## Method 1: Browser Developer Tools (Recommended)
+## Method 1: Built-in Login (Recommended)
+
+The easiest method — use the built-in browser to log in directly:
+
+1. Open **Preferences** > **Accounts**
+2. In the YouTube section, click **Login to YouTube**
+3. If prompted, allow the app to download QtWebEngine (one-time ~150MB download)
+4. A browser window will open to the Google sign-in page
+5. Log in with your Google account as you normally would
+6. Once login completes, the cookies are captured automatically and the window closes
+
+That's it! Your YouTube chat sending is now enabled.
+
+> **Note:** The embedded browser uses an isolated session — it does not access or interfere with your regular browser's cookies or sessions.
+
+> **Flatpak users:** The built-in login is not available in Flatpak builds (QtWebEngine cannot be installed at runtime). Use one of the manual methods below instead.
+
+## Method 2: Browser Developer Tools
 
 ### Chrome / Chromium / Edge
 
@@ -32,7 +49,7 @@ To send messages in YouTube live chat, you need to provide your YouTube/Google b
 6. Double-click each cookie's **Value** cell to select and copy it
 7. Format and paste as described above
 
-## Method 2: Browser Extension
+## Method 3: Browser Extension
 
 Use a cookie export extension to simplify the process:
 
@@ -44,7 +61,7 @@ Use a cookie export extension to simplify the process:
 3. Open the extension and export cookies
 4. Copy only the required cookies (SID, HSID, SSID, APISID, SAPISID) into the format above
 
-## Method 3: curl/wget Header Copy
+## Method 4: curl/wget Header Copy
 
 1. Open YouTube in your browser (logged in)
 2. Open Developer Tools (`F12`) > **Network** tab

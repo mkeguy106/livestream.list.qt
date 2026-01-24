@@ -2226,18 +2226,34 @@ class PreferencesDialog(QDialog):
         yt_layout.addWidget(self.yt_status)
 
         yt_info = QLabel(
-            "Paste YouTube browser cookies to enable chat sending.\n"
-            "Required: SID, HSID, SSID, APISID, SAPISID"
+            "Log in to enable YouTube chat sending.\n"
+            "Uses an embedded browser to capture authentication cookies."
         )
         yt_info.setStyleSheet("color: gray; font-style: italic;")
         yt_info.setWordWrap(True)
         yt_layout.addWidget(yt_info)
 
+        # Primary action: Login button
+        yt_main_buttons = QHBoxLayout()
+        self.yt_login_btn = QPushButton("Login to YouTube")
+        self.yt_login_btn.clicked.connect(self._on_yt_login)
+        yt_main_buttons.addWidget(self.yt_login_btn)
+        self.yt_logout_btn = QPushButton("Logout")
+        self.yt_logout_btn.clicked.connect(self._on_yt_clear_cookies)
+        yt_main_buttons.addWidget(self.yt_logout_btn)
+        yt_main_buttons.addStretch()
+        yt_layout.addLayout(yt_main_buttons)
+
+        # Manual cookie paste (collapsible/advanced)
+        yt_manual_label = QLabel("Or paste cookies manually:")
+        yt_manual_label.setStyleSheet("color: gray; margin-top: 8px;")
+        yt_layout.addWidget(yt_manual_label)
+
         self.yt_cookies_edit = QPlainTextEdit()
         self.yt_cookies_edit.setPlaceholderText(
             "SID=...; HSID=...; SSID=...; APISID=...; SAPISID=..."
         )
-        self.yt_cookies_edit.setMaximumHeight(80)
+        self.yt_cookies_edit.setMaximumHeight(60)
         self.yt_cookies_edit.setPlainText(self.app.settings.youtube.cookies)
         yt_layout.addWidget(self.yt_cookies_edit)
 
@@ -2245,9 +2261,6 @@ class PreferencesDialog(QDialog):
         self.yt_save_btn = QPushButton("Save Cookies")
         self.yt_save_btn.clicked.connect(self._on_yt_save_cookies)
         yt_buttons.addWidget(self.yt_save_btn)
-        self.yt_clear_btn = QPushButton("Clear")
-        self.yt_clear_btn.clicked.connect(self._on_yt_clear_cookies)
-        yt_buttons.addWidget(self.yt_clear_btn)
         yt_help_btn = QPushButton("How to get cookies")
         yt_help_btn.setStyleSheet("color: #5599ff; border: none; text-decoration: underline;")
         yt_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2736,20 +2749,37 @@ class PreferencesDialog(QDialog):
         self._update_yt_status()
         self.app.chat_manager.auth_state_changed.emit(False)
 
+    def _on_yt_login(self):
+        """Handle YouTube login via embedded browser."""
+        from .youtube_login import ensure_webengine_and_login
+
+        cookie_string = ensure_webengine_and_login(self)
+        if cookie_string:
+            self.app.settings.youtube.cookies = cookie_string
+            self.app.save_settings()
+            self.yt_cookies_edit.setPlainText(cookie_string)
+            self._update_yt_status()
+            self.app.chat_manager.auth_state_changed.emit(True)
+
     def _update_yt_status(self):
         """Update YouTube cookie status display."""
         from ..chat.connections.youtube import validate_cookies
 
         cookies = self.app.settings.youtube.cookies
-        if cookies and validate_cookies(cookies):
-            self.yt_status.setText("Status: Cookies configured")
+        is_configured = bool(cookies and validate_cookies(cookies))
+
+        if is_configured:
+            self.yt_status.setText("Status: Logged in")
             self.yt_status.setStyleSheet("color: green;")
         elif cookies:
             self.yt_status.setText("Status: Cookies incomplete (missing required keys)")
             self.yt_status.setStyleSheet("color: orange;")
         else:
-            self.yt_status.setText("Status: Not configured")
+            self.yt_status.setText("Status: Not logged in")
             self.yt_status.setStyleSheet("color: gray;")
+
+        self.yt_login_btn.setVisible(not is_configured)
+        self.yt_logout_btn.setVisible(is_configured)
 
     def _on_yt_cookie_help(self):
         """Show instructions for obtaining YouTube cookies."""
@@ -2757,7 +2787,9 @@ class PreferencesDialog(QDialog):
         msg.setWindowTitle("How to Get YouTube Cookies")
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(
-            "<h3>Getting YouTube Cookies</h3>"
+            "<h3>Getting YouTube Cookies (Manual Method)</h3>"
+            "<p>The easiest way is to click <b>Login to YouTube</b> above.<br>"
+            "If that's not available, paste cookies manually:</p>"
             "<ol>"
             "<li>Open <b>YouTube</b> in your browser and log in</li>"
             "<li>Press <b>F12</b> to open Developer Tools</li>"
