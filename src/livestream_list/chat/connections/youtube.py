@@ -277,6 +277,16 @@ class YouTubeChatConnection(BaseChatConnection):
             if datasync_match:
                 self._datasync_id = datasync_match.group(1)
 
+            # Extract logged-in user's display name for local echo
+            author_match = re.search(
+                r'"liveChatMessageInputRenderer"\s*:\s*\{[^}]*"authorName"\s*:\s*\{'
+                r'[^}]*"simpleText"\s*:\s*"([^"]+)"',
+                html,
+            )
+            if author_match:
+                self._nick = author_match.group(1)
+                logger.debug(f"YouTube user: {self._nick}")
+
             if self._innertube_api_key and self._send_params:
                 logger.info("YouTube InnerTube send params extracted successfully")
             else:
