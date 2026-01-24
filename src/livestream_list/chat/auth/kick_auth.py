@@ -20,9 +20,7 @@ KICK_SCOPES = "chat:write user:read"
 
 # Registered Kick developer app for this project
 DEFAULT_KICK_CLIENT_ID = "01KE2K1TM3ZZ4S3824V79RG2FJ"
-DEFAULT_KICK_CLIENT_SECRET = (
-    "bc2e8d615c40624929fe3f22a3b7ec468d58aaaab52e383c3c1d6c49ea546668"
-)
+DEFAULT_KICK_CLIENT_SECRET = "bc2e8d615c40624929fe3f22a3b7ec468d58aaaab52e383c3c1d6c49ea546668"
 
 
 def _generate_pkce() -> tuple[str, str]:
@@ -97,9 +95,7 @@ class KickAuthFlow:
                 return False
 
             # Exchange code for tokens
-            success = await self._exchange_code(
-                code, code_verifier, server.redirect_uri
-            )
+            success = await self._exchange_code(code, code_verifier, server.redirect_uri)
             if success:
                 logger.info("Kick OAuth login successful")
             return success
@@ -107,9 +103,7 @@ class KickAuthFlow:
         finally:
             server.stop()
 
-    async def _exchange_code(
-        self, code: str, code_verifier: str, redirect_uri: str
-    ) -> bool:
+    async def _exchange_code(self, code: str, code_verifier: str, redirect_uri: str) -> bool:
         """Exchange authorization code for access + refresh tokens."""
         data = {
             "grant_type": "authorization_code",

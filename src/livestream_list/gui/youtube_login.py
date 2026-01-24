@@ -29,10 +29,25 @@ REQUIRED_COOKIE_KEYS = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
 
 # Additional cookies needed for YouTube InnerTube API
 _YOUTUBE_COOKIE_NAMES = {
-    "SID", "HSID", "SSID", "APISID", "SAPISID",
-    "SIDCC", "LOGIN_INFO", "PREF", "YSC", "NID", "AEC",
-    "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA",
-    "GPS", "LSID", "DV", "OTZ", "SMSV", "ACCOUNT_CHOOSER",
+    "SID",
+    "HSID",
+    "SSID",
+    "APISID",
+    "SAPISID",
+    "SIDCC",
+    "LOGIN_INFO",
+    "PREF",
+    "YSC",
+    "NID",
+    "AEC",
+    "VISITOR_INFO1_LIVE",
+    "VISITOR_PRIVACY_METADATA",
+    "GPS",
+    "LSID",
+    "DV",
+    "OTZ",
+    "SMSV",
+    "ACCOUNT_CHOOSER",
 }
 
 # Prefixes for secure auth cookies that YouTube uses
@@ -115,6 +130,7 @@ def _find_firefox_cookies(browser_id: str) -> str | None:
 
     if os.path.exists(profiles_ini):
         import configparser
+
         config = configparser.ConfigParser()
         config.read(profiles_ini)
 
@@ -185,6 +201,7 @@ def _get_chromium_password(keyring_label: str) -> str | None:
     # Method 1: secretstorage (direct Secret Service search)
     try:
         import secretstorage
+
         connection = secretstorage.dbus_init()
         collection = secretstorage.get_default_collection(connection)
         if collection.is_locked():
@@ -202,6 +219,7 @@ def _get_chromium_password(keyring_label: str) -> str | None:
     # Method 2: keyring library (works with KWallet, macOS Keychain, etc.)
     try:
         import keyring as kr
+
         browser_name = keyring_label.replace(" Safe Storage", "")
         password = kr.get_password(keyring_label, browser_name)
         if password:
@@ -310,9 +328,7 @@ def _read_firefox_cookies(db_path: str) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(
-            f"host LIKE '%{d}'" for d in COOKIE_DOMAINS
-        )
+        domain_clauses = " OR ".join(f"host LIKE '%{d}'" for d in COOKIE_DOMAINS)
         cursor.execute(
             f"SELECT name, value FROM moz_cookies WHERE {domain_clauses}"  # noqa: S608
         )
@@ -341,9 +357,7 @@ def _read_chromium_cookies(db_path: str, key: bytes) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(
-            f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS
-        )
+        domain_clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS)
         cursor.execute(
             f"SELECT name, encrypted_value, value FROM cookies "  # noqa: S608
             f"WHERE {domain_clauses}"
@@ -381,9 +395,7 @@ def _detect_available_browsers() -> list[tuple[str, str, str, str, str]]:
         else:
             db_path = _find_chromium_cookies(cookie_paths)
             if db_path:
-                available.append(
-                    (browser_id, display_name, browser_type, db_path, keyring_label)
-                )
+                available.append((browser_id, display_name, browser_type, db_path, keyring_label))
     return available
 
 
@@ -418,9 +430,7 @@ class BrowserSelectDialog(QDialog):
             self._combo.addItem(display_name, browser_id)
         layout.addWidget(self._combo)
 
-        note = QLabel(
-            "Make sure you are logged into YouTube in the selected browser."
-        )
+        note = QLabel("Make sure you are logged into YouTube in the selected browser.")
         note.setStyleSheet("color: gray; font-style: italic;")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -525,7 +535,8 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
 
     # Filter to only YouTube-relevant cookies
     filtered = {
-        k: v for k, v in cookie_dict.items()
+        k: v
+        for k, v in cookie_dict.items()
         if k in _YOUTUBE_COOKIE_NAMES or k.startswith(_YOUTUBE_COOKIE_PREFIXES)
     }
 

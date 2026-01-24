@@ -34,6 +34,7 @@ class Notifier:
             # Try desktop-notifier first (handles most cases)
             try:
                 from desktop_notifier import DesktopNotifier
+
                 self._notifier = DesktopNotifier(
                     app_name="Livestream List",
                     app_icon=None,
@@ -56,6 +57,7 @@ class Notifier:
         elif backend == "dbus":
             try:
                 from desktop_notifier import DesktopNotifier
+
                 self._notifier = DesktopNotifier(
                     app_name="Livestream List",
                     app_icon=None,
@@ -217,8 +219,12 @@ class Notifier:
         # Use notify-send (via flatpak-spawn if in sandbox)
         if is_flatpak:
             cmd = [
-                "flatpak-spawn", "--host", "notify-send",
-                title, body, "--app-name=Livestream List (Qt)",
+                "flatpak-spawn",
+                "--host",
+                "notify-send",
+                title,
+                body,
+                "--app-name=Livestream List (Qt)",
             ]
         elif shutil.which("notify-send"):
             cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]

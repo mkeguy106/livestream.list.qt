@@ -23,11 +23,12 @@ def host_command(cmd: list[str]) -> list[str]:
         return ["flatpak-spawn", "--host"] + cmd
     return cmd
 
+
 # Chat URL templates by platform
 TWITCH_CHAT_URLS = {
-    0: "https://www.twitch.tv/popout/{channel}/chat",      # Popout (recommended)
-    1: "https://www.twitch.tv/embed/{channel}/chat",       # Embedded
-    2: "https://www.twitch.tv/{channel}/chat",             # Default (legacy)
+    0: "https://www.twitch.tv/popout/{channel}/chat",  # Popout (recommended)
+    1: "https://www.twitch.tv/embed/{channel}/chat",  # Embedded
+    2: "https://www.twitch.tv/{channel}/chat",  # Default (legacy)
 }
 
 KICK_CHAT_URL = "https://kick.com/popout/{channel}/chat"
@@ -49,7 +50,8 @@ class ChatLauncher:
         self.settings = settings
 
     def get_chat_url(
-        self, channel: str,
+        self,
+        channel: str,
         platform: StreamPlatform = StreamPlatform.TWITCH,
         video_id: str | None = None,
     ) -> str | None:
@@ -185,7 +187,8 @@ class ChatLauncher:
             return False
 
     def open_chat(
-        self, channel: str,
+        self,
+        channel: str,
         platform: StreamPlatform = StreamPlatform.TWITCH,
         video_id: str | None = None,
     ) -> bool:
@@ -211,7 +214,8 @@ class ChatLauncher:
         return self._open_url_in_browser(url, f"chat for {channel}")
 
     def get_channel_url(
-        self, channel: str,
+        self,
+        channel: str,
         platform: StreamPlatform = StreamPlatform.TWITCH,
     ) -> str:
         """Get the channel URL for a channel based on platform."""
@@ -245,7 +249,8 @@ class ChatLauncher:
         return self._open_url_in_browser(url, f"channel {channel}")
 
     def open_chat_app_mode(
-        self, channel: str,
+        self,
+        channel: str,
         platform: StreamPlatform = StreamPlatform.TWITCH,
         video_id: str | None = None,
     ) -> bool:

@@ -207,12 +207,9 @@ class YouTubeChatConnection(BaseChatConnection):
                     else:
                         error_text = await resp.text()
                         logger.warning(
-                            f"YouTube send_message failed ({resp.status}): "
-                            f"{error_text[:200]}"
+                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
                         )
-                        self._emit_error(
-                            f"Failed to send message (HTTP {resp.status})"
-                        )
+                        self._emit_error(f"Failed to send message (HTTP {resp.status})")
                         return False
 
         except Exception as e:
@@ -249,16 +246,12 @@ class YouTubeChatConnection(BaseChatConnection):
                     html = await resp.text()
 
             # Extract INNERTUBE_API_KEY
-            api_key_match = re.search(
-                r'"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"', html
-            )
+            api_key_match = re.search(r'"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"', html)
             if api_key_match:
                 self._innertube_api_key = api_key_match.group(1)
 
             # Extract client version
-            version_match = re.search(
-                r'"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"', html
-            )
+            version_match = re.search(r'"INNERTUBE_CLIENT_VERSION"\s*:\s*"([^"]+)"', html)
             if version_match:
                 self._client_version = version_match.group(1)
 
@@ -271,9 +264,7 @@ class YouTubeChatConnection(BaseChatConnection):
                 self._send_params = params_match.group(1)
 
             # Extract datasyncId
-            datasync_match = re.search(
-                r'"datasyncId"\s*:\s*"([^"]+)"', html
-            )
+            datasync_match = re.search(r'"datasyncId"\s*:\s*"([^"]+)"', html)
             if datasync_match:
                 self._datasync_id = datasync_match.group(1)
 
@@ -360,9 +351,7 @@ class YouTubeChatConnection(BaseChatConnection):
         if is_moderator:
             badges.append(ChatBadge(id="moderator", name="Moderator", image_url=""))
         if is_sponsor:
-            badges.append(
-                ChatBadge(id="member", name="Member", image_url=badge_url or "")
-            )
+            badges.append(ChatBadge(id="member", name="Member", image_url=badge_url or ""))
         if is_verified:
             badges.append(ChatBadge(id="verified", name="Verified", image_url=""))
 
@@ -448,9 +437,7 @@ class YouTubeChatConnection(BaseChatConnection):
             timestamp = datetime.now(timezone.utc)
             if hasattr(item, "timestamp") and item.timestamp:
                 try:
-                    timestamp = datetime.fromtimestamp(
-                        int(item.timestamp) / 1000, tz=timezone.utc
-                    )
+                    timestamp = datetime.fromtimestamp(int(item.timestamp) / 1000, tz=timezone.utc)
                 except (ValueError, OSError, TypeError):
                     pass
 

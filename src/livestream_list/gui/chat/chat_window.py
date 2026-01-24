@@ -51,9 +51,7 @@ class _TabButton(QWidget):
     clicked = Signal()
     close_clicked = Signal()
 
-    def __init__(
-        self, icon: QIcon | None, text: str, closable: bool = True, parent=None
-    ):
+    def __init__(self, icon: QIcon | None, text: str, closable: bool = True, parent=None):
         super().__init__(parent)
         self._active = False
         self._text = text
@@ -668,10 +666,7 @@ class ChatWindow(QMainWindow):
         self.save_window_state()
 
         # Collect tabbed channel keys (those NOT popped out)
-        tabbed_keys = [
-            key for key in list(self._widgets.keys())
-            if key not in self._popout_windows
-        ]
+        tabbed_keys = [key for key in list(self._widgets.keys()) if key not in self._popout_windows]
         # Disconnect each tabbed channel
         for key in tabbed_keys:
             self.close_chat(key)
