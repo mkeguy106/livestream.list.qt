@@ -460,6 +460,8 @@ class ChatWindow(QMainWindow):
         # Create chat widget - check auth based on platform
         if livestream.channel.platform == StreamPlatform.KICK:
             authenticated = bool(self.settings.kick.access_token)
+        elif livestream.channel.platform == StreamPlatform.YOUTUBE:
+            authenticated = bool(self.settings.youtube.cookies)
         else:
             authenticated = bool(self.settings.twitch.access_token)
         widget = ChatWidget(
@@ -585,6 +587,8 @@ class ChatWindow(QMainWindow):
             platform = widget.livestream.channel.platform
             if platform == StreamPlatform.KICK:
                 auth = bool(self.settings.kick.access_token)
+            elif platform == StreamPlatform.YOUTUBE:
+                auth = bool(self.settings.youtube.cookies)
             else:
                 auth = bool(self.settings.twitch.access_token)
             widget.set_authenticated(auth)

@@ -70,6 +70,7 @@ class YouTubeSettings:
     """YouTube API settings."""
 
     api_key: str = ""
+    cookies: str = ""  # Browser cookies for chat sending (InnerTube)
 
 
 @dataclass
@@ -262,7 +263,11 @@ class Settings:
 
         # YouTube
         if "youtube" in data:
-            settings.youtube = YouTubeSettings(api_key=data["youtube"].get("api_key", ""))
+            yt = data["youtube"]
+            settings.youtube = YouTubeSettings(
+                api_key=yt.get("api_key", ""),
+                cookies=yt.get("cookies", ""),
+            )
 
         # Kick
         if "kick" in data:
@@ -397,6 +402,7 @@ class Settings:
             },
             "youtube": {
                 "api_key": self.youtube.api_key,
+                "cookies": self.youtube.cookies,
             },
             "kick": {
                 "client_id": self.kick.client_id,

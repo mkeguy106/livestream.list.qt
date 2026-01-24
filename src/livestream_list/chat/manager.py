@@ -796,7 +796,10 @@ class ChatManager(QObject):
         elif platform == StreamPlatform.YOUTUBE:
             from .connections.youtube import YouTubeChatConnection
 
-            return YouTubeChatConnection(parent=self)
+            return YouTubeChatConnection(
+                youtube_settings=self.settings.youtube,
+                parent=self,
+            )
         return None
 
     def _get_connection_kwargs(self, livestream: Livestream) -> dict:

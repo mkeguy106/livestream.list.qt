@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -2219,10 +2220,44 @@ class PreferencesDialog(QDialog):
         # YouTube group
         yt_group = QGroupBox("YouTube")
         yt_layout = QVBoxLayout(yt_group)
-        yt_label = QLabel("No login required. Add channels manually.")
-        yt_label.setStyleSheet("color: gray;")
-        yt_layout.addWidget(yt_label)
+
+        self.yt_status = QLabel("Status: Not configured")
+        self.yt_status.setStyleSheet("color: gray;")
+        yt_layout.addWidget(self.yt_status)
+
+        yt_info = QLabel(
+            "Paste YouTube browser cookies to enable chat sending.\n"
+            "Required: SID, HSID, SSID, APISID, SAPISID"
+        )
+        yt_info.setStyleSheet("color: gray; font-style: italic;")
+        yt_info.setWordWrap(True)
+        yt_layout.addWidget(yt_info)
+
+        self.yt_cookies_edit = QPlainTextEdit()
+        self.yt_cookies_edit.setPlaceholderText(
+            "SID=...; HSID=...; SSID=...; APISID=...; SAPISID=..."
+        )
+        self.yt_cookies_edit.setMaximumHeight(80)
+        self.yt_cookies_edit.setPlainText(self.app.settings.youtube.cookies)
+        yt_layout.addWidget(self.yt_cookies_edit)
+
+        yt_buttons = QHBoxLayout()
+        self.yt_save_btn = QPushButton("Save Cookies")
+        self.yt_save_btn.clicked.connect(self._on_yt_save_cookies)
+        yt_buttons.addWidget(self.yt_save_btn)
+        self.yt_clear_btn = QPushButton("Clear")
+        self.yt_clear_btn.clicked.connect(self._on_yt_clear_cookies)
+        yt_buttons.addWidget(self.yt_clear_btn)
+        yt_help_btn = QPushButton("How to get cookies")
+        yt_help_btn.setStyleSheet("color: #5599ff; border: none; text-decoration: underline;")
+        yt_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        yt_help_btn.clicked.connect(self._on_yt_cookie_help)
+        yt_buttons.addWidget(yt_help_btn)
+        yt_buttons.addStretch()
+        yt_layout.addLayout(yt_buttons)
+
         layout.addWidget(yt_group)
+        self._update_yt_status()
 
         # Kick group
         kick_group = QGroupBox("Kick")
@@ -2672,6 +2707,78 @@ class PreferencesDialog(QDialog):
         self.app.save_settings()
         self._update_account_buttons()
         self.app.chat_manager.reconnect_kick()
+
+    def _on_yt_save_cookies(self):
+        """Save YouTube cookies and validate."""
+        from ..chat.connections.youtube import validate_cookies
+
+        cookie_text = self.yt_cookies_edit.toPlainText().strip()
+        if cookie_text and not validate_cookies(cookie_text):
+            QMessageBox.warning(
+                self,
+                "Invalid Cookies",
+                "The cookies are missing required keys.\n"
+                "Required: SID, HSID, SSID, APISID, SAPISID",
+            )
+            return
+
+        self.app.settings.youtube.cookies = cookie_text
+        self.app.save_settings()
+        self._update_yt_status()
+        # Notify chat system of auth state change
+        self.app.chat_manager.auth_state_changed.emit(bool(cookie_text))
+
+    def _on_yt_clear_cookies(self):
+        """Clear YouTube cookies."""
+        self.yt_cookies_edit.setPlainText("")
+        self.app.settings.youtube.cookies = ""
+        self.app.save_settings()
+        self._update_yt_status()
+        self.app.chat_manager.auth_state_changed.emit(False)
+
+    def _update_yt_status(self):
+        """Update YouTube cookie status display."""
+        from ..chat.connections.youtube import validate_cookies
+
+        cookies = self.app.settings.youtube.cookies
+        if cookies and validate_cookies(cookies):
+            self.yt_status.setText("Status: Cookies configured")
+            self.yt_status.setStyleSheet("color: green;")
+        elif cookies:
+            self.yt_status.setText("Status: Cookies incomplete (missing required keys)")
+            self.yt_status.setStyleSheet("color: orange;")
+        else:
+            self.yt_status.setText("Status: Not configured")
+            self.yt_status.setStyleSheet("color: gray;")
+
+    def _on_yt_cookie_help(self):
+        """Show instructions for obtaining YouTube cookies."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("How to Get YouTube Cookies")
+        msg.setTextFormat(Qt.TextFormat.RichText)
+        msg.setText(
+            "<h3>Getting YouTube Cookies</h3>"
+            "<ol>"
+            "<li>Open <b>YouTube</b> in your browser and log in</li>"
+            "<li>Press <b>F12</b> to open Developer Tools</li>"
+            "<li>Go to the <b>Application</b> tab (Chrome) or "
+            "<b>Storage</b> tab (Firefox)</li>"
+            "<li>Expand <b>Cookies</b> &rarr; <code>https://www.youtube.com</code></li>"
+            "<li>Find and copy the <b>Value</b> for each of these cookies:<br>"
+            "<code>SID</code>, <code>HSID</code>, <code>SSID</code>, "
+            "<code>APISID</code>, <code>SAPISID</code></li>"
+            "<li>Paste them in the format:<br>"
+            "<code>SID=value; HSID=value; SSID=value; APISID=value; SAPISID=value</code></li>"
+            "</ol>"
+            "<p><b>Notes:</b></p>"
+            "<ul>"
+            "<li>Cookies typically last 1-2 years</li>"
+            "<li>They are stored locally and only used to send chat messages</li>"
+            "<li>See <code>docs/youtube-cookies.md</code> for the full guide</li>"
+            "</ul>"
+        )
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
 
     def _on_import_follows(self):
         """Handle import follows."""
