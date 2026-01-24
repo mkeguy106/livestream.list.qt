@@ -112,6 +112,7 @@ class BuiltinChatSettings:
     show_badges: bool = True
     show_mod_badges: bool = True
     show_emotes: bool = True
+    animate_emotes: bool = True
     line_spacing: int = 4
     max_messages: int = 5000
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
@@ -128,7 +129,7 @@ class ChatSettings:
     """Chat-related settings."""
 
     enabled: bool = True
-    mode: str = "browser"  # "browser" or "builtin"
+    mode: str = "builtin"  # "browser" or "builtin"
     browser: str = "default"  # default, chrome, chromium, edge, firefox
     url_type: int = 0  # 0=Popout, 1=Embedded, 2=Default (legacy)
     auto_open: bool = False  # Auto-open chat when launching stream
@@ -324,6 +325,7 @@ class Settings:
                 show_badges=builtin_data.get("show_badges", True),
                 show_mod_badges=builtin_data.get("show_mod_badges", True),
                 show_emotes=builtin_data.get("show_emotes", True),
+                animate_emotes=builtin_data.get("animate_emotes", True),
                 line_spacing=builtin_data.get("line_spacing", 4),
                 max_messages=builtin_data.get("max_messages", 5000),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
@@ -336,7 +338,7 @@ class Settings:
             )
             settings.chat = ChatSettings(
                 enabled=c.get("enabled", True),
-                mode=c.get("mode", "browser"),
+                mode=c.get("mode", "builtin"),
                 browser=c.get("browser", "default"),
                 url_type=c.get("url_type", 0),
                 auto_open=c.get("auto_open", False),
@@ -434,6 +436,7 @@ class Settings:
                     "show_badges": self.chat.builtin.show_badges,
                     "show_mod_badges": self.chat.builtin.show_mod_badges,
                     "show_emotes": self.chat.builtin.show_emotes,
+                    "animate_emotes": self.chat.builtin.animate_emotes,
                     "line_spacing": self.chat.builtin.line_spacing,
                     "max_messages": self.chat.builtin.max_messages,
                     "emote_providers": self.chat.builtin.emote_providers,

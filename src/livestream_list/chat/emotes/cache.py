@@ -5,8 +5,8 @@ import logging
 from collections import OrderedDict
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, Signal
+from PySide6.QtGui import QImageReader, QPixmap
 
 from ...core.settings import get_data_dir
 
@@ -29,6 +29,80 @@ def _cache_key_to_filename(key: str) -> str:
     return hashlib.md5(key.encode()).hexdigest() + ".png"
 
 
+def _cache_key_to_raw_filename(key: str) -> str:
+    """Convert a cache key to a raw bytes filename (for animated emotes)."""
+    return hashlib.md5(key.encode()).hexdigest() + ".raw"
+
+
+def _is_animated(data: bytes) -> bool:
+    """Quickly check if image data contains an animated image.
+
+    Uses QImageReader metadata only (no pixel decoding) so it's safe
+    to call from any thread.
+    """
+    if not data:
+        return False
+
+    byte_array = QByteArray(data)
+    buffer = QBuffer(byte_array)
+    buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+
+    reader = QImageReader(buffer)
+    supports = reader.supportsAnimation()
+    count = reader.imageCount()
+    buffer.close()
+
+    # supportsAnimation() + imageCount != 1 means animated
+    # imageCount can be -1 (unknown) for animated formats, 0 (error), or >1
+    return supports and count != 1
+
+
+def _extract_frames(data: bytes) -> tuple[list[QPixmap], list[int]] | None:
+    """Extract animation frames from raw image bytes.
+
+    Returns (frames, delays) if the image has multiple frames, None otherwise.
+    """
+    if not data:
+        return None
+
+    byte_array = QByteArray(data)
+    buffer = QBuffer(byte_array)
+    buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+
+    reader = QImageReader(buffer)
+    reader.setAutoTransform(True)
+
+    # Check if the format supports animation. Note: imageCount() can return -1
+    # (unknown) for some formats even when animated, so we rely on
+    # supportsAnimation() and actually attempt to read multiple frames.
+    image_count = reader.imageCount()
+    if not reader.supportsAnimation() or image_count == 1:
+        buffer.close()
+        return None
+
+    frames: list[QPixmap] = []
+    delays: list[int] = []
+
+    while reader.canRead():
+        image = reader.read()
+        if image.isNull():
+            break
+        pixmap = QPixmap.fromImage(image)
+        if pixmap.height() != DEFAULT_EMOTE_HEIGHT and pixmap.height() > 0:
+            pixmap = pixmap.scaledToHeight(
+                DEFAULT_EMOTE_HEIGHT, mode=Qt.TransformationMode.SmoothTransformation
+            )
+        frames.append(pixmap)
+        delays.append(max(reader.nextImageDelay(), 20))
+
+    buffer.close()
+
+    if len(frames) <= 1:
+        return None
+
+    return frames, delays
+
+
 class EmoteCache(QObject):
     """Two-tier emote cache.
 
@@ -44,6 +118,8 @@ class EmoteCache(QObject):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._memory: OrderedDict[str, QPixmap] = OrderedDict()
+        self._animated: dict[str, list[QPixmap]] = {}  # key -> frame list
+        self._frame_delays: dict[str, list[int]] = {}  # key -> ms per frame
         self._cache_dir = _get_cache_dir()
         self._pending: set[str] = set()  # Keys currently being loaded
         self._loader: EmoteLoaderWorker | None = None
@@ -53,17 +129,84 @@ class EmoteCache(QObject):
         """Get the memory cache dict (for delegate access)."""
         return self._memory
 
+    @property
+    def animated_dict(self) -> dict[str, list[QPixmap]]:
+        """Get the animated frame cache dict (for delegate access)."""
+        return self._animated
+
+    def put_animated(self, key: str, frames: list[QPixmap], delays: list[int]) -> None:
+        """Store an animated emote's frame list."""
+        if not frames:
+            return
+        self._animated[key] = frames
+        self._frame_delays[key] = delays
+        # Also store first frame in static cache as fallback
+        self._put_memory(key, frames[0])
+        self._pending.discard(key)
+        self.emote_loaded.emit(key)
+
+    def get_frames(self, key: str) -> list[QPixmap] | None:
+        """Get an animated emote's frame list."""
+        return self._animated.get(key)
+
+    def has_animated(self, key: str) -> bool:
+        """Check if a key has animated frames."""
+        return key in self._animated
+
+    def has_animation_data(self, key: str) -> bool:
+        """Check if we have animation-aware data for this key.
+
+        Returns True if the key is in the animated dict or has a raw file on disk.
+        Returns False if we only have a legacy PNG cache (needs re-download for
+        animation detection).
+        """
+        if key in self._animated:
+            return True
+        raw_filename = _cache_key_to_raw_filename(key)
+        return (self._cache_dir / raw_filename).exists()
+
     def get(self, key: str) -> QPixmap | None:
         """Get an emote pixmap from cache.
 
         Checks memory first, then disk. Returns None if not cached.
+        For animated emotes on disk, re-extracts frames into the animated cache.
         """
         # Check memory
         if key in self._memory:
             self._memory.move_to_end(key)
             return self._memory[key]
 
-        # Check disk
+        # Check disk - raw file first (preserves original format for animation)
+        raw_filename = _cache_key_to_raw_filename(key)
+        raw_path = self._cache_dir / raw_filename
+        if raw_path.exists():
+            try:
+                data = raw_path.read_bytes()
+                if not data:
+                    pass  # Empty marker file, fall through to PNG
+                else:
+                    result = _extract_frames(data)
+                    if result:
+                        frames, delays = result
+                        self._animated[key] = frames
+                        self._frame_delays[key] = delays
+                        self._put_memory(key, frames[0])
+                        return frames[0]
+                    else:
+                        # Static emote stored as raw - load directly
+                        pixmap = QPixmap()
+                        if pixmap.loadFromData(data):
+                            if pixmap.height() != DEFAULT_EMOTE_HEIGHT and pixmap.height() > 0:
+                                pixmap = pixmap.scaledToHeight(
+                                    DEFAULT_EMOTE_HEIGHT,
+                                    mode=Qt.TransformationMode.SmoothTransformation,
+                                )
+                            self._put_memory(key, pixmap)
+                            return pixmap
+            except Exception as e:
+                logger.debug(f"Failed to load emote from raw disk cache: {e}")
+
+        # Check disk - static PNG
         filename = _cache_key_to_filename(key)
         disk_path = self._cache_dir / filename
         if disk_path.exists():
@@ -95,6 +238,11 @@ class EmoteCache(QObject):
         """Check if a key is in cache (memory or disk)."""
         if key in self._memory:
             return True
+        if key in self._animated:
+            return True
+        raw_filename = _cache_key_to_raw_filename(key)
+        if (self._cache_dir / raw_filename).exists():
+            return True
         filename = _cache_key_to_filename(key)
         return (self._cache_dir / filename).exists()
 
@@ -124,6 +272,15 @@ class EmoteCache(QObject):
         except Exception as e:
             logger.debug(f"Failed to save emote to disk: {e}")
 
+    def _put_disk_raw(self, key: str, data: bytes) -> None:
+        """Store raw bytes on disk (for animated emotes)."""
+        filename = _cache_key_to_raw_filename(key)
+        disk_path = self._cache_dir / filename
+        try:
+            disk_path.write_bytes(data)
+        except Exception as e:
+            logger.debug(f"Failed to save raw emote to disk: {e}")
+
     def clear_memory(self) -> None:
         """Clear the memory cache."""
         self._memory.clear()
@@ -144,7 +301,8 @@ class EmoteLoaderWorker(QThread):
     and stores them in the EmoteCache.
     """
 
-    emote_ready = Signal(str, object)  # key, QPixmap (or bytes for main thread decode)
+    emote_ready = Signal(str, object, bytes)  # key, QPixmap, raw_data
+    animated_emote_ready = Signal(str, bytes)  # key, raw_data (frames extracted on main thread)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -181,14 +339,22 @@ class EmoteLoaderWorker(QThread):
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         if resp.status == 200:
                             data = await resp.read()
-                            pixmap = QPixmap()
-                            if pixmap.loadFromData(data):
-                                # Scale to standard height
-                                if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
-                                    pixmap = pixmap.scaledToHeight(
-                                        DEFAULT_EMOTE_HEIGHT,
-                                        mode=Qt.TransformationMode.SmoothTransformation,
-                                    )
-                                self.emote_ready.emit(key, pixmap)
+                            # Detect animated image without creating QPixmaps
+                            # (QPixmap must be created on the GUI thread)
+                            if _is_animated(data):
+                                self.animated_emote_ready.emit(key, data)
+                            else:
+                                pixmap = QPixmap()
+                                if pixmap.loadFromData(data):
+                                    # Scale to standard height
+                                    if (
+                                        pixmap.height() > 0
+                                        and pixmap.height() != DEFAULT_EMOTE_HEIGHT
+                                    ):
+                                        pixmap = pixmap.scaledToHeight(
+                                            DEFAULT_EMOTE_HEIGHT,
+                                            mode=Qt.TransformationMode.SmoothTransformation,
+                                        )
+                                    self.emote_ready.emit(key, pixmap, data)
                 except Exception as e:
                     logger.debug(f"Failed to download emote {key}: {e}")

@@ -3,8 +3,9 @@
 import logging
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut
+from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QDialog,
     QHBoxLayout,
@@ -57,6 +58,8 @@ class ChatWidget(QWidget):
     message_sent = Signal(str, str)  # channel_key, text
     popout_requested = Signal(str)  # channel_key
     settings_clicked = Signal()
+    font_size_changed = Signal(int)  # new font size
+    settings_changed = Signal()  # any chat setting toggled
 
     def __init__(
         self,
@@ -74,6 +77,10 @@ class ChatWidget(QWidget):
         self._auto_scroll = True
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
+        self._animation_timer = QTimer(self)
+        self._animation_timer.timeout.connect(self._on_animation_tick)
+        self._animation_frame = 0
+        self._has_animated_emotes = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -81,6 +88,75 @@ class ChatWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # Search bar (hidden by default)
+        self._search_widget = QWidget()
+        self._search_widget.setStyleSheet("""
+            QWidget {
+                background-color: #16213e;
+                border-bottom: 1px solid #333;
+            }
+        """)
+        search_layout = QHBoxLayout(self._search_widget)
+        search_layout.setContentsMargins(6, 4, 6, 4)
+        search_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search messages...")
+        self._search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a2e;
+                border: 1px solid #444;
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: #eee;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #6441a5; }
+        """)
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_input.returnPressed.connect(self._search_next)
+        search_layout.addWidget(self._search_input)
+
+        self._search_count_label = QLabel("")
+        self._search_count_label.setStyleSheet(
+            "color: #aaa; font-size: 11px; background: transparent; min-width: 50px;"
+        )
+        search_layout.addWidget(self._search_count_label)
+
+        search_btn_style = """
+            QPushButton {
+                background: transparent; color: #aaa; border: none;
+                font-size: 14px; padding: 2px 6px;
+            }
+            QPushButton:hover {
+                color: #fff; background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }
+        """
+        self._search_prev_btn = QPushButton("\u25b2")
+        self._search_prev_btn.setFixedSize(24, 24)
+        self._search_prev_btn.setStyleSheet(search_btn_style)
+        self._search_prev_btn.clicked.connect(self._search_prev)
+        search_layout.addWidget(self._search_prev_btn)
+
+        self._search_next_btn = QPushButton("\u25bc")
+        self._search_next_btn.setFixedSize(24, 24)
+        self._search_next_btn.setStyleSheet(search_btn_style)
+        self._search_next_btn.clicked.connect(self._search_next)
+        search_layout.addWidget(self._search_next_btn)
+
+        self._search_close_btn = QPushButton("\u2715")
+        self._search_close_btn.setFixedSize(24, 24)
+        self._search_close_btn.setStyleSheet(search_btn_style)
+        self._search_close_btn.clicked.connect(self._close_search)
+        search_layout.addWidget(self._search_close_btn)
+
+        self._search_widget.hide()
+        layout.addWidget(self._search_widget)
+
+        self._search_matches: list[int] = []
+        self._search_current: int = -1
 
         # Message list
         self._model = ChatMessageModel(max_messages=self.settings.max_messages, parent=self)
@@ -242,7 +318,7 @@ class ChatWidget(QWidget):
                 color: #eee;
             }
         """)
-        self._settings_button.clicked.connect(self.settings_clicked.emit)
+        self._settings_button.clicked.connect(self._show_settings_menu)
         input_layout.addWidget(self._settings_button)
 
         layout.addLayout(input_layout)
@@ -282,6 +358,10 @@ class ChatWidget(QWidget):
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
         copy_shortcut.activated.connect(self._copy_selected_messages)
 
+        # Find shortcut (Ctrl+F)
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self._toggle_search)
+
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add messages to the chat.
 
@@ -293,6 +373,10 @@ class ChatWidget(QWidget):
 
         if not filtered:
             return
+
+        # Hide the "Waiting for messages" indicator on first message
+        if self._connecting_label.isVisible():
+            self._connecting_label.hide()
 
         # Show hype chat banner for paid pinned messages
         for msg in filtered:
@@ -322,7 +406,7 @@ class ChatWidget(QWidget):
 
     def set_connected(self) -> None:
         """Hide the connecting indicator and show the message list."""
-        self._connecting_label.hide()
+        self._connecting_label.setText("Waiting for messages\u2026")
         self._list_view.show()
 
     def set_authenticated(self, state: bool) -> None:
@@ -354,6 +438,31 @@ class ChatWidget(QWidget):
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the emote map for autocomplete."""
         self._completer.set_emotes(emote_map)
+
+    def set_animated_cache(self, cache: dict[str, list]) -> None:
+        """Set the animated frame cache on the delegate and start timer if needed."""
+        self._delegate.set_animated_cache(cache)
+        had_animated = self._has_animated_emotes
+        self._has_animated_emotes = bool(cache)
+        if self._has_animated_emotes and self.settings.animate_emotes:
+            if not self._animation_timer.isActive():
+                self._animation_timer.start(50)  # 20fps
+        elif not self._has_animated_emotes and had_animated:
+            self._animation_timer.stop()
+
+    def _on_animation_tick(self) -> None:
+        """Advance the global animation frame and repaint."""
+        self._animation_frame += 1
+        self._delegate.set_animation_frame(self._animation_frame)
+        self._list_view.viewport().update()
+
+    def update_animation_state(self) -> None:
+        """Start or stop the animation timer based on settings."""
+        if self._has_animated_emotes and self.settings.animate_emotes:
+            if not self._animation_timer.isActive():
+                self._animation_timer.start(50)
+        else:
+            self._animation_timer.stop()
 
     def repaint_messages(self) -> None:
         """Trigger a repaint of visible messages (e.g. after emotes load)."""
@@ -435,6 +544,17 @@ class ChatWidget(QWidget):
         if not menu.isEmpty():
             menu.exec(self._list_view.viewport().mapToGlobal(pos))
 
+    def hideEvent(self, event) -> None:  # noqa: N802
+        """Stop animation timer when widget is hidden."""
+        self._animation_timer.stop()
+        super().hideEvent(event)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Restart animation timer when widget is shown (if applicable)."""
+        super().showEvent(event)
+        if self._has_animated_emotes and self.settings.animate_emotes:
+            self._animation_timer.start(50)
+
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Invalidate item layout cache on resize to prevent text overlap."""
         super().resizeEvent(event)
@@ -463,10 +583,116 @@ class ChatWidget(QWidget):
         """Dismiss the hype chat pinned banner."""
         self._hype_banner.hide()
 
+    def _show_settings_menu(self) -> None:
+        """Show a popup menu with quick chat toggles."""
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1a1a2e;
+                color: #eee;
+                border: 1px solid #333;
+            }
+            QMenu::item:selected {
+                background-color: #2a2a4a;
+            }
+            QMenu::indicator:checked {
+                color: #6441a5;
+            }
+        """)
+
+        # Name colors toggle
+        color_action = menu.addAction("Show Name Colors")
+        color_action.setCheckable(True)
+        color_action.setChecked(self.settings.use_platform_name_colors)
+        color_action.toggled.connect(self._toggle_name_colors)
+
+        # Timestamps toggle
+        ts_action = menu.addAction("Show Timestamps")
+        ts_action.setCheckable(True)
+        ts_action.setChecked(self.settings.show_timestamps)
+        ts_action.toggled.connect(self._toggle_timestamps)
+
+        # Badges toggle
+        badge_action = menu.addAction("Show Badges")
+        badge_action.setCheckable(True)
+        badge_action.setChecked(self.settings.show_badges)
+        badge_action.toggled.connect(self._toggle_badges)
+
+        # Emotes toggle
+        emote_action = menu.addAction("Show Emotes")
+        emote_action.setCheckable(True)
+        emote_action.setChecked(self.settings.show_emotes)
+        emote_action.toggled.connect(self._toggle_emotes)
+
+        # Animate emotes toggle
+        anim_action = menu.addAction("Animate Emotes")
+        anim_action.setCheckable(True)
+        anim_action.setChecked(self.settings.animate_emotes)
+        anim_action.setEnabled(self.settings.show_emotes)
+        anim_action.toggled.connect(self._toggle_animate_emotes)
+
+        menu.addSeparator()
+        more_action = menu.addAction("More Settings...")
+        more_action.triggered.connect(self.settings_clicked.emit)
+
+        # Show menu above the button
+        btn = self._settings_button
+        pos = btn.mapToGlobal(btn.rect().topLeft())
+        pos.setY(pos.y() - menu.sizeHint().height())
+        menu.exec(pos)
+
+    def _toggle_name_colors(self, checked: bool) -> None:
+        """Toggle user-defined name colors."""
+        self.settings.use_platform_name_colors = checked
+        self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
+    def _toggle_timestamps(self, checked: bool) -> None:
+        """Toggle timestamp display."""
+        self.settings.show_timestamps = checked
+        self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
+    def _toggle_badges(self, checked: bool) -> None:
+        """Toggle badge display."""
+        self.settings.show_badges = checked
+        self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
+    def _toggle_emotes(self, checked: bool) -> None:
+        """Toggle emote display."""
+        self.settings.show_emotes = checked
+        self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
+    def _toggle_animate_emotes(self, checked: bool) -> None:
+        """Toggle emote animation (static first frame when off)."""
+        self.settings.animate_emotes = checked
+        self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
     def eventFilter(self, obj, event):  # noqa: N802
-        """Handle tooltip and click events on the list view viewport."""
+        """Handle tooltip, click, and wheel events on the list view viewport."""
         if obj is not self._list_view.viewport():
             return super().eventFilter(obj, event)
+
+        # Ctrl+Wheel: adjust font size
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    new_size = min(self.settings.font_size + 1, 30)
+                elif delta < 0:
+                    new_size = max(self.settings.font_size - 1, 4)
+                else:
+                    return True
+                if new_size != self.settings.font_size:
+                    self.settings.font_size = new_size
+                    self._model.layoutChanged.emit()
+                    self.font_size_changed.emit(new_size)
+                return True
 
         # Username click → show user's chat history
         if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
@@ -552,6 +778,81 @@ class ChatWidget(QWidget):
         self._history_dialogs.add(dialog)
         dialog.show()
 
+    def _toggle_search(self) -> None:
+        """Toggle the search bar visibility."""
+        if self._search_widget.isVisible():
+            self._close_search()
+        else:
+            self._search_widget.show()
+            self._search_input.setFocus()
+            self._search_input.selectAll()
+
+    def _close_search(self) -> None:
+        """Hide the search bar and clear highlights."""
+        self._search_widget.hide()
+        self._search_input.clear()
+        self._search_matches.clear()
+        self._search_current = -1
+        self._search_count_label.setText("")
+
+    def _on_search_text_changed(self, text: str) -> None:
+        """Update search matches when query changes."""
+        self._search_matches.clear()
+        self._search_current = -1
+
+        if not text:
+            self._search_count_label.setText("")
+            return
+
+        query = text.lower()
+        for row in range(self._model.rowCount()):
+            index = self._model.index(row, 0)
+            msg = index.data(MessageRole)
+            if not msg or not isinstance(msg, ChatMessage):
+                continue
+            if query in msg.user.display_name.lower() or query in msg.text.lower():
+                self._search_matches.append(row)
+
+        if self._search_matches:
+            # Start at the most recent match
+            self._search_current = len(self._search_matches) - 1
+            self._scroll_to_search_match()
+        else:
+            self._search_count_label.setText("No matches")
+
+    def _search_next(self) -> None:
+        """Navigate to the next search match."""
+        if not self._search_matches:
+            return
+        self._search_current = (self._search_current + 1) % len(self._search_matches)
+        self._scroll_to_search_match()
+
+    def _search_prev(self) -> None:
+        """Navigate to the previous search match."""
+        if not self._search_matches:
+            return
+        self._search_current = (self._search_current - 1) % len(self._search_matches)
+        self._scroll_to_search_match()
+
+    def _scroll_to_search_match(self) -> None:
+        """Scroll to the current search match and update the count label."""
+        if not self._search_matches or self._search_current < 0:
+            return
+        row = self._search_matches[self._search_current]
+        index = self._model.index(row, 0)
+        self._list_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
+        self._list_view.setCurrentIndex(index)
+        total = len(self._search_matches)
+        current = self._search_current + 1
+        self._search_count_label.setText(f"{current}/{total}")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Handle Escape to close search bar."""
+        if event.key() == Qt.Key.Key_Escape and self._search_widget.isVisible():
+            self._close_search()
+            return
+        super().keyPressEvent(event)
+
 
 class UserHistoryDialog(QDialog):
     """Dialog showing all messages from a specific user in the current chat session."""
@@ -593,17 +894,94 @@ class UserHistoryDialog(QDialog):
         layout.addWidget(self._header)
         self._display_name = user.display_name
 
+        # Search bar (hidden by default)
+        self._search_widget = QWidget()
+        self._search_widget.setStyleSheet("""
+            QWidget {
+                background-color: #16213e;
+                border-bottom: 1px solid #333;
+            }
+        """)
+        search_layout = QHBoxLayout(self._search_widget)
+        search_layout.setContentsMargins(6, 4, 6, 4)
+        search_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search messages...")
+        self._search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a2e;
+                border: 1px solid #444;
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: #eee;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #6441a5; }
+        """)
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_input.returnPressed.connect(self._search_next)
+        search_layout.addWidget(self._search_input)
+
+        self._search_count_label = QLabel("")
+        self._search_count_label.setStyleSheet(
+            "color: #aaa; font-size: 11px; background: transparent;"
+            " min-width: 50px;"
+        )
+        search_layout.addWidget(self._search_count_label)
+
+        search_btn_style = """
+            QPushButton {
+                background: transparent; color: #aaa; border: none;
+                font-size: 14px; padding: 2px 6px;
+            }
+            QPushButton:hover {
+                color: #fff; background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }
+        """
+        prev_btn = QPushButton("\u25b2")
+        prev_btn.setFixedSize(24, 24)
+        prev_btn.setStyleSheet(search_btn_style)
+        prev_btn.clicked.connect(self._search_prev)
+        search_layout.addWidget(prev_btn)
+
+        next_btn = QPushButton("\u25bc")
+        next_btn.setFixedSize(24, 24)
+        next_btn.setStyleSheet(search_btn_style)
+        next_btn.clicked.connect(self._search_next)
+        search_layout.addWidget(next_btn)
+
+        close_btn = QPushButton("\u2715")
+        close_btn.setFixedSize(24, 24)
+        close_btn.setStyleSheet(search_btn_style)
+        close_btn.clicked.connect(self._close_search)
+        search_layout.addWidget(close_btn)
+
+        self._search_widget.hide()
+        layout.addWidget(self._search_widget)
+
+        self._search_matches: list[int] = []
+        self._search_current: int = -1
+
         # Message list using the same delegate
         self._model = ChatMessageModel(max_messages=5000, parent=self)
-        delegate = ChatMessageDelegate(settings, parent=self)
-        delegate.set_emote_cache(emote_cache)
+        self._delegate = ChatMessageDelegate(settings, parent=self)
+        self._delegate.set_emote_cache(emote_cache)
 
         self._list_view = QListView()
         self._list_view.setModel(self._model)
-        self._list_view.setItemDelegate(delegate)
+        self._list_view.setItemDelegate(self._delegate)
         self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        self._list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
+        self._list_view.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._list_view.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._list_view.setSelectionMode(
+            QListView.SelectionMode.ExtendedSelection
+        )
         self._list_view.setWordWrap(True)
         self._list_view.setUniformItemSizes(False)
         self._list_view.setSpacing(0)
@@ -616,9 +994,19 @@ class UserHistoryDialog(QDialog):
         """)
         layout.addWidget(self._list_view)
 
+        # Enable Ctrl+scroll font size on viewport
+        self._list_view.viewport().installEventFilter(self)
+
         # Copy shortcut (Ctrl+C)
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
         copy_shortcut.activated.connect(self._copy_selected_messages)
+
+        # Find shortcut (Ctrl+F)
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self._toggle_search)
+
+        # Resize debounce timer
+        self._resize_timer: QTimer | None = None
 
         # Populate
         self._model.add_messages(messages)
@@ -681,3 +1069,118 @@ class UserHistoryDialog(QDialog):
         if lines:
             clipboard = QApplication.clipboard()
             clipboard.setText("\n".join(lines))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Invalidate item layout cache on resize to prevent text overlap."""
+        super().resizeEvent(event)
+        self._list_view.scheduleDelayedItemsLayout()
+        if self._resize_timer is None:
+            self._resize_timer = QTimer(self)
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._on_resize_debounced)
+        self._resize_timer.start(30)
+
+    def _on_resize_debounced(self) -> None:
+        """Force full relayout after resize settles."""
+        self._model.layoutChanged.emit()
+
+    def _toggle_search(self) -> None:
+        """Toggle the search bar visibility."""
+        if self._search_widget.isVisible():
+            self._close_search()
+        else:
+            self._search_widget.show()
+            self._search_input.setFocus()
+            self._search_input.selectAll()
+
+    def _close_search(self) -> None:
+        """Hide the search bar and clear state."""
+        self._search_widget.hide()
+        self._search_input.clear()
+        self._search_matches.clear()
+        self._search_current = -1
+        self._search_count_label.setText("")
+
+    def _on_search_text_changed(self, text: str) -> None:
+        """Update search matches when query changes."""
+        self._search_matches.clear()
+        self._search_current = -1
+
+        if not text:
+            self._search_count_label.setText("")
+            return
+
+        query = text.lower()
+        for row in range(self._model.rowCount()):
+            index = self._model.index(row, 0)
+            msg = index.data(MessageRole)
+            if not msg or not isinstance(msg, ChatMessage):
+                continue
+            if query in msg.user.display_name.lower() or query in msg.text.lower():
+                self._search_matches.append(row)
+
+        if self._search_matches:
+            self._search_current = len(self._search_matches) - 1
+            self._scroll_to_search_match()
+        else:
+            self._search_count_label.setText("No matches")
+
+    def _search_next(self) -> None:
+        """Navigate to the next search match."""
+        if not self._search_matches:
+            return
+        self._search_current = (self._search_current + 1) % len(
+            self._search_matches
+        )
+        self._scroll_to_search_match()
+
+    def _search_prev(self) -> None:
+        """Navigate to the previous search match."""
+        if not self._search_matches:
+            return
+        self._search_current = (self._search_current - 1) % len(
+            self._search_matches
+        )
+        self._scroll_to_search_match()
+
+    def _scroll_to_search_match(self) -> None:
+        """Scroll to the current search match and update count."""
+        if not self._search_matches or self._search_current < 0:
+            return
+        row = self._search_matches[self._search_current]
+        index = self._model.index(row, 0)
+        self._list_view.scrollTo(
+            index, QAbstractItemView.ScrollHint.PositionAtCenter
+        )
+        self._list_view.setCurrentIndex(index)
+        total = len(self._search_matches)
+        current = self._search_current + 1
+        self._search_count_label.setText(f"{current}/{total}")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Handle Escape to close search bar."""
+        if event.key() == Qt.Key.Key_Escape and self._search_widget.isVisible():
+            self._close_search()
+            return
+        super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle Ctrl+Wheel for font size adjustment."""
+        if obj is self._list_view.viewport():
+            if (
+                event.type() == QEvent.Type.Wheel
+                and isinstance(event, QWheelEvent)
+            ):
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    delta = event.angleDelta().y()
+                    if delta > 0:
+                        new_size = min(self._settings.font_size + 1, 30)
+                    elif delta < 0:
+                        new_size = max(self._settings.font_size - 1, 4)
+                    else:
+                        return True
+                    if new_size != self._settings.font_size:
+                        self._settings.font_size = new_size
+                        self._model.layoutChanged.emit()
+                    return True
+        return super().eventFilter(obj, event)

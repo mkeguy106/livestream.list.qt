@@ -5,13 +5,18 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 
 from ..core.models import Livestream, StreamPlatform
 from ..core.settings import Settings
 from .connections.base import BaseChatConnection
-from .emotes.cache import EmoteCache, EmoteLoaderWorker
+from .emotes.cache import (
+    DEFAULT_EMOTE_HEIGHT,
+    EmoteCache,
+    EmoteLoaderWorker,
+    _extract_frames,
+)
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider
 from .models import ChatEmote, ChatMessage, ChatUser
 
@@ -563,9 +568,14 @@ class ChatManager(QObject):
             # Queue emote image downloads (native + third-party)
             for start, end, emote in msg.emote_positions:
                 emote_key = f"emote:{emote.provider}:{emote.id}"
-                if not self._emote_cache.has(emote_key) and not self._emote_cache.is_pending(
-                    emote_key
-                ):
+                if self._emote_cache.is_pending(emote_key):
+                    continue
+                if not self._emote_cache.has(emote_key):
+                    url = emote.url_template.replace("{size}", "2.0")
+                    self._emote_cache.mark_pending(emote_key)
+                    self._download_queue.append((emote_key, url))
+                elif not self._emote_cache.has_animation_data(emote_key):
+                    # Legacy PNG-only cache - re-download for animation detection
                     url = emote.url_template.replace("{size}", "2.0")
                     self._emote_cache.mark_pending(emote_key)
                     self._download_queue.append((emote_key, url))
@@ -651,11 +661,18 @@ class ChatManager(QObject):
 
             # Queue image download (or load from disk cache)
             emote_key = f"emote:{emote.provider}:{emote.id}"
-            if not self._emote_cache.has(emote_key) and not self._emote_cache.is_pending(emote_key):
+            if self._emote_cache.is_pending(emote_key):
+                continue
+            if not self._emote_cache.has(emote_key):
+                # Not cached at all - download
+                self._emote_cache.mark_pending(emote_key)
+                self._download_queue.append((emote_key, emote.url_template))
+            elif not self._emote_cache.has_animation_data(emote_key):
+                # Legacy PNG cache only - re-download for animation detection
                 self._emote_cache.mark_pending(emote_key)
                 self._download_queue.append((emote_key, emote.url_template))
             elif emote_key not in self._emote_cache.pixmap_dict:
-                # Cached on disk but not in memory - load it now
+                # Has raw/animation data on disk but not in memory - load it
                 self._emote_cache.get(emote_key)
 
         logger.info(
@@ -706,6 +723,7 @@ class ChatManager(QObject):
         # Create new loader
         self._loader = EmoteLoaderWorker(parent=self)
         self._loader.emote_ready.connect(self._on_emote_downloaded)
+        self._loader.animated_emote_ready.connect(self._on_animated_emote_downloaded)
         self._loader.finished.connect(self._on_loader_finished)
 
         for key, url in self._download_queue:
@@ -714,10 +732,33 @@ class ChatManager(QObject):
 
         self._loader.start()
 
-    def _on_emote_downloaded(self, key: str, pixmap: object) -> None:
+    def _on_emote_downloaded(self, key: str, pixmap: object, raw_data: bytes = b"") -> None:
         """Handle a downloaded emote/badge image."""
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
             self._emote_cache.put(key, pixmap)
+            # Save raw bytes for emotes so has_animation_data() returns True,
+            # preventing re-downloads on future launches.
+            if raw_data and key.startswith("emote:"):
+                self._emote_cache._put_disk_raw(key, raw_data)
+
+    def _on_animated_emote_downloaded(self, key: str, raw_data: bytes) -> None:
+        """Handle a downloaded animated emote - extract frames on GUI thread."""
+        result = _extract_frames(raw_data)
+        if result:
+            frames, delays = result
+            self._emote_cache.put_animated(key, frames, delays)
+            self._emote_cache._put_disk_raw(key, raw_data)
+        else:
+            # Detection said animated but extraction failed - treat as static
+            pixmap = QPixmap()
+            if pixmap.loadFromData(raw_data):
+                if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
+                    pixmap = pixmap.scaledToHeight(
+                        DEFAULT_EMOTE_HEIGHT,
+                        mode=Qt.TransformationMode.SmoothTransformation,
+                    )
+                self._emote_cache.put(key, pixmap)
+                self._emote_cache._put_disk_raw(key, raw_data)
 
     def _on_emote_loaded(self, key: str) -> None:
         """Handle emote cache updated signal - trigger repaint."""

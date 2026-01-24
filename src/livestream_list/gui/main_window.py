@@ -1968,6 +1968,15 @@ class PreferencesDialog(QDialog):
         self.chat_emotes_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_emotes_cb)
 
+        self.chat_animate_emotes_cb = QCheckBox("Animate emotes")
+        self.chat_animate_emotes_cb.setChecked(self.app.settings.chat.builtin.animate_emotes)
+        self.chat_animate_emotes_cb.setEnabled(self.app.settings.chat.builtin.show_emotes)
+        self.chat_animate_emotes_cb.stateChanged.connect(self._on_chat_changed)
+        self.chat_emotes_cb.stateChanged.connect(
+            lambda state: self.chat_animate_emotes_cb.setEnabled(bool(state))
+        )
+        builtin_layout.addRow(self.chat_animate_emotes_cb)
+
         self.chat_alt_rows_cb = QCheckBox("Alternating row colors")
         self.chat_alt_rows_cb.setChecked(self.app.settings.chat.builtin.show_alternating_rows)
         self.chat_alt_rows_cb.stateChanged.connect(self._on_chat_changed)
@@ -2101,6 +2110,14 @@ class PreferencesDialog(QDialog):
         self.kick_status = QLabel("Status: Not logged in")
         self.kick_status.setStyleSheet("color: gray;")
         kick_layout.addWidget(self.kick_status)
+
+        kick_note = QLabel(
+            "Kick does not support importing follows.\n"
+            "Add Kick channels manually via the main window."
+        )
+        kick_note.setStyleSheet("color: gray; font-style: italic;")
+        kick_note.setWordWrap(True)
+        kick_layout.addWidget(kick_note)
 
         kick_buttons = QHBoxLayout()
         self.kick_login_btn = QPushButton("Login to Kick")
@@ -2266,6 +2283,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_badges = self.chat_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
+        self.app.settings.chat.builtin.animate_emotes = self.chat_animate_emotes_cb.isChecked()
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
         self.app.settings.chat.builtin.use_platform_name_colors = (
             self.chat_name_colors_cb.isChecked()
@@ -2285,9 +2303,10 @@ class PreferencesDialog(QDialog):
             providers.append("ffz")
         self.app.settings.chat.builtin.emote_providers = providers
         self.app.save_settings()
-        # Live-update chat window tab style if open
+        # Live-update chat window if open
         if self.app._chat_window:
             self.app._chat_window.update_tab_style()
+            self.app._chat_window.update_animation_state()
 
     def _update_swatch(self, button: QPushButton, hex_color: str) -> None:
         """Update a color swatch button's background from a hex string."""

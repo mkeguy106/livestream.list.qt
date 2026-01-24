@@ -43,10 +43,20 @@ class ChatMessageDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.settings = settings
         self._emote_cache: dict[str, QPixmap] = {}
+        self._animated_cache: dict[str, list[QPixmap]] = {}
+        self._animation_frame: int = 0
 
     def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
         """Set the shared emote pixmap cache."""
         self._emote_cache = cache
+
+    def set_animated_cache(self, cache: dict[str, list[QPixmap]]) -> None:
+        """Set the shared animated frame cache."""
+        self._animated_cache = cache
+
+    def set_animation_frame(self, frame: int) -> None:
+        """Set the current global animation frame counter."""
+        self._animation_frame = frame
 
     def _get_emote_height(self, fm: QFontMetrics) -> int:
         """Get emote height scaled to font size."""
@@ -115,7 +125,6 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 x, y, ts_width, line_height, ALIGN_LEFT_VCENTER, ts_text
             )
             x += ts_width
-            available_width -= ts_width
             painter.setFont(font)
 
         # System message text (USERNOTICE - subs, raids, etc.)
@@ -157,7 +166,6 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         x, badge_y, badge_size, badge_size, pixmap
                     )
                     x += badge_size + BADGE_SPACING
-                    available_width -= badge_size + BADGE_SPACING
 
         # Username
         bold_font = QFont(font)
@@ -171,7 +179,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 else QColor(180, 130, 255)
             )
         else:
-            user_color = option.palette.text().color()
+            user_color = QColor(100, 180, 220)
         painter.setPen(highlight_color if is_selected else user_color)
 
         name_text = message.user.display_name
@@ -245,73 +253,104 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         is_moderated: bool,
     ) -> None:
-        """Paint text with inline emotes."""
+        """Paint text with inline emotes, wrapping at available_width."""
+        start_x = x
         current_x = x
+        current_y = y
+        right_edge = x + available_width
         last_end = 0
 
         for start, end, emote in emote_positions:
-            # Draw text before emote
+            # Draw text before emote (word-by-word wrapping)
             if start > last_end:
                 segment = text[last_end:start]
-                seg_width = fm.horizontalAdvance(segment)
-                if is_moderated:
-                    self._draw_strikethrough_text(
-                        painter, current_x, y, seg_width, line_height, segment, fm
-                    )
-                else:
-                    painter.drawText(
-                        current_x,
-                        y,
-                        seg_width + 10,
-                        line_height,
-                        ALIGN_LEFT_VCENTER,
-                        segment,
-                    )
-                current_x += seg_width
+                current_x, current_y = self._draw_wrapping_text(
+                    painter, segment, current_x, current_y, start_x,
+                    right_edge, line_height, fm, is_moderated,
+                )
 
-            # Draw emote
+            # Draw emote (wrap whole emote if it doesn't fit)
             emote_key = f"emote:{emote.provider}:{emote.id}"
-            pixmap = self._emote_cache.get(emote_key)
+            frames = self._animated_cache.get(emote_key)
+            if frames and self.settings.animate_emotes:
+                frame_idx = self._animation_frame % len(frames)
+                pixmap = frames[frame_idx]
+            elif frames:
+                pixmap = frames[0]
+            else:
+                pixmap = self._emote_cache.get(emote_key)
             if pixmap and not pixmap.isNull():
                 smooth = Qt.TransformationMode.SmoothTransformation
                 scaled = pixmap.scaledToHeight(emote_height, smooth)
-                emote_y = y + (line_height - emote_height) // 2
+                emote_w = scaled.width()
+                if current_x + emote_w > right_edge and current_x > start_x:
+                    current_x = start_x
+                    current_y += line_height
+                emote_y = current_y + (line_height - emote_height) // 2
                 painter.drawPixmap(int(current_x), int(emote_y), scaled)
-                current_x += scaled.width()
+                current_x += emote_w
             else:
-                emote_text = (
-                    text[start:end] if end <= len(text) else emote.name
+                emote_text = text[start:end] if end <= len(text) else emote.name
+                current_x, current_y = self._draw_wrapping_text(
+                    painter, emote_text, current_x, current_y, start_x,
+                    right_edge, line_height, fm, is_moderated,
                 )
-                seg_width = fm.horizontalAdvance(emote_text)
-                painter.drawText(
-                    int(current_x),
-                    y,
-                    seg_width + 4,
-                    line_height,
-                    ALIGN_LEFT_VCENTER,
-                    emote_text,
-                )
-                current_x += seg_width
 
             last_end = end
 
         # Draw remaining text after last emote
         if last_end < len(text):
             segment = text[last_end:]
-            seg_width = fm.horizontalAdvance(segment)
-            if is_moderated:
-                self._draw_strikethrough_text(
-                    painter, current_x, y, seg_width, line_height, segment, fm
-                )
-            else:
-                painter.drawText(
-                    int(current_x),
-                    y,
-                    seg_width + 10,
-                    line_height,
-                    ALIGN_LEFT_VCENTER,
-                    segment,
-                )
+            self._draw_wrapping_text(
+                painter, segment, current_x, current_y, start_x,
+                right_edge, line_height, fm, is_moderated,
+            )
+
+    def _draw_wrapping_text(
+        self,
+        painter: QPainter,
+        text: str,
+        current_x: int,
+        current_y: int,
+        start_x: int,
+        right_edge: int,
+        line_height: int,
+        fm: QFontMetrics,
+        is_moderated: bool,
+    ) -> tuple[int, int]:
+        """Draw text word-by-word, wrapping to the next line as needed.
+
+        Returns (current_x, current_y) after drawing.
+        """
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            # Add space before word (except first word if at line start after emote)
+            draw_word = word if i == 0 else " " + word
+            word_width = fm.horizontalAdvance(draw_word)
+
+            # Wrap if this word doesn't fit (but not if we're at the start of a line)
+            if current_x + word_width > right_edge and current_x > start_x:
+                current_x = start_x
+                current_y += line_height
+                # Remove leading space after wrap
+                if draw_word.startswith(" "):
+                    draw_word = draw_word[1:]
+                    word_width = fm.horizontalAdvance(draw_word)
+
+            if draw_word:
+                if is_moderated:
+                    self._draw_strikethrough_text(
+                        painter, current_x, current_y, word_width, line_height,
+                        draw_word, fm,
+                    )
+                else:
+                    painter.drawText(
+                        int(current_x), int(current_y), word_width + 2,
+                        line_height, ALIGN_LEFT_VCENTER, draw_word,
+                    )
+                current_x += word_width
+
+        return current_x, current_y
 
     def _paint_wrapped_text(
         self,
@@ -325,17 +364,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         is_moderated: bool,
     ) -> None:
         """Paint text with word wrapping."""
-        if is_moderated:
-            self._draw_strikethrough_text(
-                painter, x, y, available_width, line_height, text, fm
-            )
-        else:
-            elided = fm.elidedText(
-                text, Qt.TextElideMode.ElideNone, available_width * 3
-            )
-            painter.drawText(
-                x, y, available_width, line_height * 3, ALIGN_WRAP, elided
-            )
+        right_edge = x + available_width
+        self._draw_wrapping_text(
+            painter, text, x, y, x, right_edge, line_height, fm, is_moderated,
+        )
 
     def _draw_strikethrough_text(
         self,
@@ -405,17 +437,21 @@ class ChatMessageDelegate(QStyledItemDelegate):
         name_text = message.user.display_name + suffix
         prefix_width += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
-        # Text width
-        text_width = fm.horizontalAdvance(message.text)
-
-        # Calculate number of lines needed
+        # Calculate number of lines needed via wrapping simulation
         content_width = available_width - prefix_width
         if content_width <= 0:
             content_width = available_width
 
-        lines = 1
-        if text_width > content_width:
-            lines = max(1, int(text_width / content_width) + 1)
+        if self.settings.show_emotes and message.emote_positions:
+            lines = self._compute_wrapped_lines_with_emotes(
+                message.text, message.emote_positions, content_width, fm, emote_height
+            )
+        else:
+            text_width = fm.horizontalAdvance(message.text)
+            lines = 1
+            if text_width > content_width:
+                # Simulate word wrapping
+                lines = self._compute_wrapped_lines(message.text, content_width, fm)
 
         # System messages need extra lines for system_text
         extra_lines = 0
@@ -509,7 +545,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         return QRect(int(x), int(y), int(name_width), line_height)
 
     def _get_emote_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
-        """Find which emote (if any) is at the given position."""
+        """Find which emote (if any) is at the given position, accounting for wrapping."""
         padding_v = self.settings.line_spacing
         rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
         x = rect.x()
@@ -556,17 +592,25 @@ class ChatMessageDelegate(QStyledItemDelegate):
         name_text = message.user.display_name + suffix
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
-        # Now walk through text + emotes
+        # Walk through text + emotes with wrapping logic
         text = message.text
         last_end = 0
+        start_x = rect.x()
+        current_x = x
+        current_y = y
+        available_width = rect.width()
+        right_edge = rect.x() + available_width
 
         for start, end, emote in message.emote_positions:
-            # Text before emote
+            # Advance past text before emote (with wrapping)
             if start > last_end:
                 segment = text[last_end:start]
-                x += fm.horizontalAdvance(segment)
+                current_x, current_y = self._advance_wrapping_text(
+                    segment, current_x, current_y, start_x, right_edge,
+                    line_height, fm,
+                )
 
-            # Emote rect
+            # Emote rect (with wrapping)
             emote_key = f"emote:{emote.provider}:{emote.id}"
             pixmap = self._emote_cache.get(emote_key)
             if pixmap and not pixmap.isNull():
@@ -577,14 +621,46 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 emote_text = text[start:end] if end <= len(text) else emote.name
                 emote_w = fm.horizontalAdvance(emote_text)
 
-            emote_y = y + (line_height - emote_height) // 2
-            emote_rect = QRect(int(x), int(emote_y), int(emote_w), emote_height)
+            # Wrap emote if needed
+            if current_x + emote_w > right_edge and current_x > start_x:
+                current_x = start_x
+                current_y += line_height
+
+            emote_y_pos = current_y + (line_height - emote_height) // 2
+            emote_rect = QRect(int(current_x), int(emote_y_pos), int(emote_w), emote_height)
             if emote_rect.contains(pos):
                 return emote
-            x += emote_w
+            current_x += emote_w
             last_end = end
 
         return None
+
+    def _advance_wrapping_text(
+        self,
+        text: str,
+        current_x: int,
+        current_y: int,
+        start_x: int,
+        right_edge: int,
+        line_height: int,
+        fm: QFontMetrics,
+    ) -> tuple[int, int]:
+        """Advance position through text with word wrapping (no drawing).
+
+        Returns (current_x, current_y) after the text.
+        """
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            draw_word = word if i == 0 else " " + word
+            word_width = fm.horizontalAdvance(draw_word)
+            if current_x + word_width > right_edge and current_x > start_x:
+                current_x = start_x
+                current_y += line_height
+                if draw_word.startswith(" "):
+                    draw_word = draw_word[1:]
+                    word_width = fm.horizontalAdvance(draw_word)
+            current_x += word_width
+        return current_x, current_y
 
     def _get_badge_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
         """Find which badge (if any) is at the given position."""
@@ -633,3 +709,94 @@ class ChatMessageDelegate(QStyledItemDelegate):
             x += badge_size + BADGE_SPACING
 
         return None
+
+    def _compute_wrapped_lines(
+        self, text: str, content_width: int, fm: QFontMetrics,
+    ) -> int:
+        """Compute how many lines text needs with word wrapping."""
+        lines = 1
+        current_x = 0
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            draw_word = word if i == 0 else " " + word
+            word_width = fm.horizontalAdvance(draw_word)
+            if current_x + word_width > content_width and current_x > 0:
+                lines += 1
+                current_x = 0
+                if draw_word.startswith(" "):
+                    draw_word = draw_word[1:]
+                    word_width = fm.horizontalAdvance(draw_word)
+            current_x += word_width
+        return lines
+
+    def _compute_wrapped_lines_with_emotes(
+        self,
+        text: str,
+        emote_positions: list,
+        content_width: int,
+        fm: QFontMetrics,
+        emote_height: int,
+    ) -> int:
+        """Compute how many lines text+emotes need with word wrapping."""
+        lines = 1
+        current_x = 0
+        last_end = 0
+
+        for start, end, emote in emote_positions:
+            # Text before emote
+            if start > last_end:
+                segment = text[last_end:start]
+                current_x, lines = self._advance_line_count(
+                    segment, current_x, lines, content_width, fm
+                )
+
+            # Emote width
+            emote_key = f"emote:{emote.provider}:{emote.id}"
+            pixmap = self._emote_cache.get(emote_key)
+            if pixmap and not pixmap.isNull():
+                smooth = Qt.TransformationMode.SmoothTransformation
+                scaled = pixmap.scaledToHeight(emote_height, smooth)
+                emote_w = scaled.width()
+            else:
+                emote_text = text[start:end] if end <= len(text) else emote.name
+                emote_w = fm.horizontalAdvance(emote_text)
+
+            if current_x + emote_w > content_width and current_x > 0:
+                lines += 1
+                current_x = 0
+            current_x += emote_w
+            last_end = end
+
+        # Remaining text
+        if last_end < len(text):
+            segment = text[last_end:]
+            _, lines = self._advance_line_count(
+                segment, current_x, lines, content_width, fm
+            )
+
+        return lines
+
+    def _advance_line_count(
+        self,
+        text: str,
+        current_x: int,
+        lines: int,
+        content_width: int,
+        fm: QFontMetrics,
+    ) -> tuple[int, int]:
+        """Advance line count through text with word wrapping (no drawing).
+
+        Returns (current_x, lines).
+        """
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            draw_word = word if i == 0 else " " + word
+            word_width = fm.horizontalAdvance(draw_word)
+            if current_x + word_width > content_width and current_x > 0:
+                lines += 1
+                current_x = 0
+                if draw_word.startswith(" "):
+                    draw_word = draw_word[1:]
+                    word_width = fm.horizontalAdvance(draw_word)
+            current_x += word_width
+        return current_x, lines

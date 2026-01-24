@@ -406,6 +406,11 @@ class ChatWindow(QMainWindow):
             self.settings.chat.builtin.tab_inactive_color,
         )
 
+    def update_animation_state(self) -> None:
+        """Update animation timers on all widgets (call after prefs change)."""
+        for widget in self._widgets.values():
+            widget.update_animation_state()
+
     def _connect_signals(self) -> None:
         """Connect ChatManager signals."""
         self.chat_manager.messages_received.connect(self._on_messages_received)
@@ -467,9 +472,12 @@ class ChatWindow(QMainWindow):
         widget.message_sent.connect(self._on_message_sent)
         widget.popout_requested.connect(self._on_popout_requested)
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
+        widget.font_size_changed.connect(self._on_font_size_changed)
+        widget.settings_changed.connect(self._on_settings_changed)
 
-        # Set shared emote cache and emote map on the widget
+        # Set shared emote cache, animated cache, and emote map on the widget
         widget.set_emote_cache(self.chat_manager.emote_cache.pixmap_dict)
+        widget.set_animated_cache(self.chat_manager.emote_cache.animated_dict)
         if self.chat_manager.emote_map:
             widget.set_emote_map(self.chat_manager.emote_map)
 
@@ -525,9 +533,11 @@ class ChatWindow(QMainWindow):
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - update cache refs and repaint."""
         cache_dict = self.chat_manager.emote_cache.pixmap_dict
+        animated_dict = self.chat_manager.emote_cache.animated_dict
         emote_map = self.chat_manager.emote_map
         for widget in self._widgets.values():
             widget.set_emote_cache(cache_dict)
+            widget.set_animated_cache(animated_dict)
             if emote_map:
                 widget.set_emote_map(emote_map)
             widget.repaint_messages()
@@ -535,6 +545,20 @@ class ChatWindow(QMainWindow):
     def _on_message_sent(self, channel_key: str, text: str) -> None:
         """Handle a message being sent from a chat widget."""
         self.chat_manager.send_message(channel_key, text)
+
+    def _on_font_size_changed(self, new_size: int) -> None:
+        """Persist font size change and relayout all widgets."""
+        self.settings.chat.builtin.font_size = new_size
+        self.settings.save()
+        # Relayout all other widgets to match
+        for widget in self._widgets.values():
+            widget._model.layoutChanged.emit()
+
+    def _on_settings_changed(self) -> None:
+        """Persist chat setting toggles and relayout all widgets."""
+        self.settings.save()
+        for widget in self._widgets.values():
+            widget._model.layoutChanged.emit()
 
     def _on_tab_close(self, index: int) -> None:
         """Handle tab close button clicked."""
@@ -636,8 +660,18 @@ class ChatWindow(QMainWindow):
         ws.y = pos.y()
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        """Hide the window instead of closing to keep chats alive."""
+        """Disconnect tabbed chats and hide. Popouts stay connected."""
         self.save_window_state()
+
+        # Collect tabbed channel keys (those NOT popped out)
+        tabbed_keys = [
+            key for key in list(self._widgets.keys())
+            if key not in self._popout_windows
+        ]
+        # Disconnect each tabbed channel
+        for key in tabbed_keys:
+            self.close_chat(key)
+
         event.ignore()
         self.hide()
         self.window_hidden.emit()
