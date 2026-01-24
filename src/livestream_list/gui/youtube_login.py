@@ -155,13 +155,22 @@ def _find_chromium_cookies(cookie_paths: list[str]) -> str | None:
     return None
 
 
-def _get_chromium_key(keyring_label: str) -> bytes:
-    """Get the Chromium encryption key from the system keyring.
+class DecryptionKeyError(Exception):
+    """Raised when the browser's encryption key cannot be found."""
 
-    Falls back to the default password "peanuts" if keyring is unavailable.
+    pass
+
+
+def _get_chromium_password(keyring_label: str) -> str | None:
+    """Get the Chromium safe storage password from the system keyring.
+
+    Tries multiple methods:
+    1. secretstorage (GNOME Keyring / Secret Service API)
+    2. keyring library (handles KDE KWallet, GNOME, etc.)
+
+    Returns the password string, or None if not found.
     """
-    password = "peanuts"  # Default fallback
-
+    # Method 1: secretstorage (direct Secret Service search)
     try:
         import secretstorage
         connection = secretstorage.dbus_init()
@@ -169,11 +178,45 @@ def _get_chromium_key(keyring_label: str) -> bytes:
         if collection.is_locked():
             collection.unlock()
         for item in collection.get_all_items():
-            if item.get_label() == keyring_label:
+            label = item.get_label()
+            # Match exact label or "Keys/" prefixed label (KDE migration format)
+            if label == keyring_label or label.endswith(f"/{keyring_label}"):
                 password = item.get_secret().decode("utf-8")
-                break
+                logger.debug(f"Found keyring entry: {label!r}")
+                return password
     except Exception as e:
-        logger.debug(f"Could not read keyring ({keyring_label}): {e}")
+        logger.debug(f"secretstorage lookup failed ({keyring_label}): {e}")
+
+    # Method 2: keyring library (works with KWallet, macOS Keychain, etc.)
+    try:
+        import keyring as kr
+        browser_name = keyring_label.replace(" Safe Storage", "")
+        password = kr.get_password(keyring_label, browser_name)
+        if password:
+            logger.debug(f"Found via keyring library: {keyring_label}")
+            return password
+    except Exception as e:
+        logger.debug(f"keyring library lookup failed ({keyring_label}): {e}")
+
+    return None
+
+
+def _get_chromium_key(keyring_label: str) -> bytes:
+    """Get the Chromium AES decryption key.
+
+    Raises DecryptionKeyError if the password cannot be found in the keyring.
+    """
+    password = _get_chromium_password(keyring_label)
+
+    if password is None:
+        # "peanuts" is the default only when no keyring is in use at all.
+        # If a keyring IS available but doesn't have our entry, the browser
+        # is using a method we can't access (e.g., XDG portal on KDE).
+        raise DecryptionKeyError(
+            f"Could not find '{keyring_label}' in the system keyring.\n"
+            f"This browser may use a storage method not supported by the importer.\n"
+            f"Try using Chrome or Firefox instead."
+        )
 
     # Derive the AES key: PBKDF2-SHA1, 1 iteration, salt "saltysalt", 16 bytes
     key = hashlib.pbkdf2_hmac(
@@ -223,7 +266,13 @@ def _decrypt_chromium_value(encrypted: bytes, key: bytes) -> str:
             if 0 < pad_len <= 16:
                 decrypted = decrypted[:-pad_len]
 
-        return decrypted.decode("utf-8", errors="replace")
+        result = decrypted.decode("utf-8", errors="replace")
+
+        # Validate: if more than 25% non-printable chars, decryption likely failed
+        if result and sum(1 for c in result if not c.isprintable()) > len(result) * 0.25:
+            return ""
+
+        return result
     except Exception as e:
         logger.debug(f"Cookie decryption failed: {e}")
         return ""
@@ -422,6 +471,17 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
     # Extract cookies
     try:
         cookie_dict = _extract_cookies(browser_type, db_path, keyring_label)
+    except DecryptionKeyError as e:
+        QMessageBox.warning(
+            parent,
+            "Encryption Key Not Found",
+            f"{e}\n\n"
+            "This typically happens with browsers that use the XDG Desktop\n"
+            "Portal for key storage (common on KDE/Plasma).\n\n"
+            "Try selecting Chrome or Firefox instead, or use the\n"
+            "manual cookie paste method.",
+        )
+        return None
     except Exception as e:
         QMessageBox.critical(
             parent,
