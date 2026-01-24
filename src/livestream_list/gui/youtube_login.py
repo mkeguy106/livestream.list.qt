@@ -1,4 +1,4 @@
-"""YouTube login dialog using embedded browser for cookie capture."""
+"""YouTube cookie import from installed browsers using rookiepy."""
 
 import logging
 import os
@@ -7,6 +7,7 @@ import sys
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QLabel,
@@ -21,13 +22,27 @@ logger = logging.getLogger(__name__)
 # Required cookies for InnerTube authentication
 REQUIRED_COOKIE_KEYS = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
 
-YOUTUBE_LOGIN_URL = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https://www.youtube.com/"
+# Browsers supported by rookiepy, in display order
+SUPPORTED_BROWSERS = [
+    ("chrome", "Google Chrome"),
+    ("chromium", "Chromium"),
+    ("brave", "Brave"),
+    ("edge", "Microsoft Edge"),
+    ("firefox", "Firefox"),
+    ("opera", "Opera"),
+    ("opera_gx", "Opera GX"),
+    ("vivaldi", "Vivaldi"),
+    ("librewolf", "LibreWolf"),
+]
+
+# Domains to extract cookies from
+COOKIE_DOMAINS = [".youtube.com", ".google.com", "youtube.com", "google.com"]
 
 
-def is_webengine_available() -> bool:
-    """Check if PySide6 QtWebEngine is importable."""
+def is_rookiepy_available() -> bool:
+    """Check if rookiepy is importable."""
     try:
-        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+        import rookiepy  # noqa: F401
         return True
     except ImportError:
         return False
@@ -38,22 +53,76 @@ def is_flatpak() -> bool:
     return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
 
 
-class WebEngineInstallWorker(QThread):
-    """Background worker to install PySide6-Addons via pip."""
+def _detect_available_browsers() -> list[tuple[str, str]]:
+    """Detect which supported browsers are installed.
 
-    progress = Signal(str)  # status message
+    Returns list of (rookiepy_name, display_name) for browsers that
+    appear to have cookie stores on the system.
+    """
+    available = []
+    for browser_id, display_name in SUPPORTED_BROWSERS:
+        if _browser_has_cookies(browser_id):
+            available.append((browser_id, display_name))
+    return available
+
+
+def _browser_has_cookies(browser_id: str) -> bool:
+    """Check if a browser likely has a cookie store on this system."""
+    home = os.path.expanduser("~")
+
+    # Common cookie database paths on Linux
+    cookie_paths = {
+        "chrome": [
+            os.path.join(home, ".config/google-chrome/Default/Cookies"),
+            os.path.join(home, ".config/google-chrome/Profile 1/Cookies"),
+        ],
+        "chromium": [
+            os.path.join(home, ".config/chromium/Default/Cookies"),
+        ],
+        "brave": [
+            os.path.join(home, ".config/BraveSoftware/Brave-Browser/Default/Cookies"),
+        ],
+        "edge": [
+            os.path.join(home, ".config/microsoft-edge/Default/Cookies"),
+        ],
+        "firefox": [
+            # Firefox uses profiles - check if the directory exists
+            os.path.join(home, ".mozilla/firefox"),
+        ],
+        "opera": [
+            os.path.join(home, ".config/opera/Cookies"),
+        ],
+        "opera_gx": [
+            os.path.join(home, ".config/opera-gx/Cookies"),
+        ],
+        "vivaldi": [
+            os.path.join(home, ".config/vivaldi/Default/Cookies"),
+        ],
+        "librewolf": [
+            os.path.join(home, ".librewolf"),
+        ],
+    }
+
+    paths = cookie_paths.get(browser_id, [])
+    for path in paths:
+        if os.path.exists(path):
+            return True
+    return False
+
+
+class RookiepyInstallWorker(QThread):
+    """Background worker to install rookiepy via pip."""
+
     finished_ok = Signal()
     finished_error = Signal(str)
 
     def run(self):
-        """Run pip install PySide6-Addons."""
         try:
-            self.progress.emit("Installing QtWebEngine (this may take a moment)...")
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "PySide6-Addons"],
+                [sys.executable, "-m", "pip", "install", "rookiepy"],
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=60,
             )
             if result.returncode == 0:
                 self.finished_ok.emit()
@@ -61,25 +130,24 @@ class WebEngineInstallWorker(QThread):
                 error = result.stderr.strip() or result.stdout.strip()
                 self.finished_error.emit(f"pip install failed:\n{error[:500]}")
         except subprocess.TimeoutExpired:
-            self.finished_error.emit("Installation timed out (5 minutes)")
+            self.finished_error.emit("Installation timed out")
         except Exception as e:
             self.finished_error.emit(str(e))
 
 
-class WebEngineInstallDialog(QDialog):
-    """Dialog that installs QtWebEngine with progress feedback."""
+class RookiepyInstallDialog(QDialog):
+    """Dialog that installs rookiepy with progress feedback."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Installing QtWebEngine")
-        self.setMinimumWidth(400)
+        self.setWindowTitle("Installing cookie reader")
+        self.setMinimumWidth(350)
         self._success = False
 
         layout = QVBoxLayout(self)
 
         self._label = QLabel(
-            "YouTube login requires QtWebEngine (~150MB download).\n"
-            "Installing PySide6-Addons..."
+            "Installing rookiepy (small package for reading browser cookies)..."
         )
         self._label.setWordWrap(True)
         layout.addWidget(self._label)
@@ -88,12 +156,7 @@ class WebEngineInstallDialog(QDialog):
         self._progress.setRange(0, 0)  # Indeterminate
         layout.addWidget(self._progress)
 
-        self._status = QLabel("Starting...")
-        self._status.setStyleSheet("color: gray;")
-        layout.addWidget(self._status)
-
-        self._worker = WebEngineInstallWorker(parent=self)
-        self._worker.progress.connect(self._on_progress)
+        self._worker = RookiepyInstallWorker(parent=self)
         self._worker.finished_ok.connect(self._on_success)
         self._worker.finished_error.connect(self._on_error)
         self._worker.start()
@@ -102,19 +165,18 @@ class WebEngineInstallDialog(QDialog):
     def success(self) -> bool:
         return self._success
 
-    def _on_progress(self, msg: str):
-        self._status.setText(msg)
-
     def _on_success(self):
         self._success = True
         self.accept()
 
     def _on_error(self, error: str):
         self._label.setText("Installation failed.")
-        self._status.setText(error)
-        self._status.setStyleSheet("color: red;")
         self._progress.setRange(0, 1)
         self._progress.setValue(0)
+        error_label = QLabel(error)
+        error_label.setStyleSheet("color: red;")
+        error_label.setWordWrap(True)
+        self.layout().addWidget(error_label)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
@@ -122,176 +184,187 @@ class WebEngineInstallDialog(QDialog):
 
     def closeEvent(self, event):  # noqa: N802
         if self._worker.isRunning():
-            self._worker.wait(1000)
+            self._worker.wait(2000)
         super().closeEvent(event)
 
 
-class YouTubeLoginDialog(QDialog):
-    """Embedded browser dialog for YouTube/Google login.
+class BrowserSelectDialog(QDialog):
+    """Dialog for selecting which browser to import cookies from."""
 
-    Opens Google sign-in, captures cookies as the user logs in,
-    and returns the cookie string when the required keys are found.
-    """
-
-    cookies_captured = Signal(str)  # Full cookie string
-
-    def __init__(self, parent=None):
+    def __init__(self, browsers: list[tuple[str, str]], parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Login to YouTube")
-        self.setMinimumSize(500, 600)
-        self.resize(520, 700)
-        self._cookies: dict[str, str] = {}
-        self._cookie_string: str = ""
+        self.setWindowTitle("Import YouTube Cookies")
+        self.setMinimumWidth(380)
+        self._selected_browser: str = ""
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
 
-        # Info bar at top
-        info_bar = QWidget()
-        info_bar.setStyleSheet("background-color: #1a3a6b; padding: 6px;")
-        info_layout = QVBoxLayout(info_bar)
-        info_layout.setContentsMargins(10, 6, 10, 6)
-        info_label = QLabel(
-            "Log in with your Google account. "
-            "Cookies will be captured automatically when login completes."
+        info = QLabel(
+            "Select the browser where you are logged into YouTube.\n"
+            "Cookies will be read from its local cookie store."
         )
-        info_label.setStyleSheet("color: white; font-size: 12px;")
-        info_label.setWordWrap(True)
-        info_layout.addWidget(info_label)
-        layout.addWidget(info_bar)
+        info.setWordWrap(True)
+        layout.addWidget(info)
 
-        # Import WebEngine (should be available at this point)
-        from PySide6.QtWebEngineCore import QWebEngineProfile
-        from PySide6.QtWebEngineWidgets import QWebEngineView
+        self._combo = QComboBox()
+        for browser_id, display_name in browsers:
+            self._combo.addItem(display_name, browser_id)
+        layout.addWidget(self._combo)
 
-        # Create a fresh profile so we don't interfere with any existing sessions
-        self._profile = QWebEngineProfile("youtube-login", self)
-        self._profile.setHttpUserAgent(
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        note = QLabel(
+            "Make sure you are logged into YouTube in the selected browser."
         )
+        note.setStyleSheet("color: gray; font-style: italic;")
+        note.setWordWrap(True)
+        layout.addWidget(note)
 
-        # Hook into cookie store
-        cookie_store = self._profile.cookieStore()
-        cookie_store.cookieAdded.connect(self._on_cookie_added)
-
-        # Create web view with the profile
-        from PySide6.QtWebEngineCore import QWebEnginePage
-
-        self._page = QWebEnginePage(self._profile, self)
-        self._view = QWebEngineView(self)
-        self._view.setPage(self._page)
-        layout.addWidget(self._view)
-
-        # Status bar at bottom
-        self._status_label = QLabel("Waiting for login...")
-        self._status_label.setStyleSheet(
-            "padding: 4px 10px; color: gray; font-size: 11px;"
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        layout.addWidget(self._status_label)
-
-        # Navigate to Google sign-in
-        from PySide6.QtCore import QUrl
-        self._view.setUrl(QUrl(YOUTUBE_LOGIN_URL))
-
-    def _on_cookie_added(self, cookie):
-        """Handle a cookie being set in the browser session."""
-        name = bytes(cookie.name()).decode("utf-8", errors="replace")
-        value = bytes(cookie.value()).decode("utf-8", errors="replace")
-        domain = cookie.domain()
-
-        # Only capture Google/YouTube cookies
-        if ".google.com" in domain or ".youtube.com" in domain:
-            self._cookies[name] = value
-
-            # Check if we have all required cookies
-            if REQUIRED_COOKIE_KEYS.issubset(self._cookies.keys()):
-                self._finalize()
-
-    def _finalize(self):
-        """All required cookies captured - build string and close."""
-        # Build cookie string from required + useful extra cookies
-        cookie_parts = []
-        for key in sorted(self._cookies.keys()):
-            cookie_parts.append(f"{key}={self._cookies[key]}")
-        self._cookie_string = "; ".join(cookie_parts)
-
-        self._status_label.setText("Login successful! Cookies captured.")
-        self._status_label.setStyleSheet(
-            "padding: 4px 10px; color: #00cc00; font-size: 11px;"
-        )
-
-        # Emit and close after a brief pause so user sees the success message
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(800, self._finish)
-
-    def _finish(self):
-        self.cookies_captured.emit(self._cookie_string)
-        self.accept()
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
     @property
-    def cookie_string(self) -> str:
-        """Get the captured cookie string (available after dialog closes)."""
-        return self._cookie_string
-
-    def closeEvent(self, event):  # noqa: N802
-        # Clean up the profile's cookie store
-        try:
-            self._profile.cookieStore().deleteAllCookies()
-        except Exception:
-            pass
-        super().closeEvent(event)
+    def selected_browser(self) -> str:
+        return self._combo.currentData() or ""
 
 
-def ensure_webengine_and_login(parent: QWidget) -> str | None:
-    """High-level helper: ensure WebEngine is available, then show login dialog.
+def _extract_cookies_from_browser(browser_id: str) -> str | None:
+    """Extract YouTube/Google cookies from the specified browser.
+
+    Returns cookie string on success, None on failure.
+    """
+    import rookiepy
+
+    # Map our browser IDs to rookiepy functions
+    browser_funcs = {
+        "chrome": rookiepy.chrome,
+        "chromium": rookiepy.chromium,
+        "brave": rookiepy.brave,
+        "edge": rookiepy.edge,
+        "firefox": rookiepy.firefox,
+        "opera": rookiepy.opera,
+        "opera_gx": rookiepy.opera_gx,
+        "vivaldi": rookiepy.vivaldi,
+        "librewolf": rookiepy.librewolf,
+    }
+
+    func = browser_funcs.get(browser_id)
+    if not func:
+        logger.error(f"Unknown browser: {browser_id}")
+        return None
+
+    try:
+        cookies = func(domains=COOKIE_DOMAINS)
+    except Exception as e:
+        logger.error(f"Failed to read cookies from {browser_id}: {e}")
+        raise
+
+    # Build cookie dict from rookiepy results
+    cookie_dict: dict[str, str] = {}
+    for cookie in cookies:
+        name = cookie.get("name", "")
+        value = cookie.get("value", "")
+        if name and value:
+            cookie_dict[name] = value
+
+    # Check if we have the required cookies
+    if not REQUIRED_COOKIE_KEYS.issubset(cookie_dict.keys()):
+        missing = REQUIRED_COOKIE_KEYS - cookie_dict.keys()
+        logger.warning(f"Missing required cookies: {missing}")
+        return None
+
+    # Build cookie string
+    parts = [f"{k}={v}" for k, v in sorted(cookie_dict.items())]
+    return "; ".join(parts)
+
+
+def import_cookies_from_browser(parent: QWidget) -> str | None:
+    """High-level helper: ensure rookiepy is available, pick browser, extract cookies.
 
     Returns the cookie string on success, or None if cancelled/failed.
     """
-    # Check if running in Flatpak (can't pip install)
-    if is_flatpak() and not is_webengine_available():
+    # Flatpak can't access host browser cookie stores
+    if is_flatpak():
         QMessageBox.information(
             parent,
             "Not Available in Flatpak",
-            "Automatic YouTube login requires QtWebEngine which cannot be\n"
-            "installed at runtime in Flatpak.\n\n"
+            "Browser cookie import is not available in Flatpak\n"
+            "because the sandbox cannot access browser data.\n\n"
             "Please use the manual cookie paste method instead.\n"
             "Click 'How to get cookies' for instructions.",
         )
         return None
 
-    # Install WebEngine if needed
-    if not is_webengine_available():
+    # Install rookiepy if needed
+    if not is_rookiepy_available():
         reply = QMessageBox.question(
             parent,
-            "Install QtWebEngine?",
-            "YouTube login requires QtWebEngine (~150MB download).\n\n"
-            "This is a one-time download that enables the embedded\n"
-            "browser for Google sign-in.\n\n"
+            "Install Cookie Reader?",
+            "Importing cookies requires the 'rookiepy' package\n"
+            "(small download, reads browser cookie stores).\n\n"
             "Install now?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
             return None
 
-        install_dialog = WebEngineInstallDialog(parent)
+        install_dialog = RookiepyInstallDialog(parent)
         install_dialog.exec()
         if not install_dialog.success:
             return None
 
-        # Verify it's now importable
-        if not is_webengine_available():
+        if not is_rookiepy_available():
             QMessageBox.critical(
                 parent,
                 "Installation Error",
-                "QtWebEngine was installed but cannot be imported.\n"
+                "rookiepy was installed but cannot be imported.\n"
                 "You may need to restart the application.",
             )
             return None
 
-    # Show login dialog
-    dialog = YouTubeLoginDialog(parent)
-    result = dialog.exec()
-    if result == QDialog.DialogCode.Accepted and dialog.cookie_string:
-        return dialog.cookie_string
-    return None
+    # Detect available browsers
+    browsers = _detect_available_browsers()
+    if not browsers:
+        QMessageBox.warning(
+            parent,
+            "No Browsers Found",
+            "Could not detect any supported browsers with cookie stores.\n\n"
+            "Supported: Chrome, Chromium, Brave, Edge, Firefox, Opera, Vivaldi, LibreWolf\n\n"
+            "Please use the manual cookie paste method instead.",
+        )
+        return None
+
+    # Let user pick browser
+    dialog = BrowserSelectDialog(browsers, parent)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+
+    browser_id = dialog.selected_browser
+    if not browser_id:
+        return None
+
+    # Extract cookies
+    try:
+        cookie_string = _extract_cookies_from_browser(browser_id)
+    except Exception as e:
+        QMessageBox.critical(
+            parent,
+            "Cookie Read Error",
+            f"Failed to read cookies from {browser_id}:\n\n{e}\n\n"
+            "Make sure the browser is closed or try a different browser.",
+        )
+        return None
+
+    if not cookie_string:
+        QMessageBox.warning(
+            parent,
+            "Not Logged In",
+            "The required YouTube cookies were not found in that browser.\n\n"
+            "Make sure you are logged into YouTube in the selected browser,\n"
+            "then try again.",
+        )
+        return None
+
+    return cookie_string

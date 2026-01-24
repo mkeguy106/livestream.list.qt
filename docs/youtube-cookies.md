@@ -2,22 +2,22 @@
 
 To send messages in YouTube live chat, you need to authenticate with your Google account. The app uses browser cookies to authenticate with YouTube's internal API.
 
-## Method 1: Built-in Login (Recommended)
+## Method 1: Import from Browser (Recommended)
 
-The easiest method — use the built-in browser to log in directly:
+The easiest method — import cookies directly from your installed browser:
 
-1. Open **Preferences** > **Accounts**
-2. In the YouTube section, click **Login to YouTube**
-3. If prompted, allow the app to download QtWebEngine (one-time ~150MB download)
-4. A browser window will open to the Google sign-in page
-5. Log in with your Google account as you normally would
-6. Once login completes, the cookies are captured automatically and the window closes
+1. Make sure you are **logged into YouTube** in your browser (Chrome, Firefox, Edge, Brave, etc.)
+2. Open **Preferences** > **Accounts**
+3. In the YouTube section, click **Import from Browser**
+4. If prompted, allow the app to install `rookiepy` (small one-time download for reading browser cookies)
+5. Select which browser you are logged into YouTube with
+6. Click **OK** — the app reads the cookies automatically
 
 That's it! Your YouTube chat sending is now enabled.
 
-> **Note:** The embedded browser uses an isolated session — it does not access or interfere with your regular browser's cookies or sessions.
+> **Supported browsers:** Chrome, Chromium, Brave, Edge, Firefox, Opera, Opera GX, Vivaldi, LibreWolf
 
-> **Flatpak users:** The built-in login is not available in Flatpak builds (QtWebEngine cannot be installed at runtime). Use one of the manual methods below instead.
+> **Flatpak users:** Browser import is not available in Flatpak builds because the sandbox cannot access browser data. Use one of the manual methods below instead.
 
 ## Method 2: Browser Developer Tools
 

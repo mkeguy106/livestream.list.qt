@@ -2226,8 +2226,8 @@ class PreferencesDialog(QDialog):
         yt_layout.addWidget(self.yt_status)
 
         yt_info = QLabel(
-            "Log in to enable YouTube chat sending.\n"
-            "Uses an embedded browser to capture authentication cookies."
+            "Import cookies from your browser to enable YouTube chat sending.\n"
+            "You must be logged into YouTube in the browser you select."
         )
         yt_info.setStyleSheet("color: gray; font-style: italic;")
         yt_info.setWordWrap(True)
@@ -2235,7 +2235,7 @@ class PreferencesDialog(QDialog):
 
         # Primary action: Login button
         yt_main_buttons = QHBoxLayout()
-        self.yt_login_btn = QPushButton("Login to YouTube")
+        self.yt_login_btn = QPushButton("Import from Browser")
         self.yt_login_btn.clicked.connect(self._on_yt_login)
         yt_main_buttons.addWidget(self.yt_login_btn)
         self.yt_logout_btn = QPushButton("Logout")
@@ -2750,10 +2750,10 @@ class PreferencesDialog(QDialog):
         self.app.chat_manager.auth_state_changed.emit(False)
 
     def _on_yt_login(self):
-        """Handle YouTube login via embedded browser."""
-        from .youtube_login import ensure_webengine_and_login
+        """Handle YouTube cookie import from browser."""
+        from .youtube_login import import_cookies_from_browser
 
-        cookie_string = ensure_webengine_and_login(self)
+        cookie_string = import_cookies_from_browser(self)
         if cookie_string:
             self.app.settings.youtube.cookies = cookie_string
             self.app.save_settings()
@@ -2788,7 +2788,7 @@ class PreferencesDialog(QDialog):
         msg.setTextFormat(Qt.TextFormat.RichText)
         msg.setText(
             "<h3>Getting YouTube Cookies (Manual Method)</h3>"
-            "<p>The easiest way is to click <b>Login to YouTube</b> above.<br>"
+            "<p>The easiest way is to click <b>Import from Browser</b> above.<br>"
             "If that's not available, paste cookies manually:</p>"
             "<ol>"
             "<li>Open <b>YouTube</b> in your browser and log in</li>"
