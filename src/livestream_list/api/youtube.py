@@ -1,11 +1,15 @@
 """YouTube client using yt-dlp for stream detection."""
 
 import asyncio
+import hashlib
 import json
 import logging
 import shutil
 import subprocess
+import time
 from datetime import datetime, timezone
+
+import aiohttp
 
 from ..core.models import Channel, Livestream, StreamPlatform
 from ..core.settings import YouTubeSettings
@@ -77,7 +81,7 @@ class YouTubeApiClient(BaseApiClient):
             if result.returncode == 0 and result.stdout.strip():
                 # yt-dlp may output multiple JSON objects for playlists
                 # Take the first one
-                first_line = result.stdout.strip().split('\n')[0]
+                first_line = result.stdout.strip().split("\n")[0]
                 return json.loads(first_line)
         except subprocess.TimeoutExpired:
             logger.warning(f"yt-dlp timed out for {url}")
@@ -152,10 +156,7 @@ class YouTubeApiClient(BaseApiClient):
 
         # Try to get channel info by fetching the live tab
         # Using --playlist-items 0 to not actually fetch videos
-        data = await self._run_ytdlp_async(
-            f"{url}/live",
-            ["--playlist-items", "0"]
-        )
+        data = await self._run_ytdlp_async(f"{url}/live", ["--playlist-items", "0"])
 
         if data:
             return Channel(
@@ -251,17 +252,19 @@ class YouTubeApiClient(BaseApiClient):
         # Process in batches of 5 to avoid overwhelming the system
         batch_size = 5
         for i in range(0, len(channels), batch_size):
-            batch = channels[i:i + batch_size]
+            batch = channels[i : i + batch_size]
             tasks = [self.get_livestream(channel) for channel in batch]
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
             for j, result in enumerate(batch_results):
                 if isinstance(result, Exception):
-                    results.append(Livestream(
-                        channel=batch[j],
-                        live=False,
-                        error_message=str(result),
-                    ))
+                    results.append(
+                        Livestream(
+                            channel=batch[j],
+                            live=False,
+                            error_message=str(result),
+                        )
+                    )
                 else:
                     results.append(result)
 
@@ -272,3 +275,249 @@ class YouTubeApiClient(BaseApiClient):
         # yt-dlp doesn't support channel search
         # Users must add channels by URL or handle
         return []
+
+    @staticmethod
+    def _parse_cookie_string(cookie_str: str) -> dict[str, str]:
+        """Parse a cookie string into a dict."""
+        cookies: dict[str, str] = {}
+        for part in cookie_str.split(";"):
+            part = part.strip()
+            if "=" in part:
+                name, _, value = part.partition("=")
+                name = name.strip()
+                if name:
+                    cookies[name] = value.strip()
+        return cookies
+
+    @staticmethod
+    def _generate_sapisidhash(sapisid: str) -> str:
+        """Generate SAPISIDHASH authorization header value."""
+        timestamp = int(time.time())
+        origin = "https://www.youtube.com"
+        hash_input = f"{timestamp} {sapisid} {origin}"
+        hash_value = hashlib.sha1(hash_input.encode()).hexdigest()
+        return f"SAPISIDHASH {timestamp}_{hash_value}"
+
+    async def get_subscriptions(self, cookies: str) -> list[Channel]:
+        """Get YouTube subscriptions using InnerTube API with cookie auth.
+
+        Requires valid YouTube cookies (at minimum SAPISID, SID, HSID, SSID).
+        Returns a list of Channel objects for subscribed channels.
+        """
+        cookie_dict = self._parse_cookie_string(cookies)
+        sapisid = cookie_dict.get("SAPISID", "")
+        if not sapisid:
+            raise ValueError("SAPISID cookie not found - cannot authenticate")
+
+        auth_header = self._generate_sapisidhash(sapisid)
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookie_dict.items())
+
+        headers = {
+            "Authorization": auth_header,
+            "Cookie": cookie_header,
+            "Content-Type": "application/json",
+            "Origin": "https://www.youtube.com",
+            "Referer": "https://www.youtube.com/",
+            "X-Youtube-Client-Name": "1",
+            "X-Youtube-Client-Version": "2.20250120.01.00",
+            "X-Goog-AuthUser": "0",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        }
+
+        innertube_body = {
+            "context": {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": "2.20250120.01.00",
+                    "hl": "en",
+                }
+            },
+            "browseId": "FEchannels",
+        }
+
+        channels: list[Channel] = []
+        url = "https://www.youtube.com/youtubei/v1/browse"
+
+        async with aiohttp.ClientSession() as session:
+            while True:
+                async with session.post(url, json=innertube_body, headers=headers) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise ValueError(f"YouTube API returned {resp.status}: {text[:200]}")
+                    data = await resp.json()
+
+                # Check if authentication succeeded
+                if not channels:  # Only check on first page
+                    if not self._is_logged_in(data):
+                        raise ValueError(
+                            "YouTube cookies expired or invalid. "
+                            "Please re-import cookies from your browser."
+                        )
+
+                # Parse channels from response
+                new_channels = self._parse_subscriptions_response(data)
+                channels.extend(new_channels)
+
+                # Check for continuation
+                continuation = self._get_continuation_token(data)
+                if not continuation:
+                    break
+
+                # Set up continuation request
+                innertube_body = {
+                    "context": {
+                        "client": {
+                            "clientName": "WEB",
+                            "clientVersion": "2.20250120.01.00",
+                            "hl": "en",
+                        }
+                    },
+                    "continuation": continuation,
+                }
+
+        logger.info(f"Found {len(channels)} YouTube subscriptions")
+        return channels
+
+    def _parse_subscriptions_response(self, data: dict) -> list[Channel]:
+        """Parse channel data from InnerTube browse response."""
+        channels: list[Channel] = []
+
+        # Navigate the nested response structure
+        # Initial response has tabs -> tabRenderer -> content -> sectionListRenderer
+        # Continuation has onResponseReceivedActions -> appendContinuationItemsAction
+        items = []
+
+        # Try initial response structure
+        try:
+            browse = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {})
+            tabs = browse.get("tabs", [])
+            for tab in tabs:
+                tab_content = tab.get("tabRenderer", {}).get("content", {})
+                section_list = tab_content.get("sectionListRenderer", {})
+                for section in section_list.get("contents", []):
+                    shelf = section.get("itemSectionRenderer", {})
+                    for item in shelf.get("contents", []):
+                        grid = (
+                            item.get("shelfRenderer", {})
+                            .get("content", {})
+                            .get("expandedShelfContentsRenderer", {})
+                        )
+                        items.extend(grid.get("items", []))
+                        # Also try gridRenderer
+                        grid2 = item.get("gridRenderer", {})
+                        items.extend(grid2.get("items", []))
+        except (AttributeError, TypeError):
+            pass
+
+        # Try continuation response structure
+        try:
+            for action in data.get("onResponseReceivedActions", []):
+                continuation_items = action.get("appendContinuationItemsAction", {}).get(
+                    "continuationItems", []
+                )
+                items.extend(continuation_items)
+        except (AttributeError, TypeError):
+            pass
+
+        # Extract channel info from items
+        for item in items:
+            renderer = item.get("channelRenderer", {})
+            if not renderer:
+                # Try gridChannelRenderer
+                renderer = item.get("gridChannelRenderer", {})
+            if not renderer:
+                continue
+
+            channel_id = renderer.get("channelId", "")
+            if not channel_id:
+                # Try to extract from navigationEndpoint
+                nav = renderer.get("navigationEndpoint", {})
+                channel_id = nav.get("browseEndpoint", {}).get("browseId", "")
+
+            if not channel_id:
+                continue
+
+            # Get display name from title
+            title = renderer.get("title", {})
+            if isinstance(title, dict):
+                runs = title.get("runs", [{}])
+                display_name = title.get("simpleText", "") or runs[0].get("text", "")
+            else:
+                display_name = str(title)
+
+            if not display_name:
+                display_name = channel_id
+
+            channels.append(
+                Channel(
+                    channel_id=channel_id,
+                    platform=StreamPlatform.YOUTUBE,
+                    display_name=display_name,
+                )
+            )
+
+        return channels
+
+    @staticmethod
+    def _get_continuation_token(data: dict) -> str | None:
+        """Extract continuation token from response for pagination."""
+        # Check in main content
+        try:
+            browse = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {})
+            tabs = browse.get("tabs", [])
+            for tab in tabs:
+                tab_content = tab.get("tabRenderer", {}).get("content", {})
+                section_list = tab_content.get("sectionListRenderer", {})
+                for section in section_list.get("contents", []):
+                    cont = section.get("continuationItemRenderer", {})
+                    token = (
+                        cont.get("continuationEndpoint", {})
+                        .get("continuationCommand", {})
+                        .get("token")
+                    )
+                    if token:
+                        return token
+                # Also check continuations at section list level
+                for cont in section_list.get("continuations", []):
+                    token = cont.get("nextContinuationData", {}).get("continuation")
+                    if token:
+                        return token
+        except (AttributeError, TypeError):
+            pass
+
+        # Check in continuation response
+        try:
+            for action in data.get("onResponseReceivedActions", []):
+                cont_items = action.get("appendContinuationItemsAction", {}).get(
+                    "continuationItems", []
+                )
+                for item in cont_items:
+                    cont = item.get("continuationItemRenderer", {})
+                    token = (
+                        cont.get("continuationEndpoint", {})
+                        .get("continuationCommand", {})
+                        .get("token")
+                    )
+                    if token:
+                        return token
+        except (AttributeError, TypeError):
+            pass
+
+        return None
+
+    @staticmethod
+    def _is_logged_in(data: dict) -> bool:
+        """Check if the InnerTube response indicates authenticated access."""
+        try:
+            for stp in data.get("responseContext", {}).get("serviceTrackingParams", []):
+                if stp.get("service") == "GUIDED_HELP":
+                    for p in stp.get("params", []):
+                        if p.get("key") == "logged_in":
+                            return p.get("value") == "1"
+        except (AttributeError, TypeError):
+            pass
+        # If we can't determine, check for content presence
+        return "contents" in data

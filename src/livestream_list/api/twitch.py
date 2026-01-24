@@ -498,14 +498,18 @@ class TwitchApiClient(BaseApiClient):
                             except ValueError:
                                 pass
 
-                        result.append(Livestream(
-                            channel=channel,
-                            live=True,
-                            title=stream.get("title"),
-                            game=stream.get("game", {}).get("name") if stream.get("game") else None,
-                            viewers=stream.get("viewersCount", 0),
-                            start_time=start_time,
-                        ))
+                        result.append(
+                            Livestream(
+                                channel=channel,
+                                live=True,
+                                title=stream.get("title"),
+                                game=stream.get("game", {}).get("name")
+                                if stream.get("game")
+                                else None,
+                                viewers=stream.get("viewersCount", 0),
+                                start_time=start_time,
+                            )
+                        )
                     else:
                         # Get last broadcast time for offline channels
                         last_live_time = None
@@ -517,10 +521,13 @@ class TwitchApiClient(BaseApiClient):
                                 )
                             except ValueError:
                                 pass
-                        result.append(Livestream(
-                            channel=channel, live=False,
-                            last_live_time=last_live_time,
-                        ))
+                        result.append(
+                            Livestream(
+                                channel=channel,
+                                live=False,
+                                last_live_time=last_live_time,
+                            )
+                        )
                 else:
                     result.append(Livestream(channel=channel, live=False))
 
@@ -629,9 +636,11 @@ class TwitchApiClient(BaseApiClient):
 
                     thumbnail_url = None
                     if stream_data.get("thumbnail_url"):
-                        thumbnail_url = stream_data["thumbnail_url"].replace(
-                            "{width}", "320"
-                        ).replace("{height}", "180")
+                        thumbnail_url = (
+                            stream_data["thumbnail_url"]
+                            .replace("{width}", "320")
+                            .replace("{height}", "180")
+                        )
 
                     channel = Channel(
                         channel_id=stream_data["user_login"],

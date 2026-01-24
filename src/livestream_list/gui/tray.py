@@ -27,50 +27,43 @@ def create_app_icon(size: int = 22) -> QIcon:
     painter.setPen(monitor_color)
     painter.setBrush(monitor_color)
     painter.drawRoundedRect(
-        int(2 * scale), int(2 * scale),
-        int(18 * scale), int(14 * scale),
-        int(2 * scale), int(2 * scale)
+        int(2 * scale),
+        int(2 * scale),
+        int(18 * scale),
+        int(14 * scale),
+        int(2 * scale),
+        int(2 * scale),
     )
 
     # Screen (darker inside)
     screen_color = QColor(40, 60, 80)
     painter.setBrush(screen_color)
-    painter.drawRect(
-        int(4 * scale), int(4 * scale),
-        int(14 * scale), int(10 * scale)
-    )
+    painter.drawRect(int(4 * scale), int(4 * scale), int(14 * scale), int(10 * scale))
 
     # Play button triangle
     play_color = QColor(255, 255, 255)
     painter.setPen(play_color)
     painter.setBrush(play_color)
-    triangle = QPolygon([
-        QPoint(int(8 * scale), int(6 * scale)),
-        QPoint(int(8 * scale), int(12 * scale)),
-        QPoint(int(14 * scale), int(9 * scale)),
-    ])
+    triangle = QPolygon(
+        [
+            QPoint(int(8 * scale), int(6 * scale)),
+            QPoint(int(8 * scale), int(12 * scale)),
+            QPoint(int(14 * scale), int(9 * scale)),
+        ]
+    )
     painter.drawPolygon(triangle)
 
     # Live indicator dot (red)
     live_color = QColor(255, 50, 50)
     painter.setPen(live_color)
     painter.setBrush(live_color)
-    painter.drawEllipse(
-        int(15 * scale), int(3 * scale),
-        int(4 * scale), int(4 * scale)
-    )
+    painter.drawEllipse(int(15 * scale), int(3 * scale), int(4 * scale), int(4 * scale))
 
     # Monitor stand
     painter.setPen(monitor_color)
     painter.setBrush(monitor_color)
-    painter.drawRect(
-        int(9 * scale), int(16 * scale),
-        int(4 * scale), int(2 * scale)
-    )
-    painter.drawRect(
-        int(7 * scale), int(18 * scale),
-        int(8 * scale), int(2 * scale)
-    )
+    painter.drawRect(int(9 * scale), int(16 * scale), int(4 * scale), int(2 * scale))
+    painter.drawRect(int(7 * scale), int(18 * scale), int(8 * scale), int(2 * scale))
 
     painter.end()
 

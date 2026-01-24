@@ -3,13 +3,17 @@
 Reads cookies directly from browser SQLite databases on Linux.
 - Firefox: unencrypted SQLite
 - Chromium-based: AES-CBC encrypted, key from system keyring
+
+In Flatpak, runs the extraction on the host via flatpak-spawn.
 """
 
 import hashlib
+import json
 import logging
 import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 
 from PySide6.QtWidgets import (
@@ -29,10 +33,25 @@ REQUIRED_COOKIE_KEYS = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
 
 # Additional cookies needed for YouTube InnerTube API
 _YOUTUBE_COOKIE_NAMES = {
-    "SID", "HSID", "SSID", "APISID", "SAPISID",
-    "SIDCC", "LOGIN_INFO", "PREF", "YSC", "NID", "AEC",
-    "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA",
-    "GPS", "LSID", "DV", "OTZ", "SMSV", "ACCOUNT_CHOOSER",
+    "SID",
+    "HSID",
+    "SSID",
+    "APISID",
+    "SAPISID",
+    "SIDCC",
+    "LOGIN_INFO",
+    "PREF",
+    "YSC",
+    "NID",
+    "AEC",
+    "VISITOR_INFO1_LIVE",
+    "VISITOR_PRIVACY_METADATA",
+    "GPS",
+    "LSID",
+    "DV",
+    "OTZ",
+    "SMSV",
+    "ACCOUNT_CHOOSER",
 }
 
 # Prefixes for secure auth cookies that YouTube uses
@@ -115,6 +134,7 @@ def _find_firefox_cookies(browser_id: str) -> str | None:
 
     if os.path.exists(profiles_ini):
         import configparser
+
         config = configparser.ConfigParser()
         config.read(profiles_ini)
 
@@ -185,6 +205,7 @@ def _get_chromium_password(keyring_label: str) -> str | None:
     # Method 1: secretstorage (direct Secret Service search)
     try:
         import secretstorage
+
         connection = secretstorage.dbus_init()
         collection = secretstorage.get_default_collection(connection)
         if collection.is_locked():
@@ -202,6 +223,7 @@ def _get_chromium_password(keyring_label: str) -> str | None:
     # Method 2: keyring library (works with KWallet, macOS Keychain, etc.)
     try:
         import keyring as kr
+
         browser_name = keyring_label.replace(" Safe Storage", "")
         password = kr.get_password(keyring_label, browser_name)
         if password:
@@ -310,9 +332,7 @@ def _read_firefox_cookies(db_path: str) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(
-            f"host LIKE '%{d}'" for d in COOKIE_DOMAINS
-        )
+        domain_clauses = " OR ".join(f"host LIKE '%{d}'" for d in COOKIE_DOMAINS)
         cursor.execute(
             f"SELECT name, value FROM moz_cookies WHERE {domain_clauses}"  # noqa: S608
         )
@@ -341,9 +361,7 @@ def _read_chromium_cookies(db_path: str, key: bytes) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(
-            f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS
-        )
+        domain_clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS)
         cursor.execute(
             f"SELECT name, encrypted_value, value FROM cookies "  # noqa: S608
             f"WHERE {domain_clauses}"
@@ -381,9 +399,7 @@ def _detect_available_browsers() -> list[tuple[str, str, str, str, str]]:
         else:
             db_path = _find_chromium_cookies(cookie_paths)
             if db_path:
-                available.append(
-                    (browser_id, display_name, browser_type, db_path, keyring_label)
-                )
+                available.append((browser_id, display_name, browser_type, db_path, keyring_label))
     return available
 
 
@@ -418,9 +434,7 @@ class BrowserSelectDialog(QDialog):
             self._combo.addItem(display_name, browser_id)
         layout.addWidget(self._combo)
 
-        note = QLabel(
-            "Make sure you are logged into YouTube in the selected browser."
-        )
+        note = QLabel("Make sure you are logged into YouTube in the selected browser.")
         note.setStyleSheet("color: gray; font-style: italic;")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -437,22 +451,350 @@ class BrowserSelectDialog(QDialog):
         return self._combo.currentData() or ""
 
 
+def _is_flatpak() -> bool:
+    """Check if running inside a Flatpak sandbox."""
+    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
+
+
+# Self-contained Python script run on the host via flatpak-spawn.
+# Handles browser detection and cookie extraction without needing
+# the app's packages installed on the host.
+_HOST_SCRIPT = r"""
+import configparser
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+
+COOKIE_DOMAINS = {".youtube.com", ".google.com", "youtube.com", "google.com"}
+YOUTUBE_COOKIE_NAMES = {
+    "SID", "HSID", "SSID", "APISID", "SAPISID", "SIDCC", "LOGIN_INFO",
+    "PREF", "YSC", "NID", "AEC", "VISITOR_INFO1_LIVE",
+    "VISITOR_PRIVACY_METADATA", "GPS", "LSID", "DV", "OTZ", "SMSV",
+    "ACCOUNT_CHOOSER",
+}
+YOUTUBE_COOKIE_PREFIXES = ("__Secure-", "__Host-")
+REQUIRED = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
+
+BROWSERS = [
+    ("chrome", "Google Chrome", "chromium",
+     [".config/google-chrome/Default/Cookies",
+      ".config/google-chrome/Profile 1/Cookies"],
+     "Chrome Safe Storage"),
+    ("chromium", "Chromium", "chromium",
+     [".config/chromium/Default/Cookies"], "Chromium Safe Storage"),
+    ("brave", "Brave", "chromium",
+     [".config/BraveSoftware/Brave-Browser/Default/Cookies"],
+     "Brave Safe Storage"),
+    ("vivaldi", "Vivaldi", "chromium",
+     [".config/vivaldi/Default/Cookies"], "Vivaldi Safe Storage"),
+    ("opera", "Opera", "chromium",
+     [".config/opera/Cookies"], "Opera Safe Storage"),
+    ("firefox", "Firefox", "firefox", [], ""),
+    ("librewolf", "LibreWolf", "firefox", [], ""),
+]
+
+def find_firefox_cookies(browser_id):
+    home = os.path.expanduser("~")
+    if browser_id == "firefox":
+        profiles_dir = os.path.join(home, ".mozilla/firefox")
+    elif browser_id == "librewolf":
+        profiles_dir = os.path.join(home, ".librewolf")
+    else:
+        return None
+    if not os.path.isdir(profiles_dir):
+        return None
+    profiles_ini = os.path.join(profiles_dir, "profiles.ini")
+    candidates = []
+    if os.path.exists(profiles_ini):
+        config = configparser.ConfigParser()
+        config.read(profiles_ini)
+        for section in config.sections():
+            if section.startswith("Install"):
+                path = config.get(section, "Default", fallback="")
+                if path:
+                    candidates.append(os.path.join(profiles_dir, path))
+        for section in config.sections():
+            if section.startswith("Profile"):
+                if config.get(section, "Default", fallback="0") == "1":
+                    path = config.get(section, "Path", fallback="")
+                    is_rel = config.get(section, "IsRelative", fallback="1") == "1"
+                    if path:
+                        full = os.path.join(profiles_dir, path) if is_rel else path
+                        if full not in candidates:
+                            candidates.append(full)
+    try:
+        for entry in sorted(os.listdir(profiles_dir)):
+            full = os.path.join(profiles_dir, entry)
+            if os.path.isdir(full) and (
+                entry.endswith(".default-release") or entry.endswith(".default")
+            ):
+                if full not in candidates:
+                    candidates.append(full)
+    except OSError:
+        pass
+    for profile_dir in candidates:
+        cookies_path = os.path.join(profile_dir, "cookies.sqlite")
+        if os.path.exists(cookies_path):
+            return cookies_path
+    return None
+
+def find_chromium_cookies(cookie_paths):
+    home = os.path.expanduser("~")
+    for rel_path in cookie_paths:
+        full = os.path.join(home, rel_path)
+        if os.path.exists(full):
+            return full
+    return None
+
+def detect_browsers():
+    available = []
+    for bid, name, btype, paths, klabel in BROWSERS:
+        if btype == "firefox":
+            db = find_firefox_cookies(bid)
+            if db:
+                available.append({"id": bid, "name": name, "type": btype,
+                                   "db": db, "keyring": ""})
+        else:
+            db = find_chromium_cookies(paths)
+            if db:
+                available.append({"id": bid, "name": name, "type": btype,
+                                   "db": db, "keyring": klabel})
+    return available
+
+def read_firefox(db_path):
+    cookies = {}
+    fd, tmp = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    try:
+        shutil.copy2(db_path, tmp)
+        conn = sqlite3.connect(tmp)
+        cur = conn.cursor()
+        clauses = " OR ".join(f"host LIKE '%{d}'" for d in COOKIE_DOMAINS)
+        cur.execute(f"SELECT name, value FROM moz_cookies WHERE {clauses}")
+        for name, value in cur.fetchall():
+            if name and value:
+                cookies[name] = value
+        conn.close()
+    finally:
+        os.unlink(tmp)
+    return cookies
+
+def get_chromium_password(keyring_label):
+    try:
+        import secretstorage
+        connection = secretstorage.dbus_init()
+        collection = secretstorage.get_default_collection(connection)
+        if collection.is_locked():
+            collection.unlock()
+        for item in collection.get_all_items():
+            label = item.get_label()
+            if label == keyring_label or label.endswith(f"/{keyring_label}"):
+                return item.get_secret().decode("utf-8")
+    except Exception:
+        pass
+    try:
+        import keyring as kr
+        browser_name = keyring_label.replace(" Safe Storage", "")
+        pw = kr.get_password(keyring_label, browser_name)
+        if pw:
+            return pw
+    except Exception:
+        pass
+    return None
+
+def decrypt_chromium_value(encrypted, key):
+    if not encrypted:
+        return ""
+    if encrypted[:3] in (b"v10", b"v11"):
+        version = encrypted[:3]
+        encrypted = encrypted[3:]
+    else:
+        try:
+            return encrypted.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    if len(encrypted) < 16:
+        return ""
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+        iv = b" " * 16
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        decrypted = decryptor.update(encrypted) + decryptor.finalize()
+        if decrypted:
+            pad_len = decrypted[-1]
+            if 0 < pad_len <= 16:
+                decrypted = decrypted[:-pad_len]
+        if version == b"v11" and len(decrypted) > 32:
+            decrypted = decrypted[32:]
+        result = decrypted.decode("utf-8", errors="replace")
+        if result and sum(1 for c in result if not c.isprintable()) > len(result) * 0.25:
+            return ""
+        return result
+    except Exception:
+        return ""
+
+def read_chromium(db_path, keyring_label):
+    password = get_chromium_password(keyring_label)
+    if password is None:
+        return None, f"Could not find '{keyring_label}' in system keyring"
+    key = hashlib.pbkdf2_hmac("sha1", password.encode("utf-8"), b"saltysalt", 1, dklen=16)
+    cookies = {}
+    fd, tmp = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    try:
+        shutil.copy2(db_path, tmp)
+        conn = sqlite3.connect(tmp)
+        cur = conn.cursor()
+        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS)
+        cur.execute(f"SELECT name, encrypted_value, value FROM cookies WHERE {clauses}")
+        for name, enc_val, plain_val in cur.fetchall():
+            if not name:
+                continue
+            if plain_val:
+                cookies[name] = plain_val
+            elif enc_val:
+                dec = decrypt_chromium_value(enc_val, key)
+                if dec:
+                    cookies[name] = dec
+        conn.close()
+    finally:
+        os.unlink(tmp)
+    return cookies, None
+
+def extract(browser):
+    btype = browser["type"]
+    db = browser["db"]
+    if btype == "firefox":
+        cookies = read_firefox(db)
+        error = None
+    else:
+        cookies, error = read_chromium(db, browser["keyring"])
+    if error:
+        return {"error": error}
+    if not REQUIRED.issubset(cookies.keys()):
+        missing = REQUIRED - cookies.keys()
+        return {"error": f"Missing required cookies: {', '.join(sorted(missing))}. "
+                         f"Make sure you are logged into YouTube."}
+    filtered = {k: v for k, v in cookies.items()
+                if k in YOUTUBE_COOKIE_NAMES or k.startswith(YOUTUBE_COOKIE_PREFIXES)}
+    parts = [f"{k}={v}" for k, v in sorted(filtered.items())]
+    return {"cookies": "; ".join(parts)}
+
+mode = sys.argv[1] if len(sys.argv) > 1 else "detect"
+if mode == "detect":
+    print(json.dumps(detect_browsers()))
+elif mode == "extract":
+    browser = json.loads(sys.argv[2])
+    print(json.dumps(extract(browser)))
+"""
+
+
+def _run_on_host(args: list[str], timeout: int = 30) -> str | None:
+    """Run a command on the host via flatpak-spawn, return stdout."""
+    cmd = ["flatpak-spawn", "--host"] + args
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0:
+            return result.stdout.strip()
+        logger.warning(f"Host command failed: {result.stderr.strip()}")
+    except subprocess.TimeoutExpired:
+        logger.warning("Host command timed out")
+    except Exception as e:
+        logger.warning(f"Host command error: {e}")
+    return None
+
+
+def _import_cookies_flatpak(parent: QWidget) -> str | None:
+    """Import cookies by running extraction on the host via flatpak-spawn."""
+    # Detect browsers on the host
+    output = _run_on_host(["python3", "-c", _HOST_SCRIPT, "detect"])
+    if not output:
+        QMessageBox.warning(
+            parent,
+            "Host Access Failed",
+            "Could not detect browsers on the host system.\n\n"
+            "Make sure python3 is installed on the host\n"
+            "and Flatpak has permission to spawn host commands.",
+        )
+        return None
+
+    try:
+        browsers = json.loads(output)
+    except json.JSONDecodeError:
+        QMessageBox.warning(parent, "Error", "Failed to parse browser detection output.")
+        return None
+
+    if not browsers:
+        QMessageBox.warning(
+            parent,
+            "No Browsers Found",
+            "Could not find any supported browsers with cookie stores.\n\n"
+            "Supported: Chrome, Chromium, Brave, Firefox,\n"
+            "Opera, Vivaldi, LibreWolf\n\n"
+            "Please use the manual cookie paste method instead.",
+        )
+        return None
+
+    # Show browser selection dialog
+    browser_tuples = [(b["id"], b["name"], b["type"], b["db"], b["keyring"]) for b in browsers]
+    dialog = BrowserSelectDialog(browser_tuples, parent)
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return None
+
+    selected_id = dialog.selected_browser
+    selected = next((b for b in browsers if b["id"] == selected_id), None)
+    if not selected:
+        return None
+
+    # Extract cookies on the host
+    browser_json = json.dumps(selected)
+    output = _run_on_host(["python3", "-c", _HOST_SCRIPT, "extract", browser_json], timeout=15)
+    if not output:
+        QMessageBox.warning(
+            parent,
+            "Extraction Failed",
+            f"Failed to extract cookies from {selected['name']}.\n\n"
+            "The host python3 may be missing required packages\n"
+            "(cryptography, secretstorage) for Chromium-based browsers.\n\n"
+            "Try Firefox, or use the manual cookie paste method.",
+        )
+        return None
+
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        QMessageBox.warning(parent, "Error", "Failed to parse cookie extraction output.")
+        return None
+
+    if "error" in result:
+        QMessageBox.warning(
+            parent,
+            "Cookie Import Failed",
+            f"{result['error']}\n\nTry a different browser or use the manual cookie paste method.",
+        )
+        return None
+
+    cookie_string = result.get("cookies", "")
+    if not cookie_string:
+        QMessageBox.warning(parent, "Error", "No cookies were extracted.")
+        return None
+
+    return cookie_string
+
+
 def import_cookies_from_browser(parent: QWidget) -> str | None:
     """Import YouTube cookies from an installed browser.
 
     Returns the cookie string on success, or None if cancelled/failed.
     """
-    # Flatpak can't access host browser cookie stores
-    if os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ:
-        QMessageBox.information(
-            parent,
-            "Not Available in Flatpak",
-            "Browser cookie import is not available in Flatpak\n"
-            "because the sandbox cannot access browser data.\n\n"
-            "Please use the manual cookie paste method instead.\n"
-            "Click 'How to get cookies' for instructions.",
-        )
-        return None
+    # In Flatpak, run extraction on the host via flatpak-spawn
+    if _is_flatpak():
+        return _import_cookies_flatpak(parent)
 
     # Detect available browsers
     browsers = _detect_available_browsers()
@@ -525,7 +867,8 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
 
     # Filter to only YouTube-relevant cookies
     filtered = {
-        k: v for k, v in cookie_dict.items()
+        k: v
+        for k, v in cookie_dict.items()
         if k in _YOUTUBE_COOKIE_NAMES or k.startswith(_YOUTUBE_COOKIE_PREFIXES)
     }
 
