@@ -9,9 +9,8 @@ The easiest method — import cookies directly from your installed browser:
 1. Make sure you are **logged into YouTube** in your browser (Chrome, Firefox, Edge, Brave, etc.)
 2. Open **Preferences** > **Accounts**
 3. In the YouTube section, click **Import from Browser**
-4. If prompted, allow the app to install `rookiepy` (small one-time download for reading browser cookies)
-5. Select which browser you are logged into YouTube with
-6. Click **OK** — the app reads the cookies automatically
+4. Select which browser you are logged into YouTube with
+5. Click **OK** — the app reads the cookies directly from the browser's cookie store
 
 That's it! Your YouTube chat sending is now enabled.
 
