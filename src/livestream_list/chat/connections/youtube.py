@@ -291,9 +291,17 @@ class YouTubeChatConnection(BaseChatConnection):
 
     async def _poll_loop(self) -> None:
         """Poll pytchat for new messages."""
+        loop = asyncio.get_event_loop()
         while not self._should_stop and self._pytchat and self._pytchat.is_alive():
             try:
-                chat_data = self._pytchat.get()
+                # Run blocking HTTP call in executor to not block the event loop
+                chat_data = await loop.run_in_executor(None, self._pytchat.get)
+
+                # get() returns [] when stream is no longer alive
+                if not chat_data or not hasattr(chat_data, "items"):
+                    await asyncio.sleep(2.0)
+                    continue
+
                 for item in chat_data.items:
                     message = self._parse_pytchat_item(item)
                     if message:
@@ -310,8 +318,8 @@ class YouTubeChatConnection(BaseChatConnection):
                 if not self._should_stop:
                     logger.debug(f"YouTube poll error: {e}")
 
-            # Poll interval
-            await asyncio.sleep(2.0)
+            # Brief yield before next poll (pytchat handles its own timing)
+            await asyncio.sleep(0.5)
 
         self._flush_batch()
 
@@ -399,39 +407,30 @@ class YouTubeChatConnection(BaseChatConnection):
             # Parse badges
             badges = self._parse_badges(item)
 
-            # Parse user info
+            # Parse user info from author object
+            author = getattr(item, "author", None)
+            if author:
+                author_name = getattr(author, "name", "Unknown") or "Unknown"
+                author_id = getattr(author, "channelId", "") or str(uuid.uuid4())
+            else:
+                author_name = getattr(item, "authorName", "Unknown") or "Unknown"
+                author_id = getattr(item, "authorChannelId", "") or str(uuid.uuid4())
+
             user = ChatUser(
-                id=getattr(item, "author", {}).get("channelId", str(uuid.uuid4())),
-                name=getattr(item, "author", {}).get("name", "Unknown"),
-                display_name=getattr(item, "author", {}).get("name", "Unknown"),
+                id=author_id,
+                name=author_name,
+                display_name=author_name,
                 platform=StreamPlatform.YOUTUBE,
                 color=None,
                 badges=badges,
             )
 
-            # Handle different pytchat item formats
-            if hasattr(item, "author"):
-                author = item.author
-                if hasattr(author, "name"):
-                    user.name = author.name
-                    user.display_name = author.name
-                if hasattr(author, "channelId"):
-                    user.id = author.channelId
-            elif hasattr(item, "authorName"):
-                user.name = item.authorName or "Unknown"
-                user.display_name = user.name
-                user.id = getattr(item, "authorChannelId", str(uuid.uuid4()))
-
-            # Parse timestamp
+            # Parse timestamp (pytchat timestamp is in milliseconds)
             timestamp = datetime.now(timezone.utc)
-            if hasattr(item, "datetime"):
-                ts = item.datetime
-                if isinstance(ts, datetime):
-                    timestamp = ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-            elif hasattr(item, "timestamp"):
+            if hasattr(item, "timestamp") and item.timestamp:
                 try:
                     timestamp = datetime.fromtimestamp(
-                        int(item.timestamp) / 1000000, tz=timezone.utc
+                        int(item.timestamp) / 1000, tz=timezone.utc
                     )
                 except (ValueError, OSError, TypeError):
                     pass
