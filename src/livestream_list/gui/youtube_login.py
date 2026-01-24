@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 # Required cookies for InnerTube authentication
 REQUIRED_COOKIE_KEYS = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
 
+# Additional cookies needed for YouTube InnerTube API
+_YOUTUBE_COOKIE_NAMES = {
+    "SID", "HSID", "SSID", "APISID", "SAPISID",
+    "SIDCC", "LOGIN_INFO", "PREF", "YSC", "NID", "AEC",
+    "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA",
+    "GPS", "LSID", "DV", "OTZ", "SMSV", "ACCOUNT_CHOOSER",
+}
+
+# Prefixes for secure auth cookies that YouTube uses
+_YOUTUBE_COOKIE_PREFIXES = ("__Secure-", "__Host-")
+
 # Domains to match
 COOKIE_DOMAINS = {".youtube.com", ".google.com", "youtube.com", "google.com"}
 
@@ -512,6 +523,12 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
         )
         return None
 
+    # Filter to only YouTube-relevant cookies
+    filtered = {
+        k: v for k, v in cookie_dict.items()
+        if k in _YOUTUBE_COOKIE_NAMES or k.startswith(_YOUTUBE_COOKIE_PREFIXES)
+    }
+
     # Build cookie string
-    parts = [f"{k}={v}" for k, v in sorted(cookie_dict.items())]
+    parts = [f"{k}={v}" for k, v in sorted(filtered.items())]
     return "; ".join(parts)
