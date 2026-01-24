@@ -17,7 +17,7 @@ DEFAULT_MAX_RETRIES = 3
 DEFAULT_BASE_DELAY = 1.0  # seconds
 DEFAULT_MAX_DELAY = 10.0  # seconds
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class BaseApiClient(ABC):
@@ -59,6 +59,9 @@ class BaseApiClient(ABC):
         This should be called before running async operations in a new event loop
         to avoid 'attached to a different event loop' errors with aiohttp.
         The session will be lazily recreated on next access.
+
+        Note: Call close() first if the session's event loop is still running.
+        This method is intended for use after the loop has been closed.
         """
         self._session = None
 
@@ -69,7 +72,8 @@ class BaseApiClient(ABC):
         base_delay: float = DEFAULT_BASE_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
         retryable_exceptions: tuple[type[Exception], ...] = (
-            aiohttp.ClientError, asyncio.TimeoutError,
+            aiohttp.ClientError,
+            asyncio.TimeoutError,
         ),
     ) -> T:
         """Execute an operation with exponential backoff retry.
@@ -97,7 +101,7 @@ class BaseApiClient(ABC):
 
                 if attempt < max_retries:
                     # Calculate delay with exponential backoff
-                    delay = min(base_delay * (2 ** attempt), max_delay)
+                    delay = min(base_delay * (2**attempt), max_delay)
                     logger.warning(
                         f"{self.name}: Attempt {attempt + 1}/{max_retries + 1} failed: {e}. "
                         f"Retrying in {delay:.1f}s..."

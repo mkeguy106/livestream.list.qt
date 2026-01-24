@@ -37,28 +37,24 @@ class AsyncWorker(QThread):
         try:
             # Reset aiohttp sessions for this event loop
             if self.monitor:
-                for client in self.monitor._clients.values():
-                    client.reset_session()
+                self.monitor.reset_all_sessions()
 
             result = loop.run_until_complete(self.coro_func())
             self.finished.emit(result)
 
             # Close sessions before closing loop
             if self.monitor:
-                async def close_sessions():
-                    for client in self.monitor._clients.values():
-                        await client.close()
-                loop.run_until_complete(close_sessions())
+                loop.run_until_complete(self.monitor.close_all_sessions())
 
         except Exception as e:
             logger.error(f"Async worker error: {e}")
             import traceback
+
             traceback.print_exc()
             self.error.emit(str(e))
         finally:
             if self.monitor:
-                for client in self.monitor._clients.values():
-                    client.reset_session()
+                self.monitor.reset_all_sessions()
             loop.close()
 
 
@@ -194,7 +190,7 @@ class Application(QApplication):
 
         async def init():
             # Load saved channels
-            await self.monitor._load_channels()
+            await self.monitor.load_channels()
             channel_count = len(self.monitor.channels)
             return channel_count
 
@@ -301,8 +297,8 @@ class Application(QApplication):
             if self.settings and self.settings.chat.auto_open and self.settings.chat.enabled:
                 if self.settings.chat.mode == "browser":
                     ch = livestream.channel
-                    video_id = getattr(livestream, 'video_id', None) or ""
-                    if self.main_window and hasattr(self.main_window, '_chat_launcher'):
+                    video_id = getattr(livestream, "video_id", None) or ""
+                    if self.main_window and hasattr(self.main_window, "_chat_launcher"):
                         self.main_window._chat_launcher.open_chat(
                             ch.channel_id, ch.platform.value, video_id
                         )
@@ -318,8 +314,12 @@ class Application(QApplication):
             self.main_window.set_status(f"Playing {livestream.channel.display_name}")
 
         # Open built-in chat on main thread (if enabled)
-        if (self.settings and self.settings.chat.auto_open and self.settings.chat.enabled
-                and self.settings.chat.mode == "builtin"):
+        if (
+            self.settings
+            and self.settings.chat.auto_open
+            and self.settings.chat.enabled
+            and self.settings.chat.mode == "builtin"
+        ):
             self.open_builtin_chat(livestream)
 
     def _check_processes(self):
@@ -341,6 +341,7 @@ class Application(QApplication):
 
         if not self._chat_window:
             from .chat.chat_window import ChatWindow
+
             self._chat_window = ChatWindow(self.chat_manager, self.settings)
             if self.main_window:
                 self._chat_window.chat_settings_requested.connect(
@@ -422,6 +423,7 @@ def run() -> int:
 
     # Create tray icon if available
     if is_tray_available():
+
         def restore_window():
             """Restore and focus the main window.
 
@@ -439,8 +441,7 @@ def run() -> int:
             on_quit=main_window._quit_app,
             get_notifications_enabled=lambda: app.settings.notifications.enabled,
             set_notifications_enabled=lambda enabled: (
-                setattr(app.settings.notifications, 'enabled', enabled)
-                or app.save_settings()
+                setattr(app.settings.notifications, "enabled", enabled) or app.save_settings()
             ),
         )
         tray.show()
@@ -464,7 +465,7 @@ def run() -> int:
         main_window.set_status("Ready")
         app.start_refresh_timer()
         # Mark initial load complete for notifications
-        app.monitor._initial_load_complete = True
+        app.monitor.set_initial_load_complete()
 
     app.start_async_init(
         on_channels_loaded=on_channels_loaded,

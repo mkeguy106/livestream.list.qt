@@ -60,20 +60,32 @@ PLATFORM_COLORS = {
 # UI style configurations
 UI_STYLES = {
     UIStyle.DEFAULT: {
-        "name": "Default", "margin_v": 4, "margin_h": 12,
-        "spacing": 10, "icon_size": 16,
+        "name": "Default",
+        "margin_v": 4,
+        "margin_h": 12,
+        "spacing": 10,
+        "icon_size": 16,
     },
     UIStyle.COMPACT_1: {
-        "name": "Compact 1", "margin_v": 4, "margin_h": 12,
-        "spacing": 8, "icon_size": 14,
+        "name": "Compact 1",
+        "margin_v": 4,
+        "margin_h": 12,
+        "spacing": 8,
+        "icon_size": 14,
     },
     UIStyle.COMPACT_2: {
-        "name": "Compact 2", "margin_v": 2, "margin_h": 6,
-        "spacing": 4, "icon_size": 12,
+        "name": "Compact 2",
+        "margin_v": 2,
+        "margin_h": 6,
+        "spacing": 4,
+        "icon_size": 12,
     },
     UIStyle.COMPACT_3: {
-        "name": "Compact 3", "margin_v": 1, "margin_h": 4,
-        "spacing": 2, "icon_size": 10,
+        "name": "Compact 3",
+        "margin_v": 1,
+        "margin_h": 4,
+        "spacing": 2,
+        "icon_size": 10,
     },
 }
 
@@ -100,8 +112,9 @@ class StreamRow(QWidget):
         style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(style["margin_h"], style["margin_v"],
-                                  style["margin_h"], style["margin_v"])
+        layout.setContentsMargins(
+            style["margin_h"], style["margin_v"], style["margin_h"], style["margin_v"]
+        )
         layout.setSpacing(style["spacing"])
 
         # Selection checkbox (hidden by default)
@@ -154,6 +167,7 @@ class StreamRow(QWidget):
         # Title row (only in default style)
         if self._settings.ui_style == UIStyle.DEFAULT:
             from PySide6.QtWidgets import QSizePolicy
+
             self.title_label = QLabel()
             self.title_label.setStyleSheet("color: gray; font-size: 11px;")
             self.title_label.setWordWrap(False)
@@ -320,7 +334,7 @@ class StreamRow(QWidget):
 
     def _on_chat_clicked(self):
         ch = self.livestream.channel
-        video_id = getattr(self.livestream, 'video_id', None) or ""
+        video_id = getattr(self.livestream, "video_id", None) or ""
         self.chat_clicked.emit(ch.channel_id, ch.platform.value, video_id)
 
     def _on_browser_clicked(self):
@@ -350,10 +364,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         """Set up the main window UI."""
         self.setWindowTitle("Livestream List (Qt)")
-        self.resize(
-            self.app.settings.window.width,
-            self.app.settings.window.height
-        )
+        self.resize(self.app.settings.window.width, self.app.settings.window.height)
         # Restore window position if saved
         if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
             self.move(self.app.settings.window.x, self.app.settings.window.y)
@@ -665,7 +676,7 @@ class MainWindow(QMainWindow):
             elif self._platform_filter:
                 platform_name = (
                     self._platform_filter.value
-                    if hasattr(self._platform_filter, 'value')
+                    if hasattr(self._platform_filter, "value")
                     else str(self._platform_filter)
                 )
                 self.all_offline_label.setText(f"No {platform_name} channels")
@@ -738,7 +749,8 @@ class MainWindow(QMainWindow):
                 if ls.live and ls.start_time:
                     # Live streams: sort by time live (longest first = earliest start_time)
                     start = (
-                        ls.start_time if ls.start_time.tzinfo
+                        ls.start_time
+                        if ls.start_time.tzinfo
                         else ls.start_time.replace(tzinfo=timezone.utc)
                     )
                     return (live, start.timestamp())
@@ -857,10 +869,13 @@ class MainWindow(QMainWindow):
             try:
                 self.app.streamlink.launch(livestream)
                 # Open browser chat if auto-open enabled and in browser mode
-                if (self.app.settings.chat.auto_open and self.app.settings.chat.enabled
-                        and self.app.settings.chat.mode == "browser"):
+                if (
+                    self.app.settings.chat.auto_open
+                    and self.app.settings.chat.enabled
+                    and self.app.settings.chat.mode == "browser"
+                ):
                     ch = livestream.channel
-                    video_id = getattr(livestream, 'video_id', None) or ""
+                    video_id = getattr(livestream, "video_id", None) or ""
                     self._chat_launcher.open_chat(ch.channel_id, ch.platform.value, video_id)
             except Exception as e:
                 logger.error(f"Launch error: {e}")
@@ -869,8 +884,12 @@ class MainWindow(QMainWindow):
         thread.start()
 
         # Auto-open built-in chat on main thread (if enabled)
-        if (self.app.settings.chat.auto_open and self.app.settings.chat.enabled
-                and self.app.settings.chat.mode == "builtin" and self.app.chat_manager):
+        if (
+            self.app.settings.chat.auto_open
+            and self.app.settings.chat.enabled
+            and self.app.settings.chat.mode == "builtin"
+            and self.app.chat_manager
+        ):
             self.app.open_builtin_chat(livestream)
 
         # Update UI after short delay
@@ -975,16 +994,11 @@ class MainWindow(QMainWindow):
             self,
             "Delete Channels",
             f"Delete {len(selected_keys)} channel(s)?",
-            QMessageBox.Yes | QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
-            monitor = self.app.monitor
-            for key in selected_keys:
-                if key in monitor._channels:
-                    del monitor._channels[key]
-                if key in monitor._livestreams:
-                    del monitor._livestreams[key]
+            self.app.monitor.remove_channels(selected_keys)
             self.app.save_channels()
             self._exit_selection_mode()
             self.refresh_stream_list()
@@ -1019,10 +1033,7 @@ class MainWindow(QMainWindow):
     def show_import_dialog(self):
         """Show the import dialog."""
         file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import Channels",
-            "",
-            "JSON Files (*.json);;All Files (*)"
+            self, "Import Channels", "", "JSON Files (*.json);;All Files (*)"
         )
         if file_path:
             self._import_from_file(file_path)
@@ -1032,48 +1043,59 @@ class MainWindow(QMainWindow):
         import json
 
         from ..core.settings import Settings
+
         try:
             with open(file_path) as f:
                 data = json.load(f)
 
-            channels_data = data.get('channels', [])
+            channels_data = data.get("channels", [])
             imported = 0
 
             for ch_data in channels_data:
-                platform = StreamPlatform(ch_data['platform'])
+                platform = StreamPlatform(ch_data["platform"])
                 channel = Channel(
-                    channel_id=ch_data['channel_id'],
+                    channel_id=ch_data["channel_id"],
                     platform=platform,
-                    display_name=ch_data.get('display_name'),
-                    favorite=ch_data.get('favorite', False),
+                    display_name=ch_data.get("display_name"),
+                    favorite=ch_data.get("favorite", False),
                 )
 
-                key = channel.unique_key
-                if key not in self.app.monitor._channels:
-                    self.app.monitor._channels[key] = channel
-                    self.app.monitor._livestreams[key] = Livestream(channel=channel)
+                if self.app.monitor.add_channel_direct(channel):
                     imported += 1
 
             # Import settings if present
             settings_imported = False
-            if 'settings' in data:
-                imported_settings = data['settings']
+            if "settings" in data:
+                imported_settings = data["settings"]
                 # Preserve current auth tokens and window geometry
                 current = self.app.settings._to_dict()
-                imported_settings['twitch'] = current.get('twitch', {})
-                imported_settings['youtube'] = current.get('youtube', {})
-                imported_settings['kick'] = current.get('kick', {})
-                imported_settings['window'] = current.get('window', {})
+                imported_settings["twitch"] = current.get("twitch", {})
+                imported_settings["youtube"] = current.get("youtube", {})
+                imported_settings["kick"] = current.get("kick", {})
+                imported_settings["window"] = current.get("window", {})
                 # Also preserve close_to_tray_asked state
-                imported_settings['close_to_tray_asked'] = self.app.settings.close_to_tray_asked
+                imported_settings["close_to_tray_asked"] = self.app.settings.close_to_tray_asked
                 # Apply imported settings
                 new_settings = Settings._from_dict(imported_settings)
                 # Copy all fields to current settings
-                for field_name in ['refresh_interval', 'minimize_to_tray', 'start_minimized',
-                                   'check_for_updates', 'autostart', 'close_to_tray',
-                                   'sort_mode', 'hide_offline', 'favorites_only', 'ui_style',
-                                   'platform_colors', 'streamlink', 'notifications', 'chat',
-                                   'channel_info', 'channel_icons']:
+                for field_name in [
+                    "refresh_interval",
+                    "minimize_to_tray",
+                    "start_minimized",
+                    "check_for_updates",
+                    "autostart",
+                    "close_to_tray",
+                    "sort_mode",
+                    "hide_offline",
+                    "favorites_only",
+                    "ui_style",
+                    "platform_colors",
+                    "streamlink",
+                    "notifications",
+                    "chat",
+                    "channel_info",
+                    "channel_icons",
+                ]:
                     if hasattr(new_settings, field_name):
                         setattr(self.app.settings, field_name, getattr(new_settings, field_name))
                 self.app.save_settings()
@@ -1091,7 +1113,8 @@ class MainWindow(QMainWindow):
                 self.app.refresh(on_complete=lambda: self.set_status("Ready"))
             elif settings_imported:
                 QMessageBox.information(
-                    self, "Import Complete",
+                    self,
+                    "Import Complete",
                     "Settings imported. No new channels.",
                 )
             else:
@@ -1189,8 +1212,7 @@ class AboutDialog(QDialog):
 
         # Description
         desc_label = QLabel(
-            "<p>Monitor your favorite livestreams on<br>"
-            "Twitch, YouTube, and Kick.</p>"
+            "<p>Monitor your favorite livestreams on<br>Twitch, YouTube, and Kick.</p>"
         )
         desc_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(desc_label)
@@ -1246,10 +1268,7 @@ class AboutDialog(QDialog):
 
         try:
             url = f"https://api.github.com/repos/{self.GITHUB_REPO}/releases/latest"
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Livestream-List-Qt"}
-            )
+            req = urllib.request.Request(url, headers={"User-Agent": "Livestream-List-Qt"})
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode())
@@ -1279,6 +1298,7 @@ class AboutDialog(QDialog):
 
     def _compare_versions(self, v1: str, v2: str) -> int:
         """Compare two version strings. Returns >0 if v1 > v2, <0 if v1 < v2, 0 if equal."""
+
         def parse_version(v):
             parts = []
             for part in v.split("."):
@@ -1419,6 +1439,7 @@ class AddChannelDialog(QDialog):
     def eventFilter(self, obj, event):  # noqa: N802
         """Handle focus events for auto-paste."""
         from PySide6.QtCore import QEvent
+
         if obj == self.channel_edit and event.type() == QEvent.FocusIn:
             if not self._has_auto_pasted and not self.channel_edit.text():
                 self._try_paste_clipboard()
@@ -1434,7 +1455,7 @@ class AddChannelDialog(QDialog):
 
     def _looks_like_url(self, text: str) -> bool:
         """Check if text looks like a streaming URL."""
-        patterns = ['twitch.tv', 'youtube.com', 'youtu.be', 'kick.com']
+        patterns = ["twitch.tv", "youtube.com", "youtu.be", "kick.com"]
         return any(p in text.lower() for p in patterns)
 
     def _on_text_changed(self, text: str):
@@ -1463,7 +1484,7 @@ class AddChannelDialog(QDialog):
 
         # Twitch
         twitch_patterns = [
-            r'(?:https?://)?(?:www\.)?twitch\.tv/([a-zA-Z0-9_]+)',
+            r"(?:https?://)?(?:www\.)?twitch\.tv/([a-zA-Z0-9_]+)",
         ]
         for pattern in twitch_patterns:
             match = re.match(pattern, text, re.IGNORECASE)
@@ -1472,23 +1493,23 @@ class AddChannelDialog(QDialog):
 
         # YouTube
         youtube_patterns = [
-            r'(?:https?://)?(?:www\.)?youtube\.com/@([a-zA-Z0-9_-]+)',
-            r'(?:https?://)?(?:www\.)?youtube\.com/c/([a-zA-Z0-9_-]+)',
-            r'(?:https?://)?(?:www\.)?youtube\.com/channel/([a-zA-Z0-9_-]+)',
-            r'(?:https?://)?(?:www\.)?youtube\.com/user/([a-zA-Z0-9_-]+)',
-            r'(?:https?://)?(?:www\.)?youtube\.com/([a-zA-Z0-9_-]+)',
+            r"(?:https?://)?(?:www\.)?youtube\.com/@([a-zA-Z0-9_-]+)",
+            r"(?:https?://)?(?:www\.)?youtube\.com/c/([a-zA-Z0-9_-]+)",
+            r"(?:https?://)?(?:www\.)?youtube\.com/channel/([a-zA-Z0-9_-]+)",
+            r"(?:https?://)?(?:www\.)?youtube\.com/user/([a-zA-Z0-9_-]+)",
+            r"(?:https?://)?(?:www\.)?youtube\.com/([a-zA-Z0-9_-]+)",
         ]
         for pattern in youtube_patterns:
             match = re.match(pattern, text, re.IGNORECASE)
             if match:
                 channel = match.group(1)
-                if not channel.startswith('@') and not channel.startswith('UC'):
-                    channel = '@' + channel
+                if not channel.startswith("@") and not channel.startswith("UC"):
+                    channel = "@" + channel
                 return (StreamPlatform.YOUTUBE, channel)
 
         # Kick
         kick_patterns = [
-            r'(?:https?://)?(?:www\.)?kick\.com/([a-zA-Z0-9_-]+)',
+            r"(?:https?://)?(?:www\.)?kick\.com/([a-zA-Z0-9_-]+)",
         ]
         for pattern in kick_patterns:
             match = re.match(pattern, text, re.IGNORECASE)
@@ -1524,6 +1545,7 @@ class AddChannelDialog(QDialog):
             QMessageBox.warning(self, "Error", f"Failed to add channel: {error}")
 
         from .app import AsyncWorker
+
         worker = AsyncWorker(add_channel, self.app.monitor, parent=self)
         worker.finished.connect(on_complete)
         worker.error.connect(on_error)
@@ -1539,9 +1561,7 @@ class AddChannelDialog(QDialog):
             self.twitch_import_btn.show()
             self.twitch_logout_btn.show()
         else:
-            self.twitch_status_label.setText(
-                "<p style='color: gray;'>Not logged in to Twitch</p>"
-            )
+            self.twitch_status_label.setText("<p style='color: gray;'>Not logged in to Twitch</p>")
             self.twitch_login_btn.show()
             self.twitch_import_btn.hide()
             self.twitch_logout_btn.hide()
@@ -1557,12 +1577,12 @@ class AddChannelDialog(QDialog):
             self.app.chat_manager.reconnect_twitch()
 
         # Suppress notifications for any channels imported during login
-        added = getattr(dialog, '_added_count', 0)
+        added = getattr(dialog, "_added_count", 0)
         if added > 0:
-            self.app.monitor._initial_load_complete = False
+            self.app.monitor.suppress_notifications()
 
             def on_refresh_complete():
-                self.app.monitor._initial_load_complete = True
+                self.app.monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -1577,12 +1597,12 @@ class AddChannelDialog(QDialog):
         dialog.exec()
 
         # Suppress notifications during import refresh
-        added = getattr(dialog, '_added_count', 0)
+        added = getattr(dialog, "_added_count", 0)
         if added > 0:
-            self.app.monitor._initial_load_complete = False
+            self.app.monitor.suppress_notifications()
 
             def on_refresh_complete():
-                self.app.monitor._initial_load_complete = True
+                self.app.monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -2002,9 +2022,7 @@ class PreferencesDialog(QDialog):
         builtin_layout.addRow("Emote providers:", emote_row)
 
         self.chat_name_colors_cb = QCheckBox("Use platform name colors")
-        self.chat_name_colors_cb.setChecked(
-            self.app.settings.chat.builtin.use_platform_name_colors
-        )
+        self.chat_name_colors_cb.setChecked(self.app.settings.chat.builtin.use_platform_name_colors)
         self.chat_name_colors_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_name_colors_cb)
 
@@ -2053,7 +2071,7 @@ class PreferencesDialog(QDialog):
         layout.addWidget(self.builtin_group)
 
         # Set initial visibility based on current mode
-        show_browser = (current_mode == "browser")
+        show_browser = current_mode == "browser"
         self.browser_label.setVisible(show_browser)
         self.browser_combo.setVisible(show_browser)
         self.new_window_cb.setVisible(show_browser)
@@ -2163,13 +2181,13 @@ class PreferencesDialog(QDialog):
             self.kick_status.setStyleSheet("color: gray;")
 
     def _on_autostart_changed(self, state):
-        enabled = (state == Qt.CheckState.Checked.value)
+        enabled = state == Qt.CheckState.Checked.value
         set_autostart(enabled)
         self.app.settings.autostart = enabled
         self.app.save_settings()
 
     def _on_background_changed(self, state):
-        enabled = (state == Qt.CheckState.Checked.value)
+        enabled = state == Qt.CheckState.Checked.value
         self.app.settings.close_to_tray = enabled
         self.app.save_settings()
 
@@ -2249,6 +2267,7 @@ class PreferencesDialog(QDialog):
 
     def _on_launch_method_changed(self):
         from ..core.models import LaunchMethod
+
         self.app.settings.streamlink.twitch_launch_method = LaunchMethod(
             self.twitch_launch_combo.currentData()
         )
@@ -2264,7 +2283,7 @@ class PreferencesDialog(QDialog):
         """Handle chat client type change."""
         client_type = self.chat_client_combo.currentData()
         # Show browser options only when Browser client is selected
-        show_browser = (client_type == "browser")
+        show_browser = client_type == "browser"
         self.browser_label.setVisible(show_browser)
         self.browser_combo.setVisible(show_browser)
         self.new_window_cb.setVisible(show_browser)
@@ -2343,12 +2362,12 @@ class PreferencesDialog(QDialog):
             self.app.chat_manager.reconnect_twitch()
 
         # Suppress notifications for any channels imported during login
-        added = getattr(dialog, '_added_count', 0)
+        added = getattr(dialog, "_added_count", 0)
         if added > 0:
-            self.app.monitor._initial_load_complete = False
+            self.app.monitor.suppress_notifications()
 
             def on_refresh_complete():
-                self.app.monitor._initial_load_complete = True
+                self.app.monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -2414,16 +2433,16 @@ class PreferencesDialog(QDialog):
         dialog.exec()
 
         # After dialog closes, refresh stream status with notifications suppressed
-        added = getattr(dialog, '_added_count', 0)
+        added = getattr(dialog, "_added_count", 0)
         if added > 0:
             # Suppress notifications during import refresh
-            self.app.monitor._initial_load_complete = False
+            self.app.monitor.suppress_notifications()
 
             main_window = self.app.main_window
 
             def on_refresh_complete():
                 # Re-enable notifications after refresh
-                self.app.monitor._initial_load_complete = True
+                self.app.monitor.resume_notifications()
                 if main_window:
                     main_window.refresh_stream_list()
 
@@ -2443,8 +2462,11 @@ class ImportFollowsDialog(QDialog):
     import_complete = Signal(list)
 
     def __init__(
-        self, parent, app: "Application",
-        platform: StreamPlatform, start_import: bool = False,
+        self,
+        parent,
+        app: "Application",
+        platform: StreamPlatform,
+        start_import: bool = False,
     ):
         super().__init__(parent)
         self.app = app
@@ -2467,8 +2489,7 @@ class ImportFollowsDialog(QDialog):
         login_layout.setAlignment(Qt.AlignCenter)
 
         login_label = QLabel(
-            f"Log in to {platform.value.title()} to import "
-            "your followed channels."
+            f"Log in to {platform.value.title()} to import your followed channels."
         )
         login_label.setAlignment(Qt.AlignCenter)
         login_layout.addWidget(login_label)
@@ -2485,8 +2506,7 @@ class ImportFollowsDialog(QDialog):
         waiting_layout.setAlignment(Qt.AlignCenter)
 
         waiting_label = QLabel(
-            "Waiting for authorization...\n"
-            "Please complete login in your browser."
+            "Waiting for authorization...\nPlease complete login in your browser."
         )
         waiting_label.setAlignment(Qt.AlignCenter)
         waiting_layout.addWidget(waiting_label)
@@ -2553,6 +2573,7 @@ class ImportFollowsDialog(QDialog):
         def login_thread():
             try:
                 from ..api.twitch import TwitchApiClient
+
                 client = TwitchApiClient(self.app.settings.twitch)
 
                 async def do_login():
@@ -2588,6 +2609,7 @@ class ImportFollowsDialog(QDialog):
             self.login_complete.emit()
 
         import threading
+
         thread = threading.Thread(target=run_login)
         thread.daemon = True
         thread.start()
@@ -2636,11 +2658,7 @@ class ImportFollowsDialog(QDialog):
 
             added = 0
             for i, ch in enumerate(channels):
-                # ch is a Channel object from get_followed_channels
-                key = ch.unique_key
-                if key not in self.app.monitor._channels:
-                    self.app.monitor._channels[key] = ch
-                    self.app.monitor._livestreams[key] = Livestream(channel=ch)
+                if self.app.monitor.add_channel_direct(ch):
                     added += 1
 
                 self.import_progress.setValue(i + 1)
@@ -2660,6 +2678,7 @@ class ImportFollowsDialog(QDialog):
             self.import_complete.emit(channels)
 
         import threading
+
         thread = threading.Thread(target=run_import, daemon=True)
         thread.start()
 
@@ -2700,10 +2719,7 @@ class ExportDialog(QDialog):
         default_name = f"livestream-list-export-{datetime.now().strftime('%Y-%m-%d')}.json"
 
         file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Channels",
-            default_name,
-            "JSON Files (*.json)"
+            self, "Export Channels", default_name, "JSON Files (*.json)"
         )
 
         if not file_path:
@@ -2716,7 +2732,7 @@ class ExportDialog(QDialog):
                     "app_version": __version__,
                     "export_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 },
-                "channels": []
+                "channels": [],
             }
 
             for channel in self.app.monitor.channels:
@@ -2743,7 +2759,7 @@ class ExportDialog(QDialog):
                     del settings_dict["window"]
                 data["settings"] = settings_dict
 
-            with open(file_path, 'w') as f:
+            with open(file_path, "w") as f:
                 json.dump(data, f, indent=2)
 
             self.accept()
