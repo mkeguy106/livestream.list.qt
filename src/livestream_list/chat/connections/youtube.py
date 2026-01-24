@@ -127,7 +127,7 @@ class YouTubeChatConnection(BaseChatConnection):
                 await self._extract_send_params(video_id)
 
         try:
-            self._pytchat = pytchat.create(video_id=video_id)
+            self._pytchat = pytchat.create(video_id=video_id, interruptable=False)
             self._set_connected(channel_id)
             self._last_flush = time.monotonic()
 
