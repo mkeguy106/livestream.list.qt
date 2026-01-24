@@ -234,12 +234,15 @@ def _decrypt_chromium_value(encrypted: bytes, key: bytes) -> str:
 
     Chromium on Linux uses v10/v11 prefix + AES-128-CBC.
     IV is 16 bytes of space (0x20).
+    v11 includes a 32-byte internal prefix in the plaintext that must be stripped.
     """
     if not encrypted:
         return ""
 
     # Check for version prefix
+    version = None
     if encrypted[:3] in (b"v10", b"v11"):
+        version = encrypted[:3]
         encrypted = encrypted[3:]
     else:
         # Not encrypted, return as-is
@@ -265,6 +268,10 @@ def _decrypt_chromium_value(encrypted: bytes, key: bytes) -> str:
             pad_len = decrypted[-1]
             if 0 < pad_len <= 16:
                 decrypted = decrypted[:-pad_len]
+
+        # v11 format includes a 32-byte internal prefix in the plaintext
+        if version == b"v11" and len(decrypted) > 32:
+            decrypted = decrypted[32:]
 
         result = decrypted.decode("utf-8", errors="replace")
 
