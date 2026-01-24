@@ -222,6 +222,32 @@ ssh docker01.dd.local "docker system prune -af --volumes"
 - Runner in restart loop → check logs for auth/token issues
 - Job canceled mid-run → re-run workflow with `gh run rerun <run-id>`
 
+## Release Hygiene
+
+After pushing a new release, perform these cleanup checks:
+
+1. **Prune old releases**: Keep only the latest release per minor version series. Delete older patch releases (e.g., if v0.9.1 exists, delete v0.9.0). Each flatpak is ~170MB so old releases add up fast.
+   ```bash
+   gh release list
+   gh release delete <tag> --yes --cleanup-tag
+   ```
+
+2. **Delete merged branches**: Remove remote branches that have been merged.
+   ```bash
+   git branch -r --merged origin/main | grep -v main | sed 's|origin/||' | xargs -r git push origin --delete
+   ```
+
+3. **Check total release storage**: Should stay under ~1GB (keep 4-5 releases max).
+   ```bash
+   gh api repos/mkeguy106/livestream.list.qt/releases --paginate --jq '[.[] | .assets[0].size // 0] | add / 1048576 | floor'
+   # Shows total MB across all release assets
+   ```
+
+4. **Verify repo size**: Should remain well under 1GB.
+   ```bash
+   gh api repos/mkeguy106/livestream.list.qt --jq '.size'  # KB
+   ```
+
 ## Git Commits
 
 Never include in commit messages:
