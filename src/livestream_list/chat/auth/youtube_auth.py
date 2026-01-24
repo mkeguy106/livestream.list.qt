@@ -1,53 +1,41 @@
-"""YouTube/Google OAuth authentication flow for chat."""
+"""YouTube cookie-based authentication for chat sending."""
 
 import logging
+
+from ...core.settings import YouTubeSettings
+from ..connections.youtube import validate_cookies
 
 logger = logging.getLogger(__name__)
 
 
 class YouTubeAuthFlow:
-    """Google OAuth2 authentication for YouTube chat sending.
+    """Cookie-based authentication for YouTube chat sending.
 
-    Note: This is a placeholder. Full Google OAuth2 implementation
-    requires registering with Google Cloud Console and getting
-    client credentials for the YouTube Data API.
+    YouTube chat sending uses InnerTube's private API which authenticates
+    via browser cookies (SAPISID hash). No OAuth flow is needed - the user
+    pastes their browser cookies in preferences.
     """
 
-    def __init__(self):
-        self._access_token: str = ""
-        self._refresh_token: str = ""
-
-    @property
-    def access_token(self) -> str:
-        """Get the current access token."""
-        return self._access_token
+    def __init__(self, youtube_settings: YouTubeSettings | None = None):
+        self._youtube_settings = youtube_settings
 
     @property
     def is_authenticated(self) -> bool:
-        """Check if we have a valid token."""
-        return bool(self._access_token)
+        """Check if valid cookies are configured."""
+        if not self._youtube_settings or not self._youtube_settings.cookies:
+            return False
+        return validate_cookies(self._youtube_settings.cookies)
 
     async def authenticate(self) -> bool:
-        """Start the Google OAuth2 flow.
-
-        Returns True if authentication was successful.
-        """
-        # Full implementation would:
-        # 1. Open browser to Google OAuth consent page
-        # 2. Listen on local callback server for the auth code
-        # 3. Exchange auth code for access/refresh tokens
-        # 4. Store tokens securely (keyring)
-        logger.warning("YouTube chat authentication is not yet available")
-        return False
+        """No-op - cookies are configured via preferences UI."""
+        logger.info("YouTube auth is cookie-based. Configure cookies in Preferences > Accounts.")
+        return self.is_authenticated
 
     async def refresh_access_token(self) -> bool:
-        """Refresh the access token using the refresh token."""
-        if not self._refresh_token:
-            return False
-        # Would call Google's token endpoint with refresh_token
-        return False
+        """No-op - cookies don't need refreshing (they last ~2 years)."""
+        return self.is_authenticated
 
     def clear_tokens(self) -> None:
-        """Clear stored tokens."""
-        self._access_token = ""
-        self._refresh_token = ""
+        """Clear stored cookies."""
+        if self._youtube_settings:
+            self._youtube_settings.cookies = ""
