@@ -111,6 +111,12 @@ class StreamRow(QWidget):
         """Set up the row UI."""
         style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
 
+        # Font scaling
+        default_font_size = QApplication.font().pointSize()
+        font_size = self._settings.font_size if self._settings.font_size > 0 else default_font_size
+        self._font_size = font_size
+        scale = font_size / default_font_size if default_font_size > 0 else 1.0
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
             style["margin_h"], style["margin_v"], style["margin_h"], style["margin_v"]
@@ -143,23 +149,27 @@ class StreamRow(QWidget):
         name_row.setSpacing(style["spacing"])
 
         self.name_label = QLabel()
-        self.name_label.setStyleSheet("font-weight: bold;")
+        self.name_label.setStyleSheet(
+            f"font-weight: bold; font-size: {font_size}pt;"
+        )
         self.name_label.setMinimumWidth(80)  # Ensure channel name stays visible
         name_row.addWidget(self.name_label)
 
         self.duration_label = QLabel()
-        self.duration_label.setStyleSheet("color: gray;")
+        self.duration_label.setStyleSheet(f"color: gray; font-size: {font_size}pt;")
         name_row.addWidget(self.duration_label)
 
         self.playing_label = QLabel()
-        self.playing_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        self.playing_label.setStyleSheet(
+            f"color: #4CAF50; font-weight: bold; font-size: {font_size}pt;"
+        )
         self.playing_label.setVisible(False)
         name_row.addWidget(self.playing_label)
 
         name_row.addStretch()
 
         self.viewers_label = QLabel()
-        self.viewers_label.setStyleSheet("color: gray;")
+        self.viewers_label.setStyleSheet(f"color: gray; font-size: {font_size}pt;")
         name_row.addWidget(self.viewers_label)
 
         info_layout.addLayout(name_row)
@@ -168,8 +178,9 @@ class StreamRow(QWidget):
         if self._settings.ui_style == UIStyle.DEFAULT:
             from PySide6.QtWidgets import QSizePolicy
 
+            title_size = max(8, int(font_size * 0.85))
             self.title_label = QLabel()
-            self.title_label.setStyleSheet("color: gray; font-size: 11px;")
+            self.title_label.setStyleSheet(f"color: gray; font-size: {title_size}pt;")
             self.title_label.setWordWrap(False)
             # Allow title to shrink and hide when window is small
             self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -181,7 +192,7 @@ class StreamRow(QWidget):
         layout.addLayout(info_layout, 1)
 
         # Buttons
-        icon_size = style["icon_size"]
+        icon_size = int(style["icon_size"] * scale)
 
         # Browser button
         if self._settings.channel_icons.show_browser:
@@ -240,19 +251,24 @@ class StreamRow(QWidget):
         platform_icons = {"twitch": "T", "youtube": "Y", "kick": "K"}
         platform_name = channel.platform.value
         self.platform_label.setText(platform_icons.get(platform_name, "?"))
+        fs = self._font_size
         if self._settings.platform_colors:
             color = PLATFORM_COLORS.get(channel.platform, "#888888")
-            self.platform_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+            self.platform_label.setStyleSheet(
+                f"color: {color}; font-weight: bold; font-size: {fs}pt;"
+            )
         else:
-            self.platform_label.setStyleSheet("font-weight: bold;")
+            self.platform_label.setStyleSheet(f"font-weight: bold; font-size: {fs}pt;")
 
         # Channel name
         self.name_label.setText(channel.display_name or channel.channel_id)
         if self._settings.platform_colors:
             color = PLATFORM_COLORS.get(channel.platform, "#888888")
-            self.name_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+            self.name_label.setStyleSheet(
+                f"color: {color}; font-weight: bold; font-size: {fs}pt;"
+            )
         else:
-            self.name_label.setStyleSheet("font-weight: bold;")
+            self.name_label.setStyleSheet(f"font-weight: bold; font-size: {fs}pt;")
 
         # Duration / Last seen
         if self._settings.channel_info.show_live_duration:
@@ -438,6 +454,7 @@ class MainWindow(QMainWindow):
         self.stream_list = QListWidget()
         self.stream_list.setSpacing(0)
         self.stream_list.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.stream_list.viewport().installEventFilter(self)
         list_layout.addWidget(self.stream_list)
 
         self.stack.addWidget(list_page)  # Index 3
@@ -1180,6 +1197,24 @@ class MainWindow(QMainWindow):
         self.app.settings.window.y = pos.y()
         self.app.save_settings()
 
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle Ctrl+Wheel on stream list for font scaling."""
+        from PySide6.QtCore import QEvent
+
+        if obj == self.stream_list.viewport() and event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                default_size = QApplication.font().pointSize()
+                current = self.app.settings.font_size
+                if current == 0:
+                    current = default_size
+                delta = 1 if event.angleDelta().y() > 0 else -1
+                new_size = max(6, min(30, current + delta))
+                self.app.settings.font_size = new_size
+                self.app.save_settings()
+                self.refresh_stream_list()
+                return True
+        return super().eventFilter(obj, event)
+
     def _quit_app(self):
         """Quit the application (bypasses minimize-to-tray)."""
         self._force_quit = True
@@ -1801,6 +1836,10 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(icons_group)
 
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.clicked.connect(lambda: self._reset_tab_defaults("General"))
+        layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
         layout.addStretch()
         scroll.setWidget(widget)
         return scroll
@@ -1888,11 +1927,18 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(launch_group)
 
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.clicked.connect(lambda: self._reset_tab_defaults("Playback"))
+        layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
         layout.addStretch()
         return widget
 
     def _create_chat_tab(self) -> QWidget:
         """Create the Chat settings tab."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -1968,6 +2014,25 @@ class PreferencesDialog(QDialog):
         self.chat_spacing_spin.valueChanged.connect(self._on_chat_changed)
         builtin_layout.addRow("Line spacing:", self.chat_spacing_spin)
 
+        # Emote provider checkboxes
+        emote_providers = self.app.settings.chat.builtin.emote_providers
+        self.emote_7tv_cb = QCheckBox("7TV")
+        self.emote_7tv_cb.setChecked("7tv" in emote_providers)
+        self.emote_7tv_cb.stateChanged.connect(self._on_chat_changed)
+        self.emote_bttv_cb = QCheckBox("BTTV")
+        self.emote_bttv_cb.setChecked("bttv" in emote_providers)
+        self.emote_bttv_cb.stateChanged.connect(self._on_chat_changed)
+        self.emote_ffz_cb = QCheckBox("FFZ")
+        self.emote_ffz_cb.setChecked("ffz" in emote_providers)
+        self.emote_ffz_cb.stateChanged.connect(self._on_chat_changed)
+
+        emote_row = QHBoxLayout()
+        emote_row.addWidget(self.emote_7tv_cb)
+        emote_row.addWidget(self.emote_bttv_cb)
+        emote_row.addWidget(self.emote_ffz_cb)
+        emote_row.addStretch()
+        builtin_layout.addRow("Emote providers:", emote_row)
+
         self.chat_timestamps_cb = QCheckBox("Show timestamps")
         self.chat_timestamps_cb.setChecked(self.app.settings.chat.builtin.show_timestamps)
         self.chat_timestamps_cb.stateChanged.connect(self._on_chat_changed)
@@ -2002,24 +2067,57 @@ class PreferencesDialog(QDialog):
         self.chat_alt_rows_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_alt_rows_cb)
 
-        # Emote provider checkboxes
-        emote_providers = self.app.settings.chat.builtin.emote_providers
-        self.emote_7tv_cb = QCheckBox("7TV")
-        self.emote_7tv_cb.setChecked("7tv" in emote_providers)
-        self.emote_7tv_cb.stateChanged.connect(self._on_chat_changed)
-        self.emote_bttv_cb = QCheckBox("BTTV")
-        self.emote_bttv_cb.setChecked("bttv" in emote_providers)
-        self.emote_bttv_cb.stateChanged.connect(self._on_chat_changed)
-        self.emote_ffz_cb = QCheckBox("FFZ")
-        self.emote_ffz_cb.setChecked("ffz" in emote_providers)
-        self.emote_ffz_cb.stateChanged.connect(self._on_chat_changed)
+        # Even row color picker
+        even_color_row = QHBoxLayout()
+        self.alt_row_even_swatch = QPushButton()
+        self.alt_row_even_swatch.setFixedSize(24, 24)
+        self.alt_row_even_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        even_color_row.addWidget(self.alt_row_even_swatch)
+        self.alt_row_even_edit = QLineEdit()
+        self.alt_row_even_edit.setText(self.app.settings.chat.builtin.alt_row_color_even)
+        self.alt_row_even_edit.setMaximumWidth(100)
+        self.alt_row_even_edit.editingFinished.connect(self._on_chat_changed)
+        self.alt_row_even_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.alt_row_even_swatch, t)
+        )
+        even_color_row.addWidget(self.alt_row_even_edit)
+        even_color_row.addStretch()
+        self.alt_row_even_swatch.clicked.connect(
+            lambda: self._pick_color_alpha(self.alt_row_even_edit, self.alt_row_even_swatch)
+        )
+        self._update_swatch(self.alt_row_even_swatch, self.alt_row_even_edit.text())
+        self.alt_row_even_label = QLabel("Even row color:")
+        builtin_layout.addRow(self.alt_row_even_label, even_color_row)
 
-        emote_row = QHBoxLayout()
-        emote_row.addWidget(self.emote_7tv_cb)
-        emote_row.addWidget(self.emote_bttv_cb)
-        emote_row.addWidget(self.emote_ffz_cb)
-        emote_row.addStretch()
-        builtin_layout.addRow("Emote providers:", emote_row)
+        # Odd row color picker
+        odd_color_row = QHBoxLayout()
+        self.alt_row_odd_swatch = QPushButton()
+        self.alt_row_odd_swatch.setFixedSize(24, 24)
+        self.alt_row_odd_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        odd_color_row.addWidget(self.alt_row_odd_swatch)
+        self.alt_row_odd_edit = QLineEdit()
+        self.alt_row_odd_edit.setText(self.app.settings.chat.builtin.alt_row_color_odd)
+        self.alt_row_odd_edit.setMaximumWidth(100)
+        self.alt_row_odd_edit.editingFinished.connect(self._on_chat_changed)
+        self.alt_row_odd_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.alt_row_odd_swatch, t)
+        )
+        odd_color_row.addWidget(self.alt_row_odd_edit)
+        odd_color_row.addStretch()
+        self.alt_row_odd_swatch.clicked.connect(
+            lambda: self._pick_color_alpha(self.alt_row_odd_edit, self.alt_row_odd_swatch)
+        )
+        self._update_swatch(self.alt_row_odd_swatch, self.alt_row_odd_edit.text())
+        self.alt_row_odd_label = QLabel("Odd row color:")
+        builtin_layout.addRow(self.alt_row_odd_label, odd_color_row)
+
+        # Show/hide color pickers based on checkbox state
+        alt_visible = self.chat_alt_rows_cb.isChecked()
+        for w in (self.alt_row_even_label, self.alt_row_even_swatch,
+                  self.alt_row_even_edit, self.alt_row_odd_label,
+                  self.alt_row_odd_swatch, self.alt_row_odd_edit):
+            w.setVisible(alt_visible)
+        self.chat_alt_rows_cb.stateChanged.connect(self._toggle_alt_row_colors)
 
         self.chat_name_colors_cb = QCheckBox("Use platform name colors")
         self.chat_name_colors_cb.setChecked(self.app.settings.chat.builtin.use_platform_name_colors)
@@ -2077,8 +2175,13 @@ class PreferencesDialog(QDialog):
         self.new_window_cb.setVisible(show_browser)
         self.builtin_group.setVisible(not show_browser)
 
+        reset_btn = QPushButton("Reset to Defaults")
+        reset_btn.clicked.connect(lambda: self._reset_tab_defaults("Chat"))
+        layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
+
         layout.addStretch()
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_accounts_tab(self) -> QWidget:
         """Create the Accounts tab."""
@@ -2304,6 +2407,12 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
         self.app.settings.chat.builtin.animate_emotes = self.chat_animate_emotes_cb.isChecked()
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
+        self.app.settings.chat.builtin.alt_row_color_even = (
+            self.alt_row_even_edit.text().strip() or "#00000000"
+        )
+        self.app.settings.chat.builtin.alt_row_color_odd = (
+            self.alt_row_odd_edit.text().strip() or "#0fffffff"
+        )
         self.app.settings.chat.builtin.use_platform_name_colors = (
             self.chat_name_colors_cb.isChecked()
         )
@@ -2331,8 +2440,16 @@ class PreferencesDialog(QDialog):
         """Update a color swatch button's background from a hex string."""
         color = QColor(hex_color)
         if color.isValid():
+            if color.alpha() < 255:
+                css_color = (
+                    f"rgba({color.red()}, {color.green()}, {color.blue()}, "
+                    f"{color.alpha() / 255:.2f})"
+                )
+            else:
+                css_color = hex_color
             button.setStyleSheet(
-                f"background-color: {hex_color}; border: 1px solid #666; border-radius: 3px;"
+                f"background-color: {css_color}; border: 1px solid #666;"
+                " border-radius: 3px;"
             )
         else:
             button.setStyleSheet(
@@ -2348,6 +2465,135 @@ class PreferencesDialog(QDialog):
         if color.isValid():
             line_edit.setText(color.name())
             self._update_swatch(swatch, color.name())
+            self._on_chat_changed()
+
+    def _pick_color_alpha(self, line_edit: QLineEdit, swatch: QPushButton) -> None:
+        """Open a color picker with alpha channel and update the line edit and swatch."""
+        current = QColor(line_edit.text().strip())
+        if not current.isValid():
+            current = QColor(255, 255, 255, 15)
+        color = QColorDialog.getColor(
+            current, self, "Pick a color",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        )
+        if color.isValid():
+            # Format as #AARRGGBB for Qt
+            a, r, g, b = color.alpha(), color.red(), color.green(), color.blue()
+            hex_color = f"#{a:02x}{r:02x}{g:02x}{b:02x}"
+            line_edit.setText(hex_color)
+            self._update_swatch(swatch, hex_color)
+            self._on_chat_changed()
+
+    def _toggle_alt_row_colors(self, state):
+        """Show/hide alternating row color pickers based on checkbox state."""
+        visible = bool(state)
+        for w in (self.alt_row_even_label, self.alt_row_even_swatch,
+                  self.alt_row_even_edit, self.alt_row_odd_label,
+                  self.alt_row_odd_swatch, self.alt_row_odd_edit):
+            w.setVisible(visible)
+
+    def _reset_tab_defaults(self, tab_name: str):
+        """Reset a preferences tab to default values after confirmation."""
+        from ..core.settings import (
+            BuiltinChatSettings,
+            ChannelIconSettings,
+            ChannelInfoSettings,
+            ChatSettings,
+            NotificationSettings,
+            Settings,
+            StreamlinkSettings,
+        )
+
+        result = QMessageBox.question(
+            self,
+            "Reset to Defaults",
+            f"Reset all {tab_name} settings to their default values?",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if result != QMessageBox.StandardButton.Ok:
+            return
+
+        if tab_name == "General":
+            defaults = Settings()
+            info_defaults = ChannelInfoSettings()
+            icon_defaults = ChannelIconSettings()
+            notif_defaults = NotificationSettings()
+            # Startup
+            self.autostart_cb.setChecked(defaults.autostart)
+            self.background_cb.setChecked(defaults.close_to_tray)
+            # Refresh
+            self.refresh_spin.setValue(defaults.refresh_interval)
+            # Notifications
+            self.notif_enabled_cb.setChecked(notif_defaults.enabled)
+            self.notif_sound_cb.setChecked(notif_defaults.sound_enabled)
+            for i in range(self.notif_backend_combo.count()):
+                if self.notif_backend_combo.itemData(i) == notif_defaults.backend:
+                    self.notif_backend_combo.setCurrentIndex(i)
+                    break
+            # Appearance
+            self.style_combo.setCurrentIndex(defaults.ui_style)
+            self.platform_colors_cb.setChecked(defaults.platform_colors)
+            # Channel info
+            self.show_duration_cb.setChecked(info_defaults.show_live_duration)
+            self.show_viewers_cb.setChecked(info_defaults.show_viewers)
+            # Channel icons
+            self.show_platform_cb.setChecked(icon_defaults.show_platform)
+            self.show_play_cb.setChecked(icon_defaults.show_play)
+            self.show_favorite_cb.setChecked(icon_defaults.show_favorite)
+            self.show_chat_cb.setChecked(icon_defaults.show_chat)
+            self.show_browser_cb.setChecked(icon_defaults.show_browser)
+            # Reset font_size (stream list scaling)
+            self.app.settings.font_size = defaults.font_size
+            self.app.save_settings()
+            self.app.main_window.refresh_stream_list()
+
+        elif tab_name == "Playback":
+            defaults = StreamlinkSettings()
+            self.sl_path_edit.setText(defaults.path)
+            self.sl_args_edit.setText(defaults.additional_args)
+            self.player_path_edit.setText(defaults.player)
+            self.player_args_edit.setText(defaults.player_args)
+            for combo, value in (
+                (self.twitch_launch_combo, defaults.twitch_launch_method.value),
+                (self.youtube_launch_combo, defaults.youtube_launch_method.value),
+                (self.kick_launch_combo, defaults.kick_launch_method.value),
+            ):
+                for i in range(combo.count()):
+                    if combo.itemData(i) == value:
+                        combo.setCurrentIndex(i)
+                        break
+            self._on_streamlink_changed()
+
+        elif tab_name == "Chat":
+            chat_defaults = ChatSettings()
+            builtin = BuiltinChatSettings()
+            self.chat_auto_cb.setChecked(chat_defaults.auto_open)
+            for i in range(self.chat_client_combo.count()):
+                if self.chat_client_combo.itemData(i) == chat_defaults.mode:
+                    self.chat_client_combo.setCurrentIndex(i)
+                    break
+            for i in range(self.browser_combo.count()):
+                if self.browser_combo.itemData(i) == chat_defaults.browser:
+                    self.browser_combo.setCurrentIndex(i)
+                    break
+            self.new_window_cb.setChecked(chat_defaults.new_window)
+            self.chat_font_spin.setValue(builtin.font_size)
+            self.chat_spacing_spin.setValue(builtin.line_spacing)
+            self.emote_7tv_cb.setChecked("7tv" in builtin.emote_providers)
+            self.emote_bttv_cb.setChecked("bttv" in builtin.emote_providers)
+            self.emote_ffz_cb.setChecked("ffz" in builtin.emote_providers)
+            self.chat_timestamps_cb.setChecked(builtin.show_timestamps)
+            self.chat_badges_cb.setChecked(builtin.show_badges)
+            self.chat_mod_badges_cb.setChecked(builtin.show_mod_badges)
+            self.chat_emotes_cb.setChecked(builtin.show_emotes)
+            self.chat_animate_emotes_cb.setChecked(builtin.animate_emotes)
+            self.chat_alt_rows_cb.setChecked(builtin.show_alternating_rows)
+            self.alt_row_even_edit.setText(builtin.alt_row_color_even)
+            self.alt_row_odd_edit.setText(builtin.alt_row_color_odd)
+            self.chat_name_colors_cb.setChecked(builtin.use_platform_name_colors)
+            self.tab_active_color_edit.setText(builtin.tab_active_color)
+            self.tab_inactive_color_edit.setText(builtin.tab_inactive_color)
             self._on_chat_changed()
 
     def _on_twitch_login(self):

@@ -117,6 +117,8 @@ class BuiltinChatSettings:
     max_messages: int = 5000
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
     show_alternating_rows: bool = True
+    alt_row_color_even: str = "#00000000"  # AARRGGBB: transparent (default bg)
+    alt_row_color_odd: str = "#0fffffff"  # AARRGGBB: white at ~6% opacity
     blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
     tab_active_color: str = "#6441a5"
     tab_inactive_color: str = "#16213e"
@@ -175,6 +177,7 @@ class Settings:
     favorites_only: bool = False
     ui_style: UIStyle = UIStyle.DEFAULT
     platform_colors: bool = True  # Color platform icons and channel names
+    font_size: int = 0  # 0 = system default, otherwise point size for stream list
 
     # Platform settings
     twitch: TwitchSettings = field(default_factory=TwitchSettings)
@@ -245,6 +248,7 @@ class Settings:
         except ValueError:
             settings.ui_style = UIStyle.DEFAULT
         settings.platform_colors = data.get("platform_colors", settings.platform_colors)
+        settings.font_size = data.get("font_size", settings.font_size)
 
         # Twitch
         if "twitch" in data:
@@ -330,6 +334,8 @@ class Settings:
                 max_messages=builtin_data.get("max_messages", 5000),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
+                alt_row_color_even=builtin_data.get("alt_row_color_even", "#00000000"),
+                alt_row_color_odd=builtin_data.get("alt_row_color_odd", "#0fffffff"),
                 blocked_users=builtin_data.get("blocked_users", []),
                 tab_active_color=builtin_data.get("tab_active_color", "#6441a5"),
                 tab_inactive_color=builtin_data.get("tab_inactive_color", "#16213e"),
@@ -382,6 +388,7 @@ class Settings:
             "favorites_only": self.favorites_only,
             "ui_style": self.ui_style.value,
             "platform_colors": self.platform_colors,
+            "font_size": self.font_size,
             "twitch": {
                 "client_id": self.twitch.client_id,
                 "client_secret": self.twitch.client_secret,
@@ -441,6 +448,8 @@ class Settings:
                     "max_messages": self.chat.builtin.max_messages,
                     "emote_providers": self.chat.builtin.emote_providers,
                     "show_alternating_rows": self.chat.builtin.show_alternating_rows,
+                    "alt_row_color_even": self.chat.builtin.alt_row_color_even,
+                    "alt_row_color_odd": self.chat.builtin.alt_row_color_odd,
                     "blocked_users": self.chat.builtin.blocked_users,
                     "tab_active_color": self.chat.builtin.tab_active_color,
                     "tab_inactive_color": self.chat.builtin.tab_inactive_color,

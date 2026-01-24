@@ -88,8 +88,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
             # Left accent bar for hype chat
             accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
             painter.fillRect(accent_rect, QColor(218, 165, 32))
-        elif self.settings.show_alternating_rows and index.row() % 2 == 1:
-            painter.fillRect(option.rect, QColor(255, 255, 255, 15))
+        elif self.settings.show_alternating_rows:
+            if index.row() % 2 == 0:
+                color = QColor(self.settings.alt_row_color_even)
+            else:
+                color = QColor(self.settings.alt_row_color_odd)
+            if color.alpha() > 0:
+                painter.fillRect(option.rect, color)
 
         # Apply moderation opacity
         if message.is_moderated:
@@ -150,14 +155,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 return
 
         # Badges
-        if self.settings.show_badges and message.user.badges:
+        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             badge_y = y + (line_height - badge_size) // 2
             for badge in message.user.badges:
-                # Filter mod badges if disabled
-                if (
-                    not self.settings.show_mod_badges
-                    and badge.name in MOD_BADGE_NAMES
-                ):
+                is_mod_badge = badge.name in MOD_BADGE_NAMES
+                # Skip non-mod badges if show_badges is off
+                if not self.settings.show_badges and not is_mod_badge:
+                    continue
+                # Skip mod badges if show_mod_badges is off
+                if not self.settings.show_mod_badges and is_mod_badge:
                     continue
                 badge_key = f"badge:{badge.id}"
                 pixmap = self._emote_cache.get(badge_key)
@@ -421,14 +427,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             prefix_width += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
-        if self.settings.show_badges and message.user.badges:
-            badge_count = len(message.user.badges)
-            if not self.settings.show_mod_badges:
-                badge_count = sum(
-                    1
-                    for b in message.user.badges
-                    if b.name not in MOD_BADGE_NAMES
-                )
+        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
+            badge_count = 0
+            for b in message.user.badges:
+                is_mod = b.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod:
+                    continue
+                if not self.settings.show_mod_badges and is_mod:
+                    continue
+                badge_count += 1
             prefix_width += badge_count * (badge_size + BADGE_SPACING)
 
         bold_font = QFont(font)
