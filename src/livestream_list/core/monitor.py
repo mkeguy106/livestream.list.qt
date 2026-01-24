@@ -212,10 +212,7 @@ class StreamMonitor:
             return await client.get_livestreams(channels)
         except Exception as e:
             logger.error(f"Error querying {client.name}: {e}")
-            return [
-                Livestream(channel=ch, live=False, error_message=str(e))
-                for ch in channels
-            ]
+            return [Livestream(channel=ch, live=False, error_message=str(e)) for ch in channels]
 
     def _fire_stream_online(self, livestream: Livestream) -> None:
         """Fire stream online callbacks."""
@@ -302,6 +299,58 @@ class StreamMonitor:
 
         return added
 
+    def add_channel_direct(self, channel: Channel) -> bool:
+        """Add a channel directly without API verification.
+
+        Used for import operations where the channel data is already known.
+        Returns True if the channel was added (not a duplicate).
+        """
+        key = channel.unique_key
+        if key in self._channels:
+            return False
+        self._channels[key] = channel
+        self._livestreams[key] = Livestream(channel=channel)
+        return True
+
+    def remove_channels(self, keys: list[str]) -> None:
+        """Remove multiple channels by their unique keys."""
+        for key in keys:
+            self._channels.pop(key, None)
+            self._livestreams.pop(key, None)
+
+    def has_channel(self, key: str) -> bool:
+        """Check if a channel exists by its unique key."""
+        return key in self._channels
+
+    def reset_all_sessions(self) -> None:
+        """Reset all API client sessions.
+
+        Call before running async operations in a new event loop.
+        """
+        for client in self._clients.values():
+            client.reset_session()
+
+    async def close_all_sessions(self) -> None:
+        """Close all API client sessions."""
+        for client in self._clients.values():
+            await client.close()
+
+    async def load_channels(self) -> None:
+        """Public method to load channels from disk."""
+        await self._load_channels()
+
+    def set_initial_load_complete(self) -> None:
+        """Mark initial load as complete, enabling notifications."""
+        self._initial_load_complete = True
+
+    def suppress_notifications(self) -> None:
+        """Temporarily suppress stream online notifications."""
+        self._initial_load_complete = False
+
+    def resume_notifications(self) -> None:
+        """Resume stream online notifications after suppression."""
+        self._initial_load_complete = True
+
     def set_dont_notify(self, channel: Channel, dont_notify: bool) -> None:
         """Set the notification preference for a channel."""
         if channel.unique_key in self._channels:
@@ -328,10 +377,7 @@ class StreamMonitor:
             self._pending_save = True
 
             # Schedule new save after delay
-            self._save_timer = threading.Timer(
-                SAVE_DEBOUNCE_DELAY,
-                self._execute_debounced_save
-            )
+            self._save_timer = threading.Timer(SAVE_DEBOUNCE_DELAY, self._execute_debounced_save)
             self._save_timer.daemon = True
             self._save_timer.start()
 
@@ -346,11 +392,8 @@ class StreamMonitor:
         # Save synchronously (this runs in timer thread)
         self._save_channels_sync()
 
-    def _save_channels_sync(self) -> None:
-        """Save channels to disk synchronously."""
-        path = get_data_dir() / "channels.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-
+    def _serialize_channels(self) -> list[dict]:
+        """Serialize channels to a list of dicts for JSON persistence."""
         data = []
         for ch in self._channels.values():
             ch_data = {
@@ -362,15 +405,20 @@ class StreamMonitor:
                 "favorite": ch.favorite,
                 "added_at": ch.added_at.isoformat(),
             }
-            # Save last_live_time from livestream if available
             livestream = self._livestreams.get(ch.unique_key)
             if livestream and livestream.last_live_time:
                 ch_data["last_live_time"] = livestream.last_live_time.isoformat()
             data.append(ch_data)
+        return data
+
+    def _save_channels_sync(self) -> None:
+        """Save channels to disk synchronously."""
+        path = get_data_dir() / "channels.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+                json.dump(self._serialize_channels(), f, indent=2)
         except Exception as e:
             logger.error(f"Error saving channels: {e}")
 
@@ -439,22 +487,5 @@ class StreamMonitor:
         path = get_data_dir() / "channels.json"
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        data = []
-        for ch in self._channels.values():
-            ch_data = {
-                "channel_id": ch.channel_id,
-                "platform": ch.platform.value,
-                "display_name": ch.display_name,
-                "imported_by": ch.imported_by,
-                "dont_notify": ch.dont_notify,
-                "favorite": ch.favorite,
-                "added_at": ch.added_at.isoformat(),
-            }
-            # Save last_live_time from livestream if available
-            livestream = self._livestreams.get(ch.unique_key)
-            if livestream and livestream.last_live_time:
-                ch_data["last_live_time"] = livestream.last_live_time.isoformat()
-            data.append(ch_data)
-
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+            json.dump(self._serialize_channels(), f, indent=2)

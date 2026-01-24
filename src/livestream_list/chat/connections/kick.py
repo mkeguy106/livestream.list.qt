@@ -1,5 +1,6 @@
 """Kick chat connection via Pusher WebSocket."""
 
+import asyncio
 import json
 import logging
 import re
@@ -60,6 +61,7 @@ class KickChatConnection(BaseChatConnection):
         self._badge_url_map: dict[str, str] = {}  # badge_type -> image_url
         self._message_batch: list[ChatMessage] = []
         self._last_flush: float = 0
+        self._refresh_lock = asyncio.Lock()
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a Kick channel's chat.
@@ -126,6 +128,7 @@ class KickChatConnection(BaseChatConnection):
 
         Uses the official Kick public API with OAuth bearer token.
         Automatically refreshes the token on 401 and retries once.
+        Uses a lock to prevent concurrent token refresh races.
         """
         if not self._auth_token:
             self._emit_error("Cannot send messages without Kick authentication")
@@ -137,16 +140,17 @@ class KickChatConnection(BaseChatConnection):
 
         result = await self._do_send(text)
         if result is None:
-            # 401 - try refreshing token and retry
-            if await self._refresh_auth_token():
-                result = await self._do_send(text)
-                if result is None:
-                    self._emit_error("Send failed after token refresh (401)")
+            # 401 - try refreshing token under lock to prevent concurrent refreshes
+            async with self._refresh_lock:
+                if await self._refresh_auth_token():
+                    result = await self._do_send(text)
+                    if result is None:
+                        self._emit_error("Send failed after token refresh (401)")
+                        return False
+                    return result
+                else:
+                    self._emit_error("Authentication expired - please re-login to Kick")
                     return False
-                return result
-            else:
-                self._emit_error("Authentication expired - please re-login to Kick")
-                return False
         return result
 
     async def _do_send(self, text: str) -> bool | None:
@@ -177,9 +181,7 @@ class KickChatConnection(BaseChatConnection):
                     logger.warning(f"Kick chat send got 401: {body}")
                     return None  # Signal to refresh and retry
                 body = await resp.text()
-                logger.error(
-                    f"Kick chat send failed ({resp.status}): {body}"
-                )
+                logger.error(f"Kick chat send failed ({resp.status}): {body}")
                 self._emit_error(f"Send failed ({resp.status})")
                 return False
         except Exception as e:
@@ -377,7 +379,7 @@ class KickChatConnection(BaseChatConnection):
             emote_id = match.group(1)
             emote_name = match.group(2)
             # Add text before this emote
-            text_parts.append(raw_content[last_end:match.start()])
+            text_parts.append(raw_content[last_end : match.start()])
             start = len("".join(text_parts))
             text_parts.append(emote_name)
             end = start + len(emote_name)

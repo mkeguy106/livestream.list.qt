@@ -65,13 +65,20 @@ def parse_irc_message(raw: str) -> dict:
 
     # Parse tags
     if raw.startswith("@"):
-        space_idx = raw.index(" ")
+        space_idx = raw.find(" ")
+        if space_idx < 0:
+            return result
         result["tags"] = parse_irc_tags(raw[:space_idx])
         pos = space_idx + 1
 
+    if pos >= len(raw):
+        return result
+
     # Parse prefix
     if raw[pos] == ":":
-        space_idx = raw.index(" ", pos)
+        space_idx = raw.find(" ", pos)
+        if space_idx < 0:
+            return result
         result["prefix"] = raw[pos + 1 : space_idx]
         pos = space_idx + 1
 
@@ -177,9 +184,7 @@ class TwitchChatConnection(BaseChatConnection):
 
             # If auth failed, reconnect anonymously for read-only
             if self._auth_failed:
-                logger.warning(
-                    f"Twitch auth failed for #{channel}, reconnecting anonymously"
-                )
+                logger.warning(f"Twitch auth failed for #{channel}, reconnecting anonymously")
                 await self._cleanup()
                 self._auth_failed = False
                 self._should_stop = False
@@ -217,9 +222,7 @@ class TwitchChatConnection(BaseChatConnection):
                                 f"(scopes: {scopes}, can_send: {self._can_send})"
                             )
                             return login
-                    logger.warning(
-                        f"Twitch token validation failed (status={resp.status})"
-                    )
+                    logger.warning(f"Twitch token validation failed (status={resp.status})")
         except Exception as e:
             logger.warning(f"Twitch token validation error: {e}")
         return None
@@ -261,8 +264,7 @@ class TwitchChatConnection(BaseChatConnection):
     async def disconnect(self) -> None:
         """Disconnect from the channel."""
         self._should_stop = True
-        if self._ws and not self._ws.closed:
-            await self._ws.close()
+        await self._cleanup()
 
     async def send_message(self, text: str) -> bool:
         """Send a message to the connected channel."""
@@ -271,8 +273,7 @@ class TwitchChatConnection(BaseChatConnection):
 
         if not self._can_send:
             self._emit_error(
-                "Cannot send: missing chat:edit scope. "
-                "Please re-login to Twitch via Preferences."
+                "Cannot send: missing chat:edit scope. Please re-login to Twitch via Preferences."
             )
             return False
 
@@ -400,7 +401,7 @@ class TwitchChatConnection(BaseChatConnection):
             hype_chat_level = tags.get("pinned-chat-paid-level", "ONE")
             # Convert raw amount using exponent (e.g., 500 with exp 2 = 5.00)
             if exponent > 0:
-                hype_chat_amount = f"{int(raw_amount) / (10 ** exponent):.{exponent}f}"
+                hype_chat_amount = f"{int(raw_amount) / (10**exponent):.{exponent}f}"
             else:
                 hype_chat_amount = raw_amount
 

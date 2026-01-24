@@ -139,6 +139,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
 
 class ReuseAddrHTTPServer(HTTPServer):
     """HTTP server that allows address reuse."""
+
     allow_reuse_address = True
 
 
@@ -219,6 +220,7 @@ class OAuthServer:
         self._code: str | None = None
         self._token_event = threading.Event()
         self._code_event = threading.Event()
+        self._stopped = False
 
     @property
     def port(self) -> int:
@@ -260,13 +262,17 @@ class OAuthServer:
         logger.info(f"OAuth server started on port {self.port}")
 
     def stop(self) -> None:
-        """Stop the OAuth server."""
+        """Stop the OAuth server. Safe to call multiple times."""
+        if self._stopped:
+            return
+        self._stopped = True
+
         if self._server:
             self._server.shutdown()
             self._server = None
 
         if self._thread:
-            self._thread.join(timeout=1)
+            self._thread.join(timeout=5)
             self._thread = None
 
         logger.info("OAuth server stopped")
