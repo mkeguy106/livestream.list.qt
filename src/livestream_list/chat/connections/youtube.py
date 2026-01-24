@@ -426,12 +426,21 @@ class YouTubeChatConnection(BaseChatConnection):
                 author_name = getattr(item, "authorName", "Unknown") or "Unknown"
                 author_id = getattr(item, "authorChannelId", "") or str(uuid.uuid4())
 
+            # Set username color based on role (matching YouTube web chat)
+            user_color = None
+            if any(b.id == "owner" for b in badges):
+                user_color = "#ffd600"  # Gold for channel owner
+            elif any(b.id == "moderator" for b in badges):
+                user_color = "#5e84f1"  # Blue for moderators
+            elif any(b.id == "member" for b in badges):
+                user_color = "#2ba640"  # Green for members
+
             user = ChatUser(
                 id=author_id,
                 name=author_name,
                 display_name=author_name,
                 platform=StreamPlatform.YOUTUBE,
-                color=None,
+                color=user_color,
                 badges=badges,
             )
 
