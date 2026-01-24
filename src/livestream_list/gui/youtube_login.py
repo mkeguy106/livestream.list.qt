@@ -100,42 +100,50 @@ def _find_firefox_cookies(browser_id: str) -> str | None:
 
     # Look for profiles.ini to find the default profile
     profiles_ini = os.path.join(profiles_dir, "profiles.ini")
-    default_profile = None
+    candidates: list[str] = []
 
     if os.path.exists(profiles_ini):
         import configparser
         config = configparser.ConfigParser()
         config.read(profiles_ini)
+
+        # Install sections have Default=<path> pointing to the active profile
         for section in config.sections():
-            if section.startswith("Profile") or section.startswith("Install"):
+            if section.startswith("Install"):
+                path = config.get(section, "Default", fallback="")
+                if path:
+                    candidates.append(os.path.join(profiles_dir, path))
+
+        # Profile sections with Default=1
+        for section in config.sections():
+            if section.startswith("Profile"):
                 if config.get(section, "Default", fallback="0") == "1":
                     path = config.get(section, "Path", fallback="")
                     is_relative = config.get(section, "IsRelative", fallback="1") == "1"
                     if path:
-                        if is_relative:
-                            default_profile = os.path.join(profiles_dir, path)
-                        else:
-                            default_profile = path
-                        break
+                        full = os.path.join(profiles_dir, path) if is_relative else path
+                        if full not in candidates:
+                            candidates.append(full)
 
-    # If no default found, try any .default-release or .default profile
-    if not default_profile:
-        try:
-            for entry in os.listdir(profiles_dir):
-                full = os.path.join(profiles_dir, entry)
-                if os.path.isdir(full) and (
-                    entry.endswith(".default-release") or entry.endswith(".default")
-                ):
-                    default_profile = full
-                    break
-        except OSError:
-            return None
+    # Fallback: try any .default-release or .default profile directory
+    try:
+        for entry in sorted(os.listdir(profiles_dir)):
+            full = os.path.join(profiles_dir, entry)
+            if os.path.isdir(full) and (
+                entry.endswith(".default-release") or entry.endswith(".default")
+            ):
+                if full not in candidates:
+                    candidates.append(full)
+    except OSError:
+        pass
 
-    if not default_profile:
-        return None
+    # Return first candidate that has cookies.sqlite
+    for profile_dir in candidates:
+        cookies_path = os.path.join(profile_dir, "cookies.sqlite")
+        if os.path.exists(cookies_path):
+            return cookies_path
 
-    cookies_path = os.path.join(default_profile, "cookies.sqlite")
-    return cookies_path if os.path.exists(cookies_path) else None
+    return None
 
 
 def _find_chromium_cookies(cookie_paths: list[str]) -> str | None:
