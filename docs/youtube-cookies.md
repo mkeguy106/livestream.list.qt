@@ -6,7 +6,7 @@ To send messages in YouTube live chat, you need to authenticate with your Google
 
 The easiest method — import cookies directly from your installed browser:
 
-1. Make sure you are **logged into YouTube** in your browser (Chrome, Firefox, Edge, Brave, etc.)
+1. Make sure you are **logged into YouTube** in your browser (Chrome, Firefox, Brave, etc.)
 2. Open **Preferences** > **Accounts**
 3. In the YouTube section, click **Import from Browser**
 4. Select which browser you are logged into YouTube with
@@ -14,13 +14,13 @@ The easiest method — import cookies directly from your installed browser:
 
 That's it! Your YouTube chat sending is now enabled.
 
-> **Supported browsers:** Chrome, Chromium, Brave, Edge, Firefox, Opera, Opera GX, Vivaldi, LibreWolf
+> **Supported browsers:** Chrome, Chromium, Brave, Firefox, Opera, Vivaldi, LibreWolf
 
 > **Flatpak users:** Browser import is not available in Flatpak builds because the sandbox cannot access browser data. Use one of the manual methods below instead.
 
 ## Method 2: Browser Developer Tools
 
-### Chrome / Chromium / Edge
+### Chrome / Chromium / Brave
 
 1. Open **YouTube** in your browser and make sure you're logged in
 2. Press `F12` (or `Ctrl+Shift+I`) to open Developer Tools

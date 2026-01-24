@@ -55,13 +55,6 @@ _BROWSERS = [
         "Brave Safe Storage",
     ),
     (
-        "edge",
-        "Microsoft Edge",
-        "chromium",
-        [".config/microsoft-edge/Default/Cookies"],
-        "Microsoft Edge Safe Storage",
-    ),
-    (
         "vivaldi",
         "Vivaldi",
         "chromium",
@@ -449,7 +442,7 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
             parent,
             "No Browsers Found",
             "Could not find any supported browsers with cookie stores.\n\n"
-            "Supported: Chrome, Chromium, Brave, Edge, Firefox,\n"
+            "Supported: Chrome, Chromium, Brave, Firefox,\n"
             "Opera, Vivaldi, LibreWolf\n\n"
             "Please use the manual cookie paste method instead.",
         )
