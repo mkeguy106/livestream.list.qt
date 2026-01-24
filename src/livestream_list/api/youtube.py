@@ -317,15 +317,21 @@ class YouTubeApiClient(BaseApiClient):
             "Cookie": cookie_header,
             "Content-Type": "application/json",
             "Origin": "https://www.youtube.com",
+            "Referer": "https://www.youtube.com/",
             "X-Youtube-Client-Name": "1",
-            "X-Youtube-Client-Version": "2.20240101.00.00",
+            "X-Youtube-Client-Version": "2.20250120.01.00",
+            "X-Goog-AuthUser": "0",
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
         }
 
         innertube_body = {
             "context": {
                 "client": {
                     "clientName": "WEB",
-                    "clientVersion": "2.20240101.00.00",
+                    "clientVersion": "2.20250120.01.00",
                     "hl": "en",
                 }
             },
@@ -343,6 +349,14 @@ class YouTubeApiClient(BaseApiClient):
                         raise ValueError(f"YouTube API returned {resp.status}: {text[:200]}")
                     data = await resp.json()
 
+                # Check if authentication succeeded
+                if not channels:  # Only check on first page
+                    if not self._is_logged_in(data):
+                        raise ValueError(
+                            "YouTube cookies expired or invalid. "
+                            "Please re-import cookies from your browser."
+                        )
+
                 # Parse channels from response
                 new_channels = self._parse_subscriptions_response(data)
                 channels.extend(new_channels)
@@ -357,7 +371,7 @@ class YouTubeApiClient(BaseApiClient):
                     "context": {
                         "client": {
                             "clientName": "WEB",
-                            "clientVersion": "2.20240101.00.00",
+                            "clientVersion": "2.20250120.01.00",
                             "hl": "en",
                         }
                     },
@@ -493,3 +507,17 @@ class YouTubeApiClient(BaseApiClient):
             pass
 
         return None
+
+    @staticmethod
+    def _is_logged_in(data: dict) -> bool:
+        """Check if the InnerTube response indicates authenticated access."""
+        try:
+            for stp in data.get("responseContext", {}).get("serviceTrackingParams", []):
+                if stp.get("service") == "GUIDED_HELP":
+                    for p in stp.get("params", []):
+                        if p.get("key") == "logged_in":
+                            return p.get("value") == "1"
+        except (AttributeError, TypeError):
+            pass
+        # If we can't determine, check for content presence
+        return "contents" in data
