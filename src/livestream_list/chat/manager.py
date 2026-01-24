@@ -222,9 +222,7 @@ class EmoteFetchWorker(QThread):
                             )
 
                     # Channel badges (use resolved numeric ID)
-                    broadcaster_id = getattr(
-                        self, '_resolved_broadcaster_id', self.channel_id
-                    )
+                    broadcaster_id = getattr(self, "_resolved_broadcaster_id", self.channel_id)
                     async with session.get(
                         "https://api.twitch.tv/helix/chat/badges",
                         params={"broadcaster_id": broadcaster_id},
@@ -361,35 +359,25 @@ class ChatManager(QObject):
         self.chat_opened.emit(channel_key, livestream)
 
     def _start_connection(
-        self, channel_key: str, livestream: Livestream,
+        self,
+        channel_key: str,
+        livestream: Livestream,
     ) -> None:
         """Create and start a chat connection for a channel."""
         connection = self._create_connection(livestream.channel.platform)
         if not connection:
-            logger.warning(
-                f"No chat connection for {livestream.channel.platform}"
-            )
+            logger.warning(f"No chat connection for {livestream.channel.platform}")
             return
 
         # Wire connection signals
         connection.messages_received.connect(
-            lambda msgs, key=channel_key: (
-                self._on_messages_received(key, msgs)
-            )
+            lambda msgs, key=channel_key: (self._on_messages_received(key, msgs))
         )
         connection.moderation_event.connect(
-            lambda evt, key=channel_key: (
-                self.moderation_received.emit(key, evt)
-            )
+            lambda evt, key=channel_key: (self.moderation_received.emit(key, evt))
         )
-        connection.error.connect(
-            lambda msg, key=channel_key: (
-                self._on_connection_error(key, msg)
-            )
-        )
-        connection.connected.connect(
-            lambda key=channel_key: self.chat_connected.emit(key)
-        )
+        connection.error.connect(lambda msg, key=channel_key: (self._on_connection_error(key, msg)))
+        connection.connected.connect(lambda key=channel_key: self.chat_connected.emit(key))
 
         self._connections[channel_key] = connection
 
@@ -398,8 +386,10 @@ class ChatManager(QObject):
 
         # Start worker thread
         worker = ChatConnectionWorker(
-            connection, livestream.channel.channel_id,
-            parent=self, **kwargs,
+            connection,
+            livestream.channel.channel_id,
+            parent=self,
+            **kwargs,
         )
         self._workers[channel_key] = worker
         worker.start()
@@ -410,16 +400,14 @@ class ChatManager(QObject):
         Call this after re-login to pick up new OAuth scopes.
         """
         twitch_keys = [
-            key for key, ls in self._livestreams.items()
+            key
+            for key, ls in self._livestreams.items()
             if ls.channel.platform == StreamPlatform.TWITCH
         ]
         if not twitch_keys:
             return
 
-        logger.info(
-            f"Reconnecting {len(twitch_keys)} Twitch chats "
-            "with updated token"
-        )
+        logger.info(f"Reconnecting {len(twitch_keys)} Twitch chats with updated token")
 
         for key in twitch_keys:
             # Stop old worker/connection
@@ -433,9 +421,7 @@ class ChatManager(QObject):
             livestream = self._livestreams[key]
             self._start_connection(key, livestream)
 
-        self.auth_state_changed.emit(
-            bool(self.settings.twitch.access_token)
-        )
+        self.auth_state_changed.emit(bool(self.settings.twitch.access_token))
 
     def reconnect_kick(self) -> None:
         """Reconnect all Kick chat connections with the current token.
@@ -443,19 +429,16 @@ class ChatManager(QObject):
         Call this after login to enable sending messages.
         """
         kick_keys = [
-            key for key, ls in self._livestreams.items()
+            key
+            for key, ls in self._livestreams.items()
             if ls.channel.platform == StreamPlatform.KICK
         ]
         if not kick_keys:
             # No active Kick chats, just emit auth change
-            self.auth_state_changed.emit(
-                bool(self.settings.kick.access_token)
-            )
+            self.auth_state_changed.emit(bool(self.settings.kick.access_token))
             return
 
-        logger.info(
-            f"Reconnecting {len(kick_keys)} Kick chats with updated token"
-        )
+        logger.info(f"Reconnecting {len(kick_keys)} Kick chats with updated token")
 
         for key in kick_keys:
             worker = self._workers.pop(key, None)
@@ -467,9 +450,7 @@ class ChatManager(QObject):
             livestream = self._livestreams[key]
             self._start_connection(key, livestream)
 
-        self.auth_state_changed.emit(
-            bool(self.settings.kick.access_token)
-        )
+        self.auth_state_changed.emit(bool(self.settings.kick.access_token))
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
@@ -492,22 +473,18 @@ class ChatManager(QObject):
         """Send a message to a channel's chat."""
         connection = self._connections.get(channel_key)
         if not connection or not connection.is_connected:
-            logger.warning(
-                f"Cannot send message: not connected to {channel_key}"
-            )
+            logger.warning(f"Cannot send message: not connected to {channel_key}")
             return
 
         worker = self._workers.get(channel_key)
         if worker and worker._loop:
-            asyncio.run_coroutine_threadsafe(
-                connection.send_message(text), worker._loop
-            )
+            asyncio.run_coroutine_threadsafe(connection.send_message(text), worker._loop)
 
             # Local echo: Twitch doesn't echo your own messages back.
             # Kick DOES echo via websocket, so skip local echo for Kick.
             livestream = self._livestreams.get(channel_key)
             if livestream and livestream.channel.platform != StreamPlatform.KICK:
-                nick = getattr(connection, '_nick', 'You')
+                nick = getattr(connection, "_nick", "You")
                 local_msg = ChatMessage(
                     id=str(uuid.uuid4()),
                     user=ChatUser(
@@ -583,11 +560,28 @@ class ChatManager(QObject):
                     # Cached on disk but not in memory - load it
                     self._emote_cache.get(emote_key)
 
+        # Detect @mentions of our username
+        our_nick = self._get_our_nick(channel_key)
+        if our_nick:
+            mention_pattern = f"@{our_nick}".lower()
+            for msg in messages:
+                if isinstance(msg, ChatMessage) and mention_pattern in msg.text.lower():
+                    msg.is_mention = True
+
         # Start downloading if we have items queued
         if self._download_queue:
             self._start_downloads()
 
         self.messages_received.emit(channel_key, messages)
+
+    def _get_our_nick(self, channel_key: str) -> str | None:
+        """Get the authenticated user's display name for the given channel's connection."""
+        connection = self._connections.get(channel_key)
+        if connection:
+            nick = getattr(connection, "_nick", None)
+            if nick and not nick.startswith("justinfan"):
+                return nick
+        return None
 
     def _match_third_party_emotes(self, msg: ChatMessage) -> None:
         """Scan message text for third-party emote names and add to emote_positions."""
@@ -625,12 +619,8 @@ class ChatManager(QObject):
 
         if new_positions:
             # Merge with existing positions and sort by start
-            msg.emote_positions = sorted(
-                msg.emote_positions + new_positions, key=lambda x: x[0]
-            )
-            logger.debug(
-                f"Matched {len(new_positions)} 3rd-party emotes in message"
-            )
+            msg.emote_positions = sorted(msg.emote_positions + new_positions, key=lambda x: x[0])
+            logger.debug(f"Matched {len(new_positions)} 3rd-party emotes in message")
 
     def _fetch_emotes_for_channel(self, channel_key: str, livestream: Livestream) -> None:
         """Kick off async emote/badge fetching for a channel."""

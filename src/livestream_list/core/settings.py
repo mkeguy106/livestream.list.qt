@@ -124,6 +124,7 @@ class BuiltinChatSettings:
     tab_active_color: str = "#6441a5"
     tab_inactive_color: str = "#16213e"
     use_platform_name_colors: bool = True
+    mention_highlight_color: str = "#33ff8800"  # AARRGGBB: orange at ~20% opacity
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
 
 
@@ -196,6 +197,17 @@ class Settings:
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
         """Load settings from file."""
+        from .credential_store import (
+            KEY_KICK_ACCESS_TOKEN,
+            KEY_KICK_REFRESH_TOKEN,
+            KEY_TWITCH_ACCESS_TOKEN,
+            KEY_TWITCH_REFRESH_TOKEN,
+            KEY_YOUTUBE_COOKIES,
+            get_secret,
+            is_available,
+            store_secret,
+        )
+
         if path is None:
             path = get_config_dir() / "settings.json"
 
@@ -205,20 +217,89 @@ class Settings:
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-            return cls._from_dict(data)
+            settings = cls._from_dict(data)
         except (json.JSONDecodeError, KeyError, TypeError):
-            # Return default settings if file is corrupted
             return cls()
+
+        # Load secrets from keyring (overrides JSON values)
+        if is_available():
+            kr_twitch_at = get_secret(KEY_TWITCH_ACCESS_TOKEN)
+            kr_twitch_rt = get_secret(KEY_TWITCH_REFRESH_TOKEN)
+            kr_yt_cookies = get_secret(KEY_YOUTUBE_COOKIES)
+            kr_kick_at = get_secret(KEY_KICK_ACCESS_TOKEN)
+            kr_kick_rt = get_secret(KEY_KICK_REFRESH_TOKEN)
+
+            # Migrate: if JSON has secrets but keyring doesn't, store in keyring
+            needs_resave = False
+            if settings.twitch.access_token and not kr_twitch_at:
+                store_secret(KEY_TWITCH_ACCESS_TOKEN, settings.twitch.access_token)
+                needs_resave = True
+            elif kr_twitch_at:
+                settings.twitch.access_token = kr_twitch_at
+
+            if settings.twitch.refresh_token and not kr_twitch_rt:
+                store_secret(KEY_TWITCH_REFRESH_TOKEN, settings.twitch.refresh_token)
+                needs_resave = True
+            elif kr_twitch_rt:
+                settings.twitch.refresh_token = kr_twitch_rt
+
+            if settings.youtube.cookies and not kr_yt_cookies:
+                store_secret(KEY_YOUTUBE_COOKIES, settings.youtube.cookies)
+                needs_resave = True
+            elif kr_yt_cookies:
+                settings.youtube.cookies = kr_yt_cookies
+
+            if settings.kick.access_token and not kr_kick_at:
+                store_secret(KEY_KICK_ACCESS_TOKEN, settings.kick.access_token)
+                needs_resave = True
+            elif kr_kick_at:
+                settings.kick.access_token = kr_kick_at
+
+            if settings.kick.refresh_token and not kr_kick_rt:
+                store_secret(KEY_KICK_REFRESH_TOKEN, settings.kick.refresh_token)
+                needs_resave = True
+            elif kr_kick_rt:
+                settings.kick.refresh_token = kr_kick_rt
+
+            # Re-save to clear secrets from JSON after migration
+            if needs_resave:
+                settings.save(path)
+
+        return settings
 
     def save(self, path: Path | None = None) -> None:
         """Save settings to file."""
+        from .credential_store import (
+            KEY_KICK_ACCESS_TOKEN,
+            KEY_KICK_REFRESH_TOKEN,
+            KEY_TWITCH_ACCESS_TOKEN,
+            KEY_TWITCH_REFRESH_TOKEN,
+            KEY_YOUTUBE_COOKIES,
+            is_available,
+            secure_file_permissions,
+            store_secret,
+        )
+
         if path is None:
             path = get_config_dir() / "settings.json"
 
         path.parent.mkdir(parents=True, exist_ok=True)
 
+        # Store secrets in keyring
+        use_keyring = is_available()
+        if use_keyring:
+            store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token)
+            store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token)
+            store_secret(KEY_YOUTUBE_COOKIES, self.youtube.cookies)
+            store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token)
+            store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token)
+
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(self._to_dict(), f, indent=2)
+            json.dump(self._to_dict(exclude_secrets=use_keyring), f, indent=2)
+
+        if not use_keyring:
+            # Fallback: protect the file with restrictive permissions
+            secure_file_permissions(str(path))
 
     @classmethod
     def _from_dict(cls, data: dict) -> "Settings":
@@ -345,6 +426,7 @@ class Settings:
                 tab_active_color=builtin_data.get("tab_active_color", "#6441a5"),
                 tab_inactive_color=builtin_data.get("tab_inactive_color", "#16213e"),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
+                mention_highlight_color=builtin_data.get("mention_highlight_color", "#33ff8800"),
                 window=chat_window,
             )
             settings.chat = ChatSettings(
@@ -378,8 +460,12 @@ class Settings:
 
         return settings
 
-    def _to_dict(self) -> dict:
-        """Convert Settings to a dictionary."""
+    def _to_dict(self, exclude_secrets: bool = False) -> dict:
+        """Convert Settings to a dictionary.
+
+        If exclude_secrets is True, sensitive tokens/cookies are omitted
+        (they are stored in the system keyring instead).
+        """
         return {
             "refresh_interval": self.refresh_interval,
             "minimize_to_tray": self.minimize_to_tray,
@@ -397,18 +483,30 @@ class Settings:
             "twitch": {
                 "client_id": self.twitch.client_id,
                 "client_secret": self.twitch.client_secret,
-                "access_token": self.twitch.access_token,
-                "refresh_token": self.twitch.refresh_token,
+                **(
+                    {
+                        "access_token": self.twitch.access_token,
+                        "refresh_token": self.twitch.refresh_token,
+                    }
+                    if not exclude_secrets
+                    else {}
+                ),
             },
             "youtube": {
                 "api_key": self.youtube.api_key,
-                "cookies": self.youtube.cookies,
+                **({"cookies": self.youtube.cookies} if not exclude_secrets else {}),
             },
             "kick": {
                 "client_id": self.kick.client_id,
                 "client_secret": self.kick.client_secret,
-                "access_token": self.kick.access_token,
-                "refresh_token": self.kick.refresh_token,
+                **(
+                    {
+                        "access_token": self.kick.access_token,
+                        "refresh_token": self.kick.refresh_token,
+                    }
+                    if not exclude_secrets
+                    else {}
+                ),
             },
             "streamlink": {
                 "enabled": self.streamlink.enabled,
@@ -460,6 +558,7 @@ class Settings:
                     "tab_active_color": self.chat.builtin.tab_active_color,
                     "tab_inactive_color": self.chat.builtin.tab_inactive_color,
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
+                    "mention_highlight_color": self.chat.builtin.mention_highlight_color,
                     "window": {
                         "width": self.chat.builtin.window.width,
                         "height": self.chat.builtin.window.height,

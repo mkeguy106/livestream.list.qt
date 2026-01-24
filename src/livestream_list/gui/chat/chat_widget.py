@@ -1,6 +1,7 @@
 """Single-channel chat widget with message list and input."""
 
 import logging
+import webbrowser
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
@@ -420,9 +421,7 @@ class ChatWidget(QWidget):
         else:
             platform_name = self.livestream.channel.platform.value.title()
             self._input.setPlaceholderText(f"Log in to {platform_name} to chat")
-            self._auth_banner.setText(
-                f"Not logged in \u2014 {platform_name} chat is read-only"
-            )
+            self._auth_banner.setText(f"Not logged in \u2014 {platform_name} chat is read-only")
             self._auth_banner.show()
 
     def show_error(self, message: str) -> None:
@@ -535,9 +534,7 @@ class ChatWidget(QWidget):
         if index.isValid():
             message = index.data(MessageRole)
             if message and isinstance(message, ChatMessage):
-                user_menu = UserContextMenu(
-                    message.user, self.settings, parent=self
-                )
+                user_menu = UserContextMenu(message.user, self.settings, parent=self)
                 for action in user_menu.actions():
                     menu.addAction(action)
 
@@ -694,7 +691,7 @@ class ChatWidget(QWidget):
                     self.font_size_changed.emit(new_size)
                 return True
 
-        # Username click → show user's chat history
+        # Username click → show user's chat history; URL click → open browser
         if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
             if event.button() == Qt.MouseButton.LeftButton:
                 index = self._list_view.indexAt(event.pos())
@@ -708,6 +705,31 @@ class ChatWidget(QWidget):
                         if name_rect.isValid() and name_rect.contains(event.pos()):
                             self._show_user_history(message.user)
                             return True
+                        url = self._delegate._get_url_at_position(event.pos(), option, message)
+                        if url:
+                            webbrowser.open(url)
+                            return True
+
+        # Cursor changes for clickable elements (URLs, usernames)
+        if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+            viewport = self._list_view.viewport()
+            index = self._list_view.indexAt(event.pos())
+            if index.isValid():
+                message = index.data(MessageRole)
+                if message and isinstance(message, ChatMessage):
+                    option = QStyleOptionViewItem()
+                    self._list_view.initViewItemOption(option)
+                    option.rect = self._list_view.visualRect(index)
+                    name_rect = self._delegate._get_username_rect(option, message)
+                    if name_rect.isValid() and name_rect.contains(event.pos()):
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+                    url = self._delegate._get_url_at_position(event.pos(), option, message)
+                    if url:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+            viewport.setCursor(Qt.CursorShape.ArrowCursor)
+            return False
 
         if isinstance(event, QHelpEvent):
             index = self._list_view.indexAt(event.pos())
@@ -721,22 +743,21 @@ class ChatWidget(QWidget):
                     tip_pos = event.globalPos()
 
                     # Check badges
-                    badge = self._delegate._get_badge_at_position(
-                        event.pos(), option, message
-                    )
+                    badge = self._delegate._get_badge_at_position(event.pos(), option, message)
                     if badge:
                         QToolTip.showText(tip_pos, badge.name, viewport)
                         return True
 
                     # Check emotes
                     if message.emote_positions:
-                        emote = self._delegate._get_emote_at_position(
-                            event.pos(), option, message
-                        )
+                        emote = self._delegate._get_emote_at_position(event.pos(), option, message)
                         if emote:
                             providers = {
-                                "twitch": "Twitch", "kick": "Kick",
-                                "7tv": "7TV", "bttv": "BTTV", "ffz": "FFZ",
+                                "twitch": "Twitch",
+                                "kick": "Kick",
+                                "7tv": "7TV",
+                                "bttv": "BTTV",
+                                "ffz": "FFZ",
                             }
                             provider = providers.get(emote.provider, emote.provider)
                             QToolTip.showText(
@@ -758,7 +779,8 @@ class ChatWidget(QWidget):
 
         # Collect all messages from this user
         user_messages = [
-            msg for msg in self._model._messages
+            msg
+            for msg in self._model._messages
             if msg.user.id == user.id and msg.user.platform == user.platform
         ]
 
@@ -866,9 +888,7 @@ class UserHistoryDialog(QDialog):
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
-        self.setWindowFlags(
-            Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint
-        )
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
         self._user_id = user.id
         self._user_platform = user.platform
         self._settings = settings
@@ -925,8 +945,7 @@ class UserHistoryDialog(QDialog):
 
         self._search_count_label = QLabel("")
         self._search_count_label.setStyleSheet(
-            "color: #aaa; font-size: 11px; background: transparent;"
-            " min-width: 50px;"
+            "color: #aaa; font-size: 11px; background: transparent; min-width: 50px;"
         )
         search_layout.addWidget(self._search_count_label)
 
@@ -973,15 +992,9 @@ class UserHistoryDialog(QDialog):
         self._list_view.setModel(self._model)
         self._list_view.setItemDelegate(self._delegate)
         self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        self._list_view.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._list_view.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        self._list_view.setSelectionMode(
-            QListView.SelectionMode.ExtendedSelection
-        )
+        self._list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
         self._list_view.setWordWrap(True)
         self._list_view.setUniformItemSizes(False)
         self._list_view.setSpacing(0)
@@ -994,7 +1007,8 @@ class UserHistoryDialog(QDialog):
         """)
         layout.addWidget(self._list_view)
 
-        # Enable Ctrl+scroll font size on viewport
+        # Enable mouse tracking for URL cursor changes and Ctrl+scroll
+        self._list_view.viewport().setMouseTracking(True)
         self._list_view.viewport().installEventFilter(self)
 
         # Copy shortcut (Ctrl+C)
@@ -1023,7 +1037,8 @@ class UserHistoryDialog(QDialog):
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add new messages from the tracked user (called by ChatWidget)."""
         user_msgs = [
-            msg for msg in messages
+            msg
+            for msg in messages
             if msg.user.id == self._user_id and msg.user.platform == self._user_platform
         ]
         if not user_msgs:
@@ -1129,18 +1144,14 @@ class UserHistoryDialog(QDialog):
         """Navigate to the next search match."""
         if not self._search_matches:
             return
-        self._search_current = (self._search_current + 1) % len(
-            self._search_matches
-        )
+        self._search_current = (self._search_current + 1) % len(self._search_matches)
         self._scroll_to_search_match()
 
     def _search_prev(self) -> None:
         """Navigate to the previous search match."""
         if not self._search_matches:
             return
-        self._search_current = (self._search_current - 1) % len(
-            self._search_matches
-        )
+        self._search_current = (self._search_current - 1) % len(self._search_matches)
         self._scroll_to_search_match()
 
     def _scroll_to_search_match(self) -> None:
@@ -1149,9 +1160,7 @@ class UserHistoryDialog(QDialog):
             return
         row = self._search_matches[self._search_current]
         index = self._model.index(row, 0)
-        self._list_view.scrollTo(
-            index, QAbstractItemView.ScrollHint.PositionAtCenter
-        )
+        self._list_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
         self._list_view.setCurrentIndex(index)
         total = len(self._search_matches)
         current = self._search_current + 1
@@ -1165,22 +1174,54 @@ class UserHistoryDialog(QDialog):
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event):  # noqa: N802
-        """Handle Ctrl+Wheel for font size adjustment."""
-        if obj is self._list_view.viewport():
-            if (
-                event.type() == QEvent.Type.Wheel
-                and isinstance(event, QWheelEvent)
-            ):
-                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-                    delta = event.angleDelta().y()
-                    if delta > 0:
-                        new_size = min(self._settings.font_size + 1, 30)
-                    elif delta < 0:
-                        new_size = max(self._settings.font_size - 1, 4)
-                    else:
-                        return True
-                    if new_size != self._settings.font_size:
-                        self._settings.font_size = new_size
-                        self._model.layoutChanged.emit()
+        """Handle Ctrl+Wheel, URL clicks, and cursor changes."""
+        if obj is not self._list_view.viewport():
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    new_size = min(self._settings.font_size + 1, 30)
+                elif delta < 0:
+                    new_size = max(self._settings.font_size - 1, 4)
+                else:
                     return True
+                if new_size != self._settings.font_size:
+                    self._settings.font_size = new_size
+                    self._model.layoutChanged.emit()
+                return True
+
+        # URL click → open browser
+        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+            if event.button() == Qt.MouseButton.LeftButton:
+                index = self._list_view.indexAt(event.pos())
+                if index.isValid():
+                    message = index.data(MessageRole)
+                    if message and isinstance(message, ChatMessage):
+                        option = QStyleOptionViewItem()
+                        self._list_view.initViewItemOption(option)
+                        option.rect = self._list_view.visualRect(index)
+                        url = self._delegate._get_url_at_position(event.pos(), option, message)
+                        if url:
+                            webbrowser.open(url)
+                            return True
+
+        # Cursor changes for URLs
+        if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+            viewport = self._list_view.viewport()
+            index = self._list_view.indexAt(event.pos())
+            if index.isValid():
+                message = index.data(MessageRole)
+                if message and isinstance(message, ChatMessage):
+                    option = QStyleOptionViewItem()
+                    self._list_view.initViewItemOption(option)
+                    option.rect = self._list_view.visualRect(index)
+                    url = self._delegate._get_url_at_position(event.pos(), option, message)
+                    if url:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+            viewport.setCursor(Qt.CursorShape.ArrowCursor)
+            return False
+
         return super().eventFilter(obj, event)

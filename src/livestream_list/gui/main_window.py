@@ -150,9 +150,7 @@ class StreamRow(QWidget):
         name_row.setSpacing(style["spacing"])
 
         self.name_label = QLabel()
-        self.name_label.setStyleSheet(
-            f"font-weight: bold; font-size: {font_size}pt;"
-        )
+        self.name_label.setStyleSheet(f"font-weight: bold; font-size: {font_size}pt;")
         self.name_label.setMinimumWidth(80)  # Ensure channel name stays visible
         name_row.addWidget(self.name_label)
 
@@ -265,9 +263,7 @@ class StreamRow(QWidget):
         self.name_label.setText(channel.display_name or channel.channel_id)
         if self._settings.platform_colors:
             color = PLATFORM_COLORS.get(channel.platform, "#888888")
-            self.name_label.setStyleSheet(
-                f"color: {color}; font-weight: bold; font-size: {fs}pt;"
-            )
+            self.name_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: {fs}pt;")
         else:
             self.name_label.setStyleSheet(f"font-weight: bold; font-size: {fs}pt;")
 
@@ -2114,9 +2110,14 @@ class PreferencesDialog(QDialog):
 
         # Show/hide color pickers based on checkbox state
         alt_visible = self.chat_alt_rows_cb.isChecked()
-        for w in (self.alt_row_even_label, self.alt_row_even_swatch,
-                  self.alt_row_even_edit, self.alt_row_odd_label,
-                  self.alt_row_odd_swatch, self.alt_row_odd_edit):
+        for w in (
+            self.alt_row_even_label,
+            self.alt_row_even_swatch,
+            self.alt_row_even_edit,
+            self.alt_row_odd_label,
+            self.alt_row_odd_swatch,
+            self.alt_row_odd_edit,
+        ):
             w.setVisible(alt_visible)
         self.chat_alt_rows_cb.stateChanged.connect(self._toggle_alt_row_colors)
 
@@ -2167,6 +2168,27 @@ class PreferencesDialog(QDialog):
         self._update_swatch(self.tab_inactive_swatch, self.tab_inactive_color_edit.text())
         builtin_layout.addRow("Tab inactive color:", inactive_row)
 
+        # Mention highlight color picker
+        mention_row = QHBoxLayout()
+        self.mention_color_swatch = QPushButton()
+        self.mention_color_swatch.setFixedSize(24, 24)
+        self.mention_color_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        mention_row.addWidget(self.mention_color_swatch)
+        self.mention_color_edit = QLineEdit()
+        self.mention_color_edit.setText(self.app.settings.chat.builtin.mention_highlight_color)
+        self.mention_color_edit.setMaximumWidth(100)
+        self.mention_color_edit.editingFinished.connect(self._on_chat_changed)
+        self.mention_color_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.mention_color_swatch, t)
+        )
+        mention_row.addWidget(self.mention_color_edit)
+        mention_row.addStretch()
+        self.mention_color_swatch.clicked.connect(
+            lambda: self._pick_color_alpha(self.mention_color_edit, self.mention_color_swatch)
+        )
+        self._update_swatch(self.mention_color_swatch, self.mention_color_edit.text())
+        builtin_layout.addRow("Mention highlight:", mention_row)
+
         layout.addWidget(self.builtin_group)
 
         # Set initial visibility based on current mode
@@ -2186,6 +2208,10 @@ class PreferencesDialog(QDialog):
 
     def _create_accounts_tab(self) -> QWidget:
         """Create the Accounts tab."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -2238,7 +2264,11 @@ class PreferencesDialog(QDialog):
         self.yt_login_btn = QPushButton("Import from Browser")
         self.yt_login_btn.clicked.connect(self._on_yt_login)
         yt_main_buttons.addWidget(self.yt_login_btn)
+        self.yt_import_subs_btn = QPushButton("Import Subscriptions")
+        self.yt_import_subs_btn.clicked.connect(self._on_yt_import_subs)
+        yt_main_buttons.addWidget(self.yt_import_subs_btn)
         self.yt_logout_btn = QPushButton("Logout")
+        self.yt_logout_btn.setStyleSheet("color: red;")
         self.yt_logout_btn.clicked.connect(self._on_yt_clear_cookies)
         yt_main_buttons.addWidget(self.yt_logout_btn)
         yt_main_buttons.addStretch()
@@ -2253,7 +2283,7 @@ class PreferencesDialog(QDialog):
         self.yt_cookies_edit.setPlaceholderText(
             "SID=...; HSID=...; SSID=...; APISID=...; SAPISID=..."
         )
-        self.yt_cookies_edit.setMaximumHeight(60)
+        self.yt_cookies_edit.setMinimumHeight(120)
         self.yt_cookies_edit.setPlainText(self.app.settings.youtube.cookies)
         yt_layout.addWidget(self.yt_cookies_edit)
 
@@ -2293,6 +2323,7 @@ class PreferencesDialog(QDialog):
         self.kick_login_btn.clicked.connect(self._on_kick_login)
         kick_buttons.addWidget(self.kick_login_btn)
         self.kick_logout_btn = QPushButton("Logout")
+        self.kick_logout_btn.setStyleSheet("color: red;")
         self.kick_logout_btn.clicked.connect(self._on_kick_logout)
         kick_buttons.addWidget(self.kick_logout_btn)
         kick_buttons.addStretch()
@@ -2302,7 +2333,8 @@ class PreferencesDialog(QDialog):
 
         layout.addStretch()
         self._update_account_buttons()
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _update_twitch_status(self):
         """Update Twitch login status display."""
@@ -2470,6 +2502,9 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.tab_inactive_color = (
             self.tab_inactive_color_edit.text().strip() or "#16213e"
         )
+        self.app.settings.chat.builtin.mention_highlight_color = (
+            self.mention_color_edit.text().strip() or "#33ff8800"
+        )
         providers = []
         if self.emote_7tv_cb.isChecked():
             providers.append("7tv")
@@ -2496,8 +2531,7 @@ class PreferencesDialog(QDialog):
             else:
                 css_color = hex_color
             button.setStyleSheet(
-                f"background-color: {css_color}; border: 1px solid #666;"
-                " border-radius: 3px;"
+                f"background-color: {css_color}; border: 1px solid #666; border-radius: 3px;"
             )
         else:
             button.setStyleSheet(
@@ -2521,7 +2555,9 @@ class PreferencesDialog(QDialog):
         if not current.isValid():
             current = QColor(255, 255, 255, 15)
         color = QColorDialog.getColor(
-            current, self, "Pick a color",
+            current,
+            self,
+            "Pick a color",
             QColorDialog.ColorDialogOption.ShowAlphaChannel,
         )
         if color.isValid():
@@ -2535,9 +2571,14 @@ class PreferencesDialog(QDialog):
     def _toggle_alt_row_colors(self, state):
         """Show/hide alternating row color pickers based on checkbox state."""
         visible = bool(state)
-        for w in (self.alt_row_even_label, self.alt_row_even_swatch,
-                  self.alt_row_even_edit, self.alt_row_odd_label,
-                  self.alt_row_odd_swatch, self.alt_row_odd_edit):
+        for w in (
+            self.alt_row_even_label,
+            self.alt_row_even_swatch,
+            self.alt_row_even_edit,
+            self.alt_row_odd_label,
+            self.alt_row_odd_swatch,
+            self.alt_row_odd_edit,
+        ):
             w.setVisible(visible)
 
     def _reset_tab_defaults(self, tab_name: str):
@@ -2761,6 +2802,14 @@ class PreferencesDialog(QDialog):
             self._update_yt_status()
             self.app.chat_manager.auth_state_changed.emit(True)
 
+    def _on_yt_import_subs(self):
+        """Open YouTube subscription import dialog."""
+        dialog = YouTubeImportDialog(self, self.app)
+        dialog.exec()
+        # Refresh after import
+        if dialog._added_count > 0 and self.parent():
+            self.parent().refresh_stream_list()
+
     def _update_yt_status(self):
         """Update YouTube cookie status display."""
         from ..chat.connections.youtube import validate_cookies
@@ -2779,6 +2828,7 @@ class PreferencesDialog(QDialog):
             self.yt_status.setStyleSheet("color: gray;")
 
         self.yt_login_btn.setVisible(not is_configured)
+        self.yt_import_subs_btn.setVisible(is_configured)
         self.yt_logout_btn.setVisible(is_configured)
 
     def _on_yt_cookie_help(self):
@@ -3066,6 +3116,142 @@ class ImportFollowsDialog(QDialog):
 
         thread = threading.Thread(target=run_import, daemon=True)
         thread.start()
+
+
+class YouTubeImportDialog(QDialog):
+    """Dialog for importing YouTube subscriptions using cookie auth."""
+
+    import_complete = Signal(object)  # list[Channel] or Exception
+
+    def __init__(self, parent, app: "Application"):
+        super().__init__(parent)
+        self.app = app
+        self._added_count = 0
+
+        self.setWindowTitle("Import YouTube Subscriptions")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+
+        # Stack for different states
+        self.stack = QStackedWidget()
+        layout.addWidget(self.stack)
+
+        # Ready page (0)
+        ready_page = QWidget()
+        ready_layout = QVBoxLayout(ready_page)
+        ready_layout.setAlignment(Qt.AlignCenter)
+
+        ready_label = QLabel(
+            "Import your YouTube subscriptions as channels.\n"
+            "This uses your saved cookies to fetch your subscription list."
+        )
+        ready_label.setAlignment(Qt.AlignCenter)
+        ready_label.setWordWrap(True)
+        ready_layout.addWidget(ready_label)
+
+        import_btn = QPushButton("Import Subscriptions")
+        import_btn.clicked.connect(self._start_import)
+        ready_layout.addWidget(import_btn, 0, Qt.AlignCenter)
+
+        self.stack.addWidget(ready_page)
+
+        # Importing page (1)
+        importing_page = QWidget()
+        importing_layout = QVBoxLayout(importing_page)
+        importing_layout.setAlignment(Qt.AlignCenter)
+
+        self.import_label = QLabel("Fetching subscriptions...")
+        self.import_label.setAlignment(Qt.AlignCenter)
+        importing_layout.addWidget(self.import_label)
+
+        self.import_progress = QProgressBar()
+        self.import_progress.setMaximumWidth(300)
+        self.import_progress.setRange(0, 0)  # Indeterminate
+        importing_layout.addWidget(self.import_progress, 0, Qt.AlignCenter)
+
+        self.stack.addWidget(importing_page)
+
+        # Done page (2)
+        done_page = QWidget()
+        done_layout = QVBoxLayout(done_page)
+        done_layout.setAlignment(Qt.AlignCenter)
+
+        self.done_label = QLabel("")
+        self.done_label.setAlignment(Qt.AlignCenter)
+        self.done_label.setWordWrap(True)
+        done_layout.addWidget(self.done_label)
+
+        self.stack.addWidget(done_page)
+
+        # Close button
+        self.close_btn = QPushButton("Close")
+        self.close_btn.clicked.connect(self.accept)
+        layout.addWidget(self.close_btn, 0, Qt.AlignCenter)
+
+        self.import_complete.connect(self._on_import_complete)
+
+    def _start_import(self):
+        """Start fetching YouTube subscriptions in a background thread."""
+        self.stack.setCurrentIndex(1)
+        self.close_btn.setEnabled(False)
+
+        cookies = self.app.settings.youtube.cookies
+        if not cookies:
+            self._on_import_complete(ValueError("No YouTube cookies configured"))
+            return
+
+        import threading
+
+        def run():
+            try:
+                from ..api.youtube import YouTubeApiClient
+
+                client = YouTubeApiClient(self.app.settings.youtube)
+
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    channels = loop.run_until_complete(client.get_subscriptions(cookies))
+                    self.import_complete.emit(channels)
+                finally:
+                    loop.close()
+            except Exception as e:
+                logger.error(f"YouTube import error: {e}")
+                self.import_complete.emit(e)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+    def _on_import_complete(self, result):
+        """Handle import completion on the main thread."""
+        if isinstance(result, Exception):
+            self.done_label.setText(f"Import failed: {result}")
+            self.stack.setCurrentIndex(2)
+            self.close_btn.setEnabled(True)
+            return
+
+        channels = result
+        if not channels:
+            self.done_label.setText("No subscriptions found.")
+            self.stack.setCurrentIndex(2)
+            self.close_btn.setEnabled(True)
+            return
+
+        # Add channels
+        self.import_progress.setRange(0, len(channels))
+        added = 0
+        for i, ch in enumerate(channels):
+            if self.app.monitor.add_channel_direct(ch):
+                added += 1
+            self.import_progress.setValue(i + 1)
+            QApplication.processEvents()
+
+        self.app.save_channels()
+        self._added_count = added
+        self.done_label.setText(f"Import complete!\nAdded {added} of {len(channels)} channels.")
+        self.stack.setCurrentIndex(2)
+        self.close_btn.setEnabled(True)
 
 
 class ExportDialog(QDialog):
