@@ -452,6 +452,35 @@ class ChatManager(QObject):
 
         self.auth_state_changed.emit(bool(self.settings.kick.access_token))
 
+    def reconnect_youtube(self) -> None:
+        """Reconnect all YouTube chat connections with current cookies.
+
+        Call this after saving cookies to enable sending messages.
+        """
+        youtube_keys = [
+            key
+            for key, ls in self._livestreams.items()
+            if ls.channel.platform == StreamPlatform.YOUTUBE
+        ]
+        if not youtube_keys:
+            # No active YouTube chats, just emit auth change
+            self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
+            return
+
+        logger.info(f"Reconnecting {len(youtube_keys)} YouTube chats with updated cookies")
+
+        for key in youtube_keys:
+            worker = self._workers.pop(key, None)
+            if worker:
+                worker.stop()
+                worker.wait(3000)
+            self._connections.pop(key, None)
+
+            livestream = self._livestreams[key]
+            self._start_connection(key, livestream)
+
+        self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
+
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
         worker = self._workers.pop(channel_key, None)
