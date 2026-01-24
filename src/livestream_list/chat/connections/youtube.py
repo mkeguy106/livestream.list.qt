@@ -450,6 +450,8 @@ class YouTubeChatConnection(BaseChatConnection):
 
             # Check message type for SuperChat/membership events
             item_type = getattr(item, "type", "textMessage")
+            if item_type != "textMessage":
+                logger.info(f"YouTube special event: {item_type} from {author_name}")
             is_hype_chat = False
             hype_chat_amount = ""
             hype_chat_currency = ""
@@ -464,9 +466,12 @@ class YouTubeChatConnection(BaseChatConnection):
                 hype_chat_currency = getattr(item, "currency", "") or ""
                 hype_chat_level = _get_superchat_tier(amount_value)
 
-                # SuperSticker with no text gets a placeholder
-                if item_type == "superSticker" and not text:
-                    text = "[SuperSticker]"
+                # SuperChat/SuperSticker with no text gets a placeholder
+                if not text:
+                    if item_type == "superSticker":
+                        text = "[SuperSticker]"
+                    else:
+                        text = hype_chat_amount or "[SuperChat]"
 
             elif item_type == "newSponsor":
                 is_system = True
