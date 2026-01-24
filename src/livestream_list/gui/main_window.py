@@ -3130,6 +3130,7 @@ class YouTubeImportDialog(QDialog):
 
         self.setWindowTitle("Import YouTube Subscriptions")
         self.setMinimumWidth(400)
+        self.setMinimumHeight(200)
 
         layout = QVBoxLayout(self)
 
