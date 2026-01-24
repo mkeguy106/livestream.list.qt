@@ -222,6 +222,18 @@ ssh docker01.dd.local "docker system prune -af --volumes"
 - Runner in restart loop → check logs for auth/token issues
 - Job canceled mid-run → re-run workflow with `gh run rerun <run-id>`
 
+## Before Creating a Release
+
+**ALWAYS test the changes locally before pushing a release.** Run the app and verify the fix/feature works:
+
+```bash
+# Kill existing and launch fresh from dev environment
+pkill -9 -f livestream-list-qt 2>/dev/null; sleep 0.5
+.venv/bin/livestream-list-qt 2>&1 &
+```
+
+Test the specific functionality that was changed. Only after confirming it works should you create the release.
+
 ## Release Hygiene
 
 After pushing a new release, perform these cleanup checks:
