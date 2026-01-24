@@ -2779,8 +2779,8 @@ class PreferencesDialog(QDialog):
         self.app.settings.youtube.cookies = cookie_text
         self.app.save_settings()
         self._update_yt_status()
-        # Notify chat system of auth state change
-        self.app.chat_manager.auth_state_changed.emit(bool(cookie_text))
+        # Reconnect YouTube chats to pick up new cookies
+        self.app.chat_manager.reconnect_youtube()
 
     def _on_yt_clear_cookies(self):
         """Clear YouTube cookies."""
@@ -2788,7 +2788,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.youtube.cookies = ""
         self.app.save_settings()
         self._update_yt_status()
-        self.app.chat_manager.auth_state_changed.emit(False)
+        self.app.chat_manager.reconnect_youtube()
 
     def _on_yt_login(self):
         """Handle YouTube cookie import from browser."""
@@ -2800,7 +2800,7 @@ class PreferencesDialog(QDialog):
             self.app.save_settings()
             self.yt_cookies_edit.setPlainText(cookie_string)
             self._update_yt_status()
-            self.app.chat_manager.auth_state_changed.emit(True)
+            self.app.chat_manager.reconnect_youtube()
 
     def _on_yt_import_subs(self):
         """Open YouTube subscription import dialog."""
