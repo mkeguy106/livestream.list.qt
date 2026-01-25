@@ -121,10 +121,18 @@ class YouTubeChatConnection(BaseChatConnection):
             return
 
         # Parse cookies for sending support
-        if self._youtube_settings and self._youtube_settings.cookies:
-            self._cookies = parse_cookie_string(self._youtube_settings.cookies)
-            if REQUIRED_COOKIE_KEYS.issubset(self._cookies.keys()):
+        yt_settings = self._youtube_settings
+        cookie_len = len(yt_settings.cookies) if yt_settings and yt_settings.cookies else 0
+        logger.info(f"YouTube connect: settings={yt_settings is not None}, cookies={cookie_len}")
+        if yt_settings and yt_settings.cookies:
+            self._cookies = parse_cookie_string(yt_settings.cookies)
+            has_keys = REQUIRED_COOKIE_KEYS.issubset(self._cookies.keys())
+            logger.info(f"Parsed {len(self._cookies)} cookies, required keys: {has_keys}")
+            if has_keys:
                 await self._extract_send_params(video_id)
+                has_api = self._innertube_api_key is not None
+                has_params = self._send_params is not None
+                logger.info(f"After extract: api_key={has_api}, send_params={has_params}")
 
         try:
             self._pytchat = pytchat.create(video_id=video_id, interruptable=False)
@@ -219,6 +227,7 @@ class YouTubeChatConnection(BaseChatConnection):
 
     async def _extract_send_params(self, video_id: str) -> None:
         """Extract InnerTube API key and send params from the live chat page."""
+        logger.info(f"Extracting send params for video {video_id}")
         try:
             import aiohttp
 
@@ -232,6 +241,7 @@ class YouTubeChatConnection(BaseChatConnection):
             }
 
             url = f"https://www.youtube.com/live_chat?v={video_id}"
+            logger.info(f"Fetching {url}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -239,11 +249,13 @@ class YouTubeChatConnection(BaseChatConnection):
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
+                    logger.info(f"live_chat response: {resp.status}")
                     if resp.status != 200:
                         logger.warning(f"Failed to fetch live_chat page: {resp.status}")
                         return
 
                     html = await resp.text()
+                    logger.info(f"Got HTML, length={len(html)}")
 
             # Extract INNERTUBE_API_KEY
             api_key_match = re.search(r'"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"', html)

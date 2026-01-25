@@ -457,6 +457,10 @@ class ChatManager(QObject):
 
         Call this after saving cookies to enable sending messages.
         """
+        logger.info(
+            f"reconnect_youtube called, cookies length: "
+            f"{len(self.settings.youtube.cookies) if self.settings.youtube.cookies else 0}"
+        )
         youtube_keys = [
             key
             for key, ls in self._livestreams.items()
@@ -464,6 +468,7 @@ class ChatManager(QObject):
         ]
         if not youtube_keys:
             # No active YouTube chats, just emit auth change
+            logger.info("No active YouTube chats to reconnect")
             self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
             return
 
