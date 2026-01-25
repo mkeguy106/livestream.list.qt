@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import secrets
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -100,6 +101,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
             const hash = window.location.hash.substring(1);
             const params = new URLSearchParams(hash);
             const token = params.get('access_token');
+            const state = params.get('state');
             const error = params.get('error');
             const statusEl = document.getElementById('status');
 
@@ -111,20 +113,26 @@ CALLBACK_HTML = """<!DOCTYPE html>
             }
 
             if (token) {
-                // Send token to server
-                fetch('/token?access_token=' + encodeURIComponent(token))
+                // Send token and state to server for validation
+                let url = '/token?access_token=' + encodeURIComponent(token);
+                if (state) {
+                    url += '&state=' + encodeURIComponent(state);
+                }
+                fetch(url)
                     .then(response => {
                         if (response.ok) {
                             statusEl.className = 'success';
                             statusEl.textContent =
                                 'Success! You can close this window.';
+                        } else if (response.status === 400) {
+                            throw new Error('Invalid state - possible CSRF attack');
                         } else {
                             throw new Error('Server error');
                         }
                     })
                     .catch(err => {
                         statusEl.className = 'error';
-                        statusEl.textContent = 'Failed to save token. Please try again.';
+                        statusEl.textContent = err.message || 'Failed to save token. Please try again.';
                     });
             } else {
                 statusEl.className = 'error';
@@ -159,6 +167,7 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             # Check if this is a code flow (Kick) or implicit flow (Twitch)
             code = params.get("code", [None])[0]
             error = params.get("error", [None])[0]
+            state = params.get("state", [None])[0]
 
             if error:
                 # OAuth error
@@ -170,6 +179,16 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
                 self.wfile.write(html.encode())
             elif code:
                 # Authorization code flow (Kick) - code in query param
+                # Validate state parameter to prevent CSRF attacks
+                if self.server.expected_state and state != self.server.expected_state:
+                    logger.warning("OAuth state mismatch - possible CSRF attack")
+                    html = KICK_ERROR_HTML.format(error="Invalid state parameter")
+                    self.send_response(400)
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(html.encode())
+                    return
+
                 if self.server.code_callback:
                     self.server.code_callback(code)
                 self.send_response(200)
@@ -185,8 +204,18 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
                 self.wfile.write(CALLBACK_HTML.encode())
 
         elif parsed.path == "/token":
-            # Receive the token from JavaScript (Twitch flow)
+            # Receive the token from JavaScript (Twitch implicit flow)
             token = params.get("access_token", [None])[0]
+            state = params.get("state", [None])[0]
+
+            # Validate state parameter to prevent CSRF attacks
+            if self.server.expected_state and state != self.server.expected_state:
+                logger.warning("OAuth state mismatch in implicit flow - possible CSRF attack")
+                self.send_response(400)
+                self.send_header("Content-Type", "text/plain")
+                self.end_headers()
+                self.wfile.write(b"Invalid state parameter")
+                return
 
             if token and self.server.token_callback:
                 self.server.token_callback(token)
@@ -221,6 +250,7 @@ class OAuthServer:
         self._token_event = threading.Event()
         self._code_event = threading.Event()
         self._stopped = False
+        self._expected_state: str | None = None
 
     @property
     def port(self) -> int:
@@ -233,6 +263,20 @@ class OAuthServer:
     def redirect_uri(self) -> str:
         """Get the redirect URI for OAuth."""
         return f"http://localhost:{self.port}/redirect"
+
+    def generate_state(self) -> str:
+        """Generate and store a cryptographically secure state parameter.
+
+        Returns:
+            The generated state string to include in the OAuth request.
+        """
+        self._expected_state = secrets.token_urlsafe(32)
+        return self._expected_state
+
+    @property
+    def expected_state(self) -> str | None:
+        """Get the expected state for validation."""
+        return self._expected_state
 
     def _on_token(self, token: str) -> None:
         """Callback when token is received (implicit flow)."""
@@ -255,6 +299,7 @@ class OAuthServer:
         self._server = ReuseAddrHTTPServer(("localhost", self._port), OAuthCallbackHandler)
         self._server.token_callback = self._on_token
         self._server.code_callback = self._on_code
+        self._server.expected_state = self._expected_state
 
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()

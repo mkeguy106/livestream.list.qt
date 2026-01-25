@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import sys
+import threading
 import weakref
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -72,21 +73,24 @@ class NotificationBridge(QObject):
         super().__init__()
         self.notifier = notifier
         self._pending = []
-        self._timer = QTimer()
+        self._lock = threading.Lock()  # Protect _pending from concurrent access
+        self._timer = QTimer(self)  # Parent ensures cleanup on destruction
         self._timer.timeout.connect(self._process_pending)
         self._timer.start(100)
 
     def queue_notification(self, livestream):
-        """Queue a notification to be sent."""
-        self._pending.append(livestream)
+        """Queue a notification to be sent (thread-safe)."""
+        with self._lock:
+            self._pending.append(livestream)
 
     def _process_pending(self):
-        """Process pending notifications."""
-        if not self._pending:
-            return
-
-        pending = self._pending[:]
-        self._pending.clear()
+        """Process pending notifications on main thread."""
+        # Atomically swap pending list to avoid holding lock during processing
+        with self._lock:
+            if not self._pending:
+                return
+            pending = self._pending[:]
+            self._pending.clear()
 
         # Delegate to Notifier's synchronous method (thread-safe, uses subprocess)
         for livestream in pending:
@@ -94,6 +98,10 @@ class NotificationBridge(QObject):
                 self.notifier.send_notification_sync(livestream)
             except Exception as e:
                 logger.error(f"Notification error: {e}")
+
+    def cleanup(self):
+        """Stop the timer - call on application shutdown."""
+        self._timer.stop()
 
     def send_test_notification(self, livestream):
         """Send a test notification (bypasses enabled check)."""
@@ -184,7 +192,7 @@ class Application(QApplication):
         self.monitor.on_stream_online(self._on_stream_online)
 
         # Set up process check timer (every 2 seconds)
-        self._process_check_timer = QTimer()
+        self._process_check_timer = QTimer(self)  # Parent ensures cleanup
         self._process_check_timer.timeout.connect(self._check_processes)
         self._process_check_timer.start(2000)
 
@@ -260,7 +268,7 @@ class Application(QApplication):
         if self._refresh_timer:
             self._refresh_timer.stop()
 
-        self._refresh_timer = QTimer()
+        self._refresh_timer = QTimer(self)  # Parent ensures cleanup
         self._refresh_timer.timeout.connect(self._on_timed_refresh)
         interval_ms = self.settings.refresh_interval * 1000
         self._refresh_timer.start(interval_ms)
@@ -418,6 +426,10 @@ class Application(QApplication):
         if self._process_check_timer:
             self._process_check_timer.stop()
             self._process_check_timer = None
+
+        # Stop notification bridge timer
+        if self.notification_bridge:
+            self.notification_bridge.cleanup()
 
         # Disconnect all chat connections
         if self.chat_manager:

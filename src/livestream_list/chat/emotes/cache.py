@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 CACHE_DIR_NAME = "emote_cache"
 DEFAULT_EMOTE_HEIGHT = 28
 MAX_MEMORY_ENTRIES = 2000
+MAX_ANIMATED_ENTRIES = 100  # Animated emotes use significantly more memory (20-100 frames each)
+MAX_DISK_CACHE_MB = 500  # Maximum disk cache size in MB
+DISK_CACHE_EVICT_PERCENT = 0.2  # Evict 20% when over limit
 
 
 def _get_cache_dir() -> Path:
@@ -118,7 +121,8 @@ class EmoteCache(QObject):
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._memory: OrderedDict[str, QPixmap] = OrderedDict()
-        self._animated: dict[str, list[QPixmap]] = {}  # key -> frame list
+        # Use OrderedDict for LRU eviction of animated emotes (they use much more memory)
+        self._animated: OrderedDict[str, list[QPixmap]] = OrderedDict()
         self._frame_delays: dict[str, list[int]] = {}  # key -> ms per frame
         self._cache_dir = _get_cache_dir()
         self._pending: set[str] = set()  # Keys currently being loaded
@@ -135,11 +139,18 @@ class EmoteCache(QObject):
         return self._animated
 
     def put_animated(self, key: str, frames: list[QPixmap], delays: list[int]) -> None:
-        """Store an animated emote's frame list."""
+        """Store an animated emote's frame list with LRU eviction."""
         if not frames:
             return
         self._animated[key] = frames
+        self._animated.move_to_end(key)
         self._frame_delays[key] = delays
+
+        # Evict oldest animated entries if over limit
+        while len(self._animated) > MAX_ANIMATED_ENTRIES:
+            evicted_key, _ = self._animated.popitem(last=False)
+            self._frame_delays.pop(evicted_key, None)
+
         # Also store first frame in static cache as fallback
         self._put_memory(key, frames[0])
         self._pending.discard(key)
@@ -269,6 +280,7 @@ class EmoteCache(QObject):
         disk_path = self._cache_dir / filename
         try:
             pixmap.save(str(disk_path), "PNG")
+            self._enforce_disk_limit()
         except Exception as e:
             logger.debug(f"Failed to save emote to disk: {e}")
 
@@ -278,8 +290,54 @@ class EmoteCache(QObject):
         disk_path = self._cache_dir / filename
         try:
             disk_path.write_bytes(data)
+            self._enforce_disk_limit()
         except Exception as e:
             logger.debug(f"Failed to save raw emote to disk: {e}")
+
+    def _enforce_disk_limit(self) -> None:
+        """Enforce disk cache size limit by evicting oldest files."""
+        try:
+            max_bytes = MAX_DISK_CACHE_MB * 1024 * 1024
+            files = list(self._cache_dir.iterdir())
+
+            # Calculate total size
+            file_info = []
+            total_size = 0
+            for f in files:
+                try:
+                    stat = f.stat()
+                    total_size += stat.st_size
+                    file_info.append((f, stat.st_mtime, stat.st_size))
+                except OSError:
+                    continue
+
+            if total_size <= max_bytes:
+                return
+
+            # Sort by modification time (oldest first)
+            file_info.sort(key=lambda x: x[1])
+
+            # Evict files until under limit (evict at least 20% to avoid frequent cleanups)
+            target_size = int(max_bytes * (1 - DISK_CACHE_EVICT_PERCENT))
+            evicted_count = 0
+
+            for filepath, _mtime, size in file_info:
+                if total_size <= target_size:
+                    break
+                try:
+                    filepath.unlink()
+                    total_size -= size
+                    evicted_count += 1
+                except OSError:
+                    continue
+
+            if evicted_count > 0:
+                logger.info(
+                    f"Disk cache cleanup: evicted {evicted_count} files, "
+                    f"size now {total_size // (1024 * 1024)}MB"
+                )
+        except Exception as e:
+            logger.debug(f"Disk cache cleanup error: {e}")
 
     def clear_memory(self) -> None:
         """Clear the memory cache."""
@@ -298,10 +356,12 @@ class EmoteLoaderWorker(QThread):
     """Worker thread for downloading and decoding emote images.
 
     Processes a queue of (key, url) pairs, downloads images via aiohttp,
-    and stores them in the EmoteCache.
+    and emits raw bytes via signals. QPixmap creation happens on the main
+    thread to comply with Qt threading requirements.
     """
 
-    emote_ready = Signal(str, object, bytes)  # key, QPixmap, raw_data
+    # Both signals send raw bytes - QPixmap must be created on GUI thread
+    emote_ready = Signal(str, bytes)  # key, raw_data (static image)
     animated_emote_ready = Signal(str, bytes)  # key, raw_data (frames extracted on main thread)
 
     def __init__(self, parent: QObject | None = None):
@@ -344,17 +404,7 @@ class EmoteLoaderWorker(QThread):
                             if _is_animated(data):
                                 self.animated_emote_ready.emit(key, data)
                             else:
-                                pixmap = QPixmap()
-                                if pixmap.loadFromData(data):
-                                    # Scale to standard height
-                                    if (
-                                        pixmap.height() > 0
-                                        and pixmap.height() != DEFAULT_EMOTE_HEIGHT
-                                    ):
-                                        pixmap = pixmap.scaledToHeight(
-                                            DEFAULT_EMOTE_HEIGHT,
-                                            mode=Qt.TransformationMode.SmoothTransformation,
-                                        )
-                                    self.emote_ready.emit(key, pixmap, data)
+                                # Emit raw bytes - QPixmap creation happens on main thread
+                                self.emote_ready.emit(key, data)
                 except Exception as e:
                     logger.debug(f"Failed to download emote {key}: {e}")

@@ -3,7 +3,6 @@
 import base64
 import hashlib
 import logging
-import secrets
 import webbrowser
 from urllib.parse import urlencode
 
@@ -25,6 +24,8 @@ DEFAULT_KICK_CLIENT_SECRET = "bc2e8d615c40624929fe3f22a3b7ec468d58aaaab52e383c3c
 
 def _generate_pkce() -> tuple[str, str]:
     """Generate PKCE code_verifier and code_challenge (S256)."""
+    import secrets
+
     code_verifier = secrets.token_urlsafe(64)[:128]
     digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
@@ -65,12 +66,16 @@ class KickAuthFlow:
         """
         # Start local OAuth server on port 65432 (must match registered redirect URI)
         server = OAuthServer(port=65432)
-        server.start()
 
         try:
             # Generate PKCE values
             code_verifier, code_challenge = _generate_pkce()
-            state = secrets.token_urlsafe(32)
+
+            # Generate state via server for CSRF protection (validated on callback)
+            state = server.generate_state()
+
+            # Start server after generating state so it's available for validation
+            server.start()
 
             # Build authorization URL
             params = {
@@ -83,7 +88,7 @@ class KickAuthFlow:
                 "code_challenge_method": "S256",
             }
             auth_url = f"{KICK_OAUTH_BASE}/oauth/authorize?{urlencode(params)}"
-            logger.info(f"Opening Kick OAuth URL: {auth_url}")
+            logger.debug(f"Opening Kick OAuth URL (state={state[:8]}...)")
 
             # Open browser for user authorization
             webbrowser.open(auth_url)

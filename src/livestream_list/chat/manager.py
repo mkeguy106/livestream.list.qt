@@ -1217,13 +1217,24 @@ class ChatManager(QObject):
 
         self._loader.start()
 
-    def _on_emote_downloaded(self, key: str, pixmap: object, raw_data: bytes = b"") -> None:
-        """Handle a downloaded emote/badge image."""
-        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+    def _on_emote_downloaded(self, key: str, raw_data: bytes) -> None:
+        """Handle a downloaded emote/badge image - create QPixmap on main thread."""
+        if not raw_data:
+            return
+
+        # Create QPixmap on main thread (GUI thread) as required by Qt
+        pixmap = QPixmap()
+        if pixmap.loadFromData(raw_data):
+            # Scale to standard height
+            if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
+                pixmap = pixmap.scaledToHeight(
+                    DEFAULT_EMOTE_HEIGHT,
+                    mode=Qt.TransformationMode.SmoothTransformation,
+                )
             self._emote_cache.put(key, pixmap)
             # Save raw bytes for emotes so has_animation_data() returns True,
             # preventing re-downloads on future launches.
-            if raw_data and key.startswith("emote:"):
+            if key.startswith("emote:"):
                 self._emote_cache._put_disk_raw(key, raw_data)
 
     def _on_animated_emote_downloaded(self, key: str, raw_data: bytes) -> None:

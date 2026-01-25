@@ -1287,17 +1287,19 @@ class AboutDialog(QDialog):
 
     def _check_for_updates(self):
         """Check GitHub for the latest release."""
-        import json
-        import urllib.request
-
         self.check_updates_btn.setEnabled(False)
         self.check_updates_btn.setText("Checking...")
         self.update_status.setText("Checking for updates...")
         self.update_status.setStyleSheet("")
         self.update_status.show()
 
-        # Force UI update
-        QApplication.processEvents()
+        # Defer HTTP request to allow UI to update naturally (avoid processEvents antipattern)
+        QTimer.singleShot(0, self._do_update_check)
+
+    def _do_update_check(self) -> None:
+        """Perform the actual update check (called after UI updates)."""
+        import json
+        import urllib.request
 
         try:
             url = f"https://api.github.com/repos/{self.GITHUB_REPO}/releases/latest"

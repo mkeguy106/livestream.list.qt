@@ -1,6 +1,7 @@
 """Twitch Helix API client."""
 
 import asyncio
+import json
 import logging
 import webbrowser
 from datetime import datetime
@@ -15,6 +16,15 @@ from .base import BaseApiClient
 from .oauth_server import OAuthServer
 
 logger = logging.getLogger(__name__)
+
+
+async def _safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
+    """Safely parse JSON from response, returning None on error."""
+    try:
+        return await resp.json()
+    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
+        logger.warning(f"Failed to parse JSON response: {e}")
+        return None
 
 # Twitch application client ID for OAuth (Qt version)
 # Registered separately from GTK version to use different OAuth port
@@ -117,10 +127,14 @@ class TwitchApiClient(BaseApiClient):
         except (aiohttp.ClientError, KeyError):
             return False
 
-    def get_oauth_url(self, redirect_uri: str) -> str:
+    def get_oauth_url(self, redirect_uri: str, state: str | None = None) -> str:
         """
         Get the OAuth authorization URL for browser-based login.
         Uses Implicit Grant Flow - token is returned in URL fragment.
+
+        Args:
+            redirect_uri: The OAuth redirect URI.
+            state: CSRF protection state parameter (should be validated on callback).
         """
         params = {
             "client_id": self.client_id,
@@ -128,6 +142,8 @@ class TwitchApiClient(BaseApiClient):
             "response_type": "token",
             "scope": OAUTH_SCOPES,
         }
+        if state:
+            params["state"] = state
         return f"{self.AUTH_URL}/authorize?{urlencode(params)}"
 
     async def oauth_login(self, timeout: float = 300) -> bool:
@@ -146,12 +162,15 @@ class TwitchApiClient(BaseApiClient):
         # Start local OAuth server on port 65433 (must match registered redirect URI)
         # Using different port than GTK version (65432) to allow running both apps
         server = OAuthServer(port=65433)
+
+        # Generate state for CSRF protection (validated in JavaScript callback)
+        state = server.generate_state()
         server.start()
 
         try:
-            # Build OAuth URL with our redirect URI
-            oauth_url = self.get_oauth_url(server.redirect_uri)
-            logger.info(f"Opening OAuth URL: {oauth_url}")
+            # Build OAuth URL with our redirect URI and state
+            oauth_url = self.get_oauth_url(server.redirect_uri, state)
+            logger.debug(f"Opening OAuth URL (state={state[:8]}...)")
 
             # Open browser
             webbrowser.open(oauth_url)
@@ -366,7 +385,9 @@ class TwitchApiClient(BaseApiClient):
                     logger.warning(f"GraphQL batch query failed with status {resp.status}")
                     return {}
 
-                data = await resp.json()
+                data = await _safe_json(resp)
+                if not data or not isinstance(data, dict):
+                    return {}
                 result_data = data.get("data", {})
 
                 # Map results back to login names

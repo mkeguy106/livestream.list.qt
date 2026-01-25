@@ -47,6 +47,9 @@ class StreamMonitor:
         self._save_lock = threading.Lock()
         self._pending_save = False
 
+        # Lock for protecting channel/livestream state from concurrent access
+        self._state_lock = threading.RLock()
+
         # Initialize API clients
         self._init_clients()
 
@@ -64,18 +67,21 @@ class StreamMonitor:
 
     @property
     def channels(self) -> list[Channel]:
-        """Get all monitored channels."""
-        return list(self._channels.values())
+        """Get all monitored channels (thread-safe snapshot)."""
+        with self._state_lock:
+            return list(self._channels.values())
 
     @property
     def livestreams(self) -> list[Livestream]:
-        """Get all livestreams (live and offline)."""
-        return list(self._livestreams.values())
+        """Get all livestreams (live and offline) (thread-safe snapshot)."""
+        with self._state_lock:
+            return list(self._livestreams.values())
 
     @property
     def live_streams(self) -> list[Livestream]:
-        """Get only live streams."""
-        return [s for s in self._livestreams.values() if s.live]
+        """Get only live streams (thread-safe snapshot)."""
+        with self._state_lock:
+            return [s for s in self._livestreams.values() if s.live]
 
     def get_client(self, platform: StreamPlatform) -> BaseApiClient:
         """Get the API client for a platform."""
@@ -149,12 +155,15 @@ class StreamMonitor:
 
     async def refresh(self) -> None:
         """Refresh all livestream statuses."""
-        if not self._channels:
-            return
+        # Take a snapshot of channels under lock to avoid iteration issues
+        with self._state_lock:
+            if not self._channels:
+                return
+            channels_snapshot = list(self._channels.values())
 
         # Group channels by platform
         by_platform: dict[StreamPlatform, list[Channel]] = {}
-        for channel in self._channels.values():
+        for channel in channels_snapshot:
             if channel.platform not in by_platform:
                 by_platform[channel.platform] = []
             by_platform[channel.platform].append(channel)
@@ -176,20 +185,30 @@ class StreamMonitor:
             all_livestreams.extend(result)
 
         # Update internal state and fire events
-        for livestream in all_livestreams:
-            key = livestream.channel.unique_key
-            existing = self._livestreams.get(key)
+        events_to_fire: list[tuple[str, Livestream]] = []  # (event_type, livestream)
 
-            if existing:
-                went_live = existing.update_from(livestream)
-                if went_live:
-                    self._fire_stream_online(existing)
-                elif not livestream.live and existing.live:
-                    self._fire_stream_offline(existing)
+        with self._state_lock:
+            for livestream in all_livestreams:
+                key = livestream.channel.unique_key
+                existing = self._livestreams.get(key)
+
+                if existing:
+                    went_live = existing.update_from(livestream)
+                    if went_live:
+                        events_to_fire.append(("online", existing))
+                    elif not livestream.live and existing.live:
+                        events_to_fire.append(("offline", existing))
+                else:
+                    self._livestreams[key] = livestream
+                    if livestream.live:
+                        events_to_fire.append(("online", livestream))
+
+        # Fire events outside the lock to avoid deadlocks
+        for event_type, livestream in events_to_fire:
+            if event_type == "online":
+                self._fire_stream_online(livestream)
             else:
-                self._livestreams[key] = livestream
-                if livestream.live:
-                    self._fire_stream_online(livestream)
+                self._fire_stream_offline(livestream)
 
         # Fire refresh complete
         for callback in self._on_refresh_complete:
@@ -245,7 +264,8 @@ class StreamMonitor:
 
     def _has_channels_for_platform(self, platform: StreamPlatform) -> bool:
         """Check if we have any channels for a platform."""
-        return any(c.platform == platform for c in self._channels.values())
+        with self._state_lock:
+            return any(c.platform == platform for c in self._channels.values())
 
     async def add_channel(self, channel_id: str, platform: StreamPlatform) -> Channel | None:
         """Add a channel to monitor."""
@@ -256,15 +276,18 @@ class StreamMonitor:
         if not channel:
             return None
 
-        # Check for duplicates
-        if channel.unique_key in self._channels:
-            return self._channels[channel.unique_key]
+        with self._state_lock:
+            # Check for duplicates
+            if channel.unique_key in self._channels:
+                return self._channels[channel.unique_key]
 
-        self._channels[channel.unique_key] = channel
+            self._channels[channel.unique_key] = channel
 
         # Create initial livestream entry
         livestream = await client.get_livestream(channel)
-        self._livestreams[channel.unique_key] = livestream
+
+        with self._state_lock:
+            self._livestreams[channel.unique_key] = livestream
 
         # Save to disk
         await self._save_channels()
@@ -275,11 +298,9 @@ class StreamMonitor:
         """Remove a channel from monitoring."""
         key = channel.unique_key
 
-        if key in self._channels:
-            del self._channels[key]
-
-        if key in self._livestreams:
-            del self._livestreams[key]
+        with self._state_lock:
+            self._channels.pop(key, None)
+            self._livestreams.pop(key, None)
 
         await self._save_channels()
 
@@ -293,11 +314,12 @@ class StreamMonitor:
             return []
 
         added: list[Channel] = []
-        for channel in channels:
-            if channel.unique_key not in self._channels:
-                self._channels[channel.unique_key] = channel
-                self._livestreams[channel.unique_key] = Livestream(channel=channel)
-                added.append(channel)
+        with self._state_lock:
+            for channel in channels:
+                if channel.unique_key not in self._channels:
+                    self._channels[channel.unique_key] = channel
+                    self._livestreams[channel.unique_key] = Livestream(channel=channel)
+                    added.append(channel)
 
         if added:
             await self._save_channels()
@@ -312,21 +334,24 @@ class StreamMonitor:
         Returns True if the channel was added (not a duplicate).
         """
         key = channel.unique_key
-        if key in self._channels:
-            return False
-        self._channels[key] = channel
-        self._livestreams[key] = Livestream(channel=channel)
-        return True
+        with self._state_lock:
+            if key in self._channels:
+                return False
+            self._channels[key] = channel
+            self._livestreams[key] = Livestream(channel=channel)
+            return True
 
     def remove_channels(self, keys: list[str]) -> None:
         """Remove multiple channels by their unique keys."""
-        for key in keys:
-            self._channels.pop(key, None)
-            self._livestreams.pop(key, None)
+        with self._state_lock:
+            for key in keys:
+                self._channels.pop(key, None)
+                self._livestreams.pop(key, None)
 
     def has_channel(self, key: str) -> bool:
         """Check if a channel exists by its unique key."""
-        return key in self._channels
+        with self._state_lock:
+            return key in self._channels
 
     def reset_all_sessions(self) -> None:
         """Reset all API client sessions.
@@ -359,15 +384,17 @@ class StreamMonitor:
 
     def set_dont_notify(self, channel: Channel, dont_notify: bool) -> None:
         """Set the notification preference for a channel."""
-        if channel.unique_key in self._channels:
-            self._channels[channel.unique_key].dont_notify = dont_notify
-            self._schedule_debounced_save()
+        with self._state_lock:
+            if channel.unique_key in self._channels:
+                self._channels[channel.unique_key].dont_notify = dont_notify
+        self._schedule_debounced_save()
 
     def set_favorite(self, channel: Channel, favorite: bool) -> None:
         """Set the favorite status for a channel."""
-        if channel.unique_key in self._channels:
-            self._channels[channel.unique_key].favorite = favorite
-            self._schedule_debounced_save()
+        with self._state_lock:
+            if channel.unique_key in self._channels:
+                self._channels[channel.unique_key].favorite = favorite
+        self._schedule_debounced_save()
 
     def _schedule_debounced_save(self) -> None:
         """Schedule a debounced save operation.
@@ -401,20 +428,21 @@ class StreamMonitor:
     def _serialize_channels(self) -> list[dict]:
         """Serialize channels to a list of dicts for JSON persistence."""
         data = []
-        for ch in self._channels.values():
-            ch_data = {
-                "channel_id": ch.channel_id,
-                "platform": ch.platform.value,
-                "display_name": ch.display_name,
-                "imported_by": ch.imported_by,
-                "dont_notify": ch.dont_notify,
-                "favorite": ch.favorite,
-                "added_at": ch.added_at.isoformat(),
-            }
-            livestream = self._livestreams.get(ch.unique_key)
-            if livestream and livestream.last_live_time:
-                ch_data["last_live_time"] = livestream.last_live_time.isoformat()
-            data.append(ch_data)
+        with self._state_lock:
+            for ch in self._channels.values():
+                ch_data = {
+                    "channel_id": ch.channel_id,
+                    "platform": ch.platform.value,
+                    "display_name": ch.display_name,
+                    "imported_by": ch.imported_by,
+                    "dont_notify": ch.dont_notify,
+                    "favorite": ch.favorite,
+                    "added_at": ch.added_at.isoformat(),
+                }
+                livestream = self._livestreams.get(ch.unique_key)
+                if livestream and livestream.last_live_time:
+                    ch_data["last_live_time"] = livestream.last_live_time.isoformat()
+                data.append(ch_data)
         return data
 
     def _save_channels_sync(self) -> None:

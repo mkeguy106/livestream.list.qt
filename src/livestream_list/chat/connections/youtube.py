@@ -131,6 +131,7 @@ class YouTubeChatConnection(BaseChatConnection):
         try:
             self._pytchat = pytchat.create(video_id=video_id, interruptable=False)
             self._set_connected(channel_id)
+            self._reset_backoff()  # Reset backoff on successful connection
             self._last_flush = time.monotonic()
 
             # Poll loop
