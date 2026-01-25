@@ -44,14 +44,25 @@ class BaseApiClient(ABC):
         if self._session is None or self._session.closed:
             # Use explicit timeout to avoid Python 3.11 compatibility issues
             timeout = aiohttp.ClientTimeout(total=30)
-            connector = aiohttp.TCPConnector(limit=10)
+            connector = aiohttp.TCPConnector(limit=50)
             self._session = aiohttp.ClientSession(timeout=timeout, connector=connector)
         return self._session
 
     async def close(self) -> None:
         """Close the HTTP session."""
         if self._session and not self._session.closed:
-            await self._session.close()
+            try:
+                await self._session.close()
+            except RuntimeError as e:
+                # Session may be attached to a different event loop
+                # This can happen when sessions are created in worker threads
+                # Just log and continue - the session will be garbage collected
+                if "attached to a different loop" in str(e):
+                    logger.debug(f"Session attached to different loop, skipping close: {e}")
+                else:
+                    raise
+            finally:
+                self._session = None
 
     def reset_session(self) -> None:
         """Reset the HTTP session.

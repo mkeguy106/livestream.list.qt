@@ -441,6 +441,11 @@ class ChatWidget(QWidget):
         """Apply a moderation event to the message list."""
         self._model.apply_moderation(event)
 
+        # Forward to any open user history dialogs
+        if self._history_dialogs:
+            for dialog in list(self._history_dialogs):
+                dialog.apply_moderation(event)
+
     def set_connected(self) -> None:
         """Hide the connecting indicator and show the message list."""
         self._connecting_label.setText("Waiting for messages\u2026")
@@ -1117,6 +1122,10 @@ class UserHistoryDialog(QDialog):
 
         if was_at_bottom:
             self._list_view.scrollToBottom()
+
+    def apply_moderation(self, event) -> None:
+        """Apply a moderation event to messages in this dialog."""
+        self._model.apply_moderation(event)
 
     def _is_at_bottom(self) -> bool:
         """Check if the view is scrolled to the bottom."""

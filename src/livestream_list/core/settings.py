@@ -142,6 +142,14 @@ class ChatSettings:
 
 
 @dataclass
+class PerformanceSettings:
+    """Performance-related settings for API concurrency."""
+
+    youtube_concurrency: int = 4  # Concurrent yt-dlp processes for YouTube
+    kick_concurrency: int = 10  # Concurrent API calls for Kick
+
+
+@dataclass
 class ChannelInfoSettings:
     """Channel row information visibility settings."""
 
@@ -193,6 +201,7 @@ class Settings:
     chat: ChatSettings = field(default_factory=ChatSettings)
     channel_info: ChannelInfoSettings = field(default_factory=ChannelInfoSettings)
     channel_icons: ChannelIconSettings = field(default_factory=ChannelIconSettings)
+    performance: PerformanceSettings = field(default_factory=PerformanceSettings)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
@@ -458,6 +467,14 @@ class Settings:
                 show_browser=ci.get("show_browser", True),
             )
 
+        # Performance
+        if "performance" in data:
+            perf = data["performance"]
+            settings.performance = PerformanceSettings(
+                youtube_concurrency=perf.get("youtube_concurrency", 4),
+                kick_concurrency=perf.get("kick_concurrency", 10),
+            )
+
         return settings
 
     def _to_dict(self, exclude_secrets: bool = False) -> dict:
@@ -577,5 +594,9 @@ class Settings:
                 "show_favorite": self.channel_icons.show_favorite,
                 "show_chat": self.channel_icons.show_chat,
                 "show_browser": self.channel_icons.show_browser,
+            },
+            "performance": {
+                "youtube_concurrency": self.performance.youtube_concurrency,
+                "kick_concurrency": self.performance.kick_concurrency,
             },
         }

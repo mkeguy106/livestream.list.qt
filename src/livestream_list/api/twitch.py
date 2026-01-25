@@ -471,16 +471,42 @@ class TwitchApiClient(BaseApiClient):
         if not channels:
             return []
 
-        result: list[Livestream] = []
         channel_map = {c.channel_id.lower(): c for c in channels}
 
         # Batch channels into groups of 35 per request
         batch_size = 35
         all_logins = [c.channel_id for c in channels]
 
-        for i in range(0, len(all_logins), batch_size):
-            batch_logins = all_logins[i : i + batch_size]
-            batch_results = await self._get_streams_gql_batch(batch_logins)
+        # Create all batch requests
+        batches = [
+            all_logins[i : i + batch_size] for i in range(0, len(all_logins), batch_size)
+        ]
+
+        # Execute all batches in parallel
+        batch_results_list = await asyncio.gather(
+            *[self._get_streams_gql_batch(batch) for batch in batches],
+            return_exceptions=True,
+        )
+
+        # Process results
+        result: list[Livestream] = []
+        for batch_idx, batch_logins in enumerate(batches):
+            batch_results = batch_results_list[batch_idx]
+
+            # Handle exceptions from gather
+            if isinstance(batch_results, Exception):
+                logger.error(f"Twitch batch {batch_idx} failed: {batch_results}")
+                # Mark all channels in this batch as offline with error
+                for login in batch_logins:
+                    channel = channel_map[login.lower()]
+                    result.append(
+                        Livestream(
+                            channel=channel,
+                            live=False,
+                            error_message=str(batch_results),
+                        )
+                    )
+                continue
 
             for login in batch_logins:
                 channel = channel_map[login.lower()]

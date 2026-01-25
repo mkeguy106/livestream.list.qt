@@ -1109,6 +1109,7 @@ class MainWindow(QMainWindow):
                     "chat",
                     "channel_info",
                     "channel_icons",
+                    "performance",
                 ]:
                     if hasattr(new_settings, field_name):
                         setattr(self.app.settings, field_name, getattr(new_settings, field_name))
@@ -1833,6 +1834,32 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(icons_group)
 
+        # Performance group
+        perf_group = QGroupBox("Performance")
+        perf_layout = QFormLayout(perf_group)
+
+        self.youtube_concurrency_spin = QSpinBox()
+        self.youtube_concurrency_spin.setRange(1, 20)
+        self.youtube_concurrency_spin.setValue(self.app.settings.performance.youtube_concurrency)
+        self.youtube_concurrency_spin.setToolTip(
+            "Number of concurrent yt-dlp processes for checking YouTube channels.\n"
+            "Higher = faster refresh, but more CPU usage."
+        )
+        self.youtube_concurrency_spin.valueChanged.connect(self._on_performance_changed)
+        perf_layout.addRow("YouTube concurrency:", self.youtube_concurrency_spin)
+
+        self.kick_concurrency_spin = QSpinBox()
+        self.kick_concurrency_spin.setRange(1, 30)
+        self.kick_concurrency_spin.setValue(self.app.settings.performance.kick_concurrency)
+        self.kick_concurrency_spin.setToolTip(
+            "Number of concurrent API calls for checking Kick channels.\n"
+            "Higher = faster refresh, but more network usage."
+        )
+        self.kick_concurrency_spin.valueChanged.connect(self._on_performance_changed)
+        perf_layout.addRow("Kick concurrency:", self.kick_concurrency_spin)
+
+        layout.addWidget(perf_group)
+
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(lambda: self._reset_tab_defaults("General"))
         layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
@@ -2440,6 +2467,13 @@ class PreferencesDialog(QDialog):
         # Refresh main window to apply changes
         if self.app.main_window:
             self.app.main_window.refresh_stream_list()
+
+    def _on_performance_changed(self, value):
+        """Handle performance settings change."""
+        self.app.settings.performance.youtube_concurrency = self.youtube_concurrency_spin.value()
+        self.app.settings.performance.kick_concurrency = self.kick_concurrency_spin.value()
+        self.app.save_settings()
+        # Note: Changes take effect on next app restart (clients already initialized)
 
     def _on_streamlink_changed(self):
         self.app.settings.streamlink.path = self.sl_path_edit.text()
@@ -3122,6 +3156,7 @@ class YouTubeImportDialog(QDialog):
     """Dialog for importing YouTube subscriptions using cookie auth."""
 
     import_complete = Signal(object)  # list[Channel] or Exception
+    filter_progress = Signal(int, int, str)  # checked, total, channel_name
 
     def __init__(self, parent, app: "Application"):
         super().__init__(parent)
@@ -3130,7 +3165,7 @@ class YouTubeImportDialog(QDialog):
 
         self.setWindowTitle("Import YouTube Subscriptions")
         self.setMinimumWidth(400)
-        self.setMinimumHeight(200)
+        self.setMinimumHeight(250)
 
         layout = QVBoxLayout(self)
 
@@ -3150,6 +3185,15 @@ class YouTubeImportDialog(QDialog):
         ready_label.setAlignment(Qt.AlignCenter)
         ready_label.setWordWrap(True)
         ready_layout.addWidget(ready_label)
+
+        # Filter checkbox
+        self.filter_checkbox = QCheckBox("Only import channels that do livestreams")
+        self.filter_checkbox.setChecked(True)
+        self.filter_checkbox.setToolTip(
+            "Check each channel's /live tab to see if they stream.\n"
+            "This takes longer but avoids importing channels that never go live."
+        )
+        ready_layout.addWidget(self.filter_checkbox, 0, Qt.AlignCenter)
 
         import_btn = QPushButton("Import Subscriptions")
         import_btn.clicked.connect(self._start_import)
@@ -3191,11 +3235,13 @@ class YouTubeImportDialog(QDialog):
         layout.addWidget(self.close_btn, 0, Qt.AlignCenter)
 
         self.import_complete.connect(self._on_import_complete)
+        self.filter_progress.connect(self._on_filter_progress)
 
     def _start_import(self):
         """Start fetching YouTube subscriptions in a background thread."""
         self.stack.setCurrentIndex(1)
         self.close_btn.setEnabled(False)
+        self._filter_livestreams = self.filter_checkbox.isChecked()
 
         cookies = self.app.settings.youtube.cookies
         if not cookies:
@@ -3208,12 +3254,25 @@ class YouTubeImportDialog(QDialog):
             try:
                 from ..api.youtube import YouTubeApiClient
 
-                client = YouTubeApiClient(self.app.settings.youtube)
+                client = YouTubeApiClient(
+                    self.app.settings.youtube,
+                    concurrency=self.app.settings.performance.youtube_concurrency,
+                )
 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     channels = loop.run_until_complete(client.get_subscriptions(cookies))
+
+                    if self._filter_livestreams and channels:
+                        # Filter to only channels that do livestreams
+                        def progress_callback(checked, total, name):
+                            self.filter_progress.emit(checked, total, name)
+
+                        channels = loop.run_until_complete(
+                            client.filter_channels_by_livestream(channels, progress_callback)
+                        )
+
                     self.import_complete.emit(channels)
                 finally:
                     loop.close()
@@ -3223,6 +3282,12 @@ class YouTubeImportDialog(QDialog):
 
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
+
+    def _on_filter_progress(self, checked: int, total: int, channel_name: str):
+        """Update UI with filter progress."""
+        self.import_label.setText(f"Checking livestream capability...\n{channel_name}")
+        self.import_progress.setRange(0, total)
+        self.import_progress.setValue(checked)
 
     def _on_import_complete(self, result):
         """Handle import completion on the main thread."""

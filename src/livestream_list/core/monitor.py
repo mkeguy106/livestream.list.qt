@@ -53,8 +53,14 @@ class StreamMonitor:
     def _init_clients(self) -> None:
         """Initialize API clients for each platform."""
         self._clients[StreamPlatform.TWITCH] = TwitchApiClient(self.settings.twitch)
-        self._clients[StreamPlatform.YOUTUBE] = YouTubeApiClient(self.settings.youtube)
-        self._clients[StreamPlatform.KICK] = KickApiClient(self.settings.kick)
+        self._clients[StreamPlatform.YOUTUBE] = YouTubeApiClient(
+            self.settings.youtube,
+            concurrency=self.settings.performance.youtube_concurrency,
+        )
+        self._clients[StreamPlatform.KICK] = KickApiClient(
+            self.settings.kick,
+            concurrency=self.settings.performance.kick_concurrency,
+        )
 
     @property
     def channels(self) -> list[Channel]:
