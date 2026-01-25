@@ -29,6 +29,7 @@ MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
 # URL detection
 URL_RE = re.compile(r'https?://[^\s<>\[\]"\'`)\]]+')
 URL_COLOR = QColor("#58a6ff")
+URL_COLOR_SELECTED = QColor("#90d5ff")  # Lighter blue for contrast on selection highlight
 
 # Shared alignment flags
 ALIGN_LEFT_VCENTER = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -238,6 +239,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 available_width - (text_x - rect.x()),
                 fm,
                 message.is_moderated,
+                is_selected=is_selected,
             )
         else:
             remaining_width = available_width - (text_x - rect.x())
@@ -250,6 +252,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 line_height,
                 fm,
                 message.is_moderated,
+                is_selected=is_selected,
             )
 
         painter.restore()
@@ -266,6 +269,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         available_width: int,
         fm: QFontMetrics,
         is_moderated: bool,
+        is_selected: bool = False,
     ) -> None:
         """Paint text with inline emotes, wrapping at available_width."""
         start_x = x
@@ -291,6 +295,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     is_moderated,
                     url_ranges=url_ranges,
                     text_offset=last_end,
+                    is_selected=is_selected,
                 )
 
             # Draw emote (wrap whole emote if it doesn't fit)
@@ -325,6 +330,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     line_height,
                     fm,
                     is_moderated,
+                    is_selected=is_selected,
                 )
 
             last_end = end
@@ -344,6 +350,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 is_moderated,
                 url_ranges=url_ranges,
                 text_offset=last_end,
+                is_selected=is_selected,
             )
 
     @staticmethod
@@ -364,6 +371,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         is_moderated: bool,
         url_ranges: list[tuple[int, int, str]] | None = None,
         text_offset: int = 0,
+        is_selected: bool = False,
     ) -> tuple[int, int]:
         """Draw text word-by-word, wrapping to the next line as needed.
 
@@ -405,7 +413,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if draw_word:
                 if in_url:
                     saved_pen = painter.pen()
-                    painter.setPen(URL_COLOR)
+                    url_color = URL_COLOR_SELECTED if is_selected else URL_COLOR
+                    painter.setPen(url_color)
                     font = painter.font()
                     font.setUnderline(True)
                     painter.setFont(font)
@@ -456,6 +465,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         line_height: int,
         fm: QFontMetrics,
         is_moderated: bool,
+        is_selected: bool = False,
     ) -> None:
         """Paint text with word wrapping."""
         right_edge = x + available_width
@@ -472,6 +482,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             is_moderated,
             url_ranges=url_ranges,
             text_offset=0,
+            is_selected=is_selected,
         )
 
     def _draw_strikethrough_text(
@@ -667,7 +678,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                x += badge_size + BADGE_SPACING
+                # Only advance x if pixmap exists (matches paint behavior)
+                badge_key = f"badge:{badge.id}"
+                pixmap = self._emote_cache.get(badge_key)
+                if pixmap and not pixmap.isNull():
+                    x += badge_size + BADGE_SPACING
 
         # Username rect
         bold_font = QFont(font)
@@ -718,7 +733,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                x += badge_size + BADGE_SPACING
+                # Only advance x if pixmap exists (matches paint behavior)
+                badge_key = f"badge:{badge.id}"
+                pixmap = self._emote_cache.get(badge_key)
+                if pixmap and not pixmap.isNull():
+                    x += badge_size + BADGE_SPACING
 
         # Skip username
         bold_font = QFont(font)
@@ -728,9 +747,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text + emotes with wrapping logic
+        # start_x must be x (after badges+username) to match paint behavior
         text = message.text
         last_end = 0
-        start_x = rect.x()
+        start_x = x
         current_x = x
         current_y = y
         available_width = rect.width()
@@ -814,7 +834,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 return None
 
-        # Skip badges
+        # Skip badges - must match paint logic for consistent positioning
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             for badge in message.user.badges:
                 is_mod = badge.name in MOD_BADGE_NAMES
@@ -822,7 +842,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                x += badge_size + BADGE_SPACING
+                # Only advance x if pixmap exists (matches paint behavior)
+                badge_key = f"badge:{badge.id}"
+                pixmap = self._emote_cache.get(badge_key)
+                if pixmap and not pixmap.isNull():
+                    x += badge_size + BADGE_SPACING
 
         # Skip username
         bold_font = QFont(font)
@@ -832,8 +856,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text with wrapping, checking URL word positions
+        # start_x must be x (after badges+username) to match paint behavior
         text = message.text
-        start_x = rect.x()
+        start_x = x
         current_x = x
         current_y = y
         right_edge = rect.x() + rect.width()
