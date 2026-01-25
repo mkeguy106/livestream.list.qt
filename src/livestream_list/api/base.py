@@ -141,6 +141,38 @@ class BaseApiClient(ABC):
         # Retry on server errors (5xx) and rate limiting (429)
         return status >= 500 or status == 429
 
+    def _parse_retry_after(self, headers: dict, default: float = 1.0) -> float:
+        """Parse Retry-After header value.
+
+        Args:
+            headers: Response headers.
+            default: Default delay if header is missing or unparseable.
+
+        Returns:
+            Delay in seconds to wait before retrying.
+        """
+        retry_after = headers.get("Retry-After")
+        if not retry_after:
+            return default
+
+        try:
+            # Retry-After can be seconds or HTTP-date
+            # Most APIs use seconds
+            return float(retry_after)
+        except ValueError:
+            # Try parsing as HTTP-date (RFC 7231)
+            from email.utils import parsedate_to_datetime
+
+            try:
+                retry_dt = parsedate_to_datetime(retry_after)
+                from datetime import datetime, timezone
+
+                now = datetime.now(timezone.utc)
+                delta = (retry_dt - now).total_seconds()
+                return max(delta, 0.0)
+            except (TypeError, ValueError):
+                return default
+
     @abstractmethod
     async def is_authorized(self) -> bool:
         """Check if the client is authorized."""
