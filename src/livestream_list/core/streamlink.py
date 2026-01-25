@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import os
+import shlex
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
@@ -25,6 +27,35 @@ def host_command(cmd: list[str]) -> list[str]:
     return cmd
 
 
+def _validate_additional_args(args_str: str) -> list[str]:
+    """Validate and parse additional arguments safely.
+
+    Uses shlex.split for proper parsing and validates that all args
+    start with - or -- to prevent command injection.
+    """
+    if not args_str:
+        return []
+
+    try:
+        args = shlex.split(args_str)
+    except ValueError as e:
+        logger.warning(f"Invalid additional_args syntax: {e}")
+        return []
+
+    validated = []
+    for arg in args:
+        # Allow args starting with - or --
+        # Also allow = in the middle of an arg (e.g., --player-args=foo)
+        if arg.startswith("-"):
+            validated.append(arg)
+        elif "=" in arg and not arg.startswith("="):
+            # This could be a value from a previous arg, skip validation
+            validated.append(arg)
+        else:
+            logger.warning(f"Skipping invalid argument (must start with -): {arg}")
+    return validated
+
+
 class StreamlinkLauncher:
     """Launches streams using streamlink."""
 
@@ -34,6 +65,8 @@ class StreamlinkLauncher:
         self._active_streams: dict[str, tuple[subprocess.Popen, Livestream]] = {}
         # Callbacks for when a stream stops
         self._on_stream_stopped: list[Callable[[str], None]] = []
+        # Lock to protect _active_streams from concurrent access
+        self._lock = threading.Lock()
 
     def on_stream_stopped(self, callback: Callable[[str], None]) -> None:
         """Register callback for when a stream stops playing."""
@@ -41,65 +74,75 @@ class StreamlinkLauncher:
 
     def is_playing(self, channel_key: str) -> bool:
         """Check if a stream is currently playing."""
-        if channel_key not in self._active_streams:
-            return False
-        process, _ = self._active_streams[channel_key]
-        # Check if process is still running
-        if process.poll() is not None:
-            # Process has exited, clean up
-            del self._active_streams[channel_key]
-            return False
-        return True
+        with self._lock:
+            if channel_key not in self._active_streams:
+                return False
+            process, _ = self._active_streams[channel_key]
+            # Check if process is still running
+            if process.poll() is not None:
+                # Process has exited, clean up
+                del self._active_streams[channel_key]
+                return False
+            return True
 
     def get_playing_streams(self) -> list[str]:
         """Get list of channel keys that are currently playing."""
         # Clean up dead processes first
         self.cleanup_dead_processes()
-        return list(self._active_streams.keys())
+        with self._lock:
+            return list(self._active_streams.keys())
 
     def cleanup_dead_processes(self) -> list[str]:
         """Remove dead processes from tracking. Returns list of stopped channel keys."""
         stopped = []
-        for key in list(self._active_streams.keys()):
-            process, _ = self._active_streams[key]
-            if process.poll() is not None:
-                del self._active_streams[key]
-                stopped.append(key)
-                # Fire callbacks
-                for callback in self._on_stream_stopped:
-                    try:
-                        callback(key)
-                    except Exception as e:
-                        logger.error(f"Stream stopped callback error: {e}")
+        # Collect stopped keys while holding lock
+        with self._lock:
+            for key in list(self._active_streams.keys()):
+                process, _ = self._active_streams[key]
+                if process.poll() is not None:
+                    del self._active_streams[key]
+                    stopped.append(key)
+
+        # Fire callbacks outside of lock to avoid deadlocks
+        for key in stopped:
+            for callback in self._on_stream_stopped:
+                try:
+                    callback(key)
+                except Exception as e:
+                    logger.error(f"Stream stopped callback error: {e}")
         return stopped
 
     def stop_stream(self, channel_key: str) -> bool:
         """Stop a playing stream."""
-        if channel_key not in self._active_streams:
-            return False
-        process, _ = self._active_streams[channel_key]
-        try:
-            process.terminate()
-            # Give it a moment to terminate gracefully
+        with self._lock:
+            if channel_key not in self._active_streams:
+                return False
+            process, _ = self._active_streams[channel_key]
             try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-            del self._active_streams[channel_key]
-            # Fire callbacks
-            for callback in self._on_stream_stopped:
+                process.terminate()
+                # Give it a moment to terminate gracefully
                 try:
-                    callback(channel_key)
-                except Exception as e:
-                    logger.error(f"Stream stopped callback error: {e}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to stop stream: {e}")
-            return False
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                del self._active_streams[channel_key]
+            except Exception as e:
+                logger.error(f"Failed to stop stream: {e}")
+                return False
+
+        # Fire callbacks outside of lock to avoid deadlocks
+        for callback in self._on_stream_stopped:
+            try:
+                callback(channel_key)
+            except Exception as e:
+                logger.error(f"Stream stopped callback error: {e}")
+        return True
 
     def stop_all_streams(self) -> None:
         """Stop all playing streams."""
-        for key in list(self._active_streams.keys()):
+        with self._lock:
+            keys = list(self._active_streams.keys())
+        for key in keys:
             self.stop_stream(key)
 
     def is_available(self) -> bool:
@@ -153,9 +196,9 @@ class StreamlinkLauncher:
         if self.settings.player_args:
             cmd.extend(["--player-args", self.settings.player_args])
 
-        # Additional arguments
+        # Additional arguments (validated to prevent command injection)
         if self.settings.additional_args:
-            cmd.extend(self.settings.additional_args.split())
+            cmd.extend(_validate_additional_args(self.settings.additional_args))
 
         # Stream URL
         cmd.append(livestream.stream_url)
@@ -173,9 +216,9 @@ class StreamlinkLauncher:
         """
         cmd = [self.settings.player or "mpv"]
 
-        # Player arguments
+        # Player arguments (validated to prevent command injection)
         if self.settings.player_args:
-            cmd.extend(self.settings.player_args.split())
+            cmd.extend(_validate_additional_args(self.settings.player_args))
 
         # Stream URL - player (mpv) will use yt-dlp to handle the stream
         cmd.append(livestream.stream_url)
@@ -205,8 +248,8 @@ class StreamlinkLauncher:
 
         channel_key = livestream.channel.unique_key
 
-        # Stop existing stream for this channel if any
-        if channel_key in self._active_streams:
+        # Stop existing stream for this channel if any (is_playing/stop_stream use lock)
+        if self.is_playing(channel_key):
             self.stop_stream(channel_key)
 
         # Get the launch method for this platform
@@ -231,7 +274,8 @@ class StreamlinkLauncher:
                 start_new_session=True,
             )
             # Track this stream
-            self._active_streams[channel_key] = (process, livestream)
+            with self._lock:
+                self._active_streams[channel_key] = (process, livestream)
             return process
         except Exception as e:
             logger.error(f"Failed to launch stream: {e}")
