@@ -328,6 +328,17 @@ class Application(QApplication):
             stopped = self.streamlink.cleanup_dead_processes()
             if stopped and self.main_window:
                 self.main_window.refresh_stream_list()
+                # Update status based on remaining playing streams
+                remaining = self.streamlink._active_streams
+                if len(remaining) == 0:
+                    self.main_window.set_status("Playback ended")
+                elif len(remaining) == 1:
+                    # Get the single remaining stream's channel name
+                    _, livestream = next(iter(remaining.values()))
+                    name = livestream.channel.display_name or livestream.channel.channel_id
+                    self.main_window.set_status(f"Playing {name}")
+                else:
+                    self.main_window.set_status("Playing Streams")
 
     def _cleanup_worker(self, worker):
         """Remove worker from active list."""

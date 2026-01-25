@@ -25,9 +25,10 @@ class KickApiClient(BaseApiClient):
     BASE_URL = "https://kick.com/api/v2"
     BASE_URL_V1 = "https://kick.com/api/v1"
 
-    def __init__(self, settings: KickSettings) -> None:
+    def __init__(self, settings: KickSettings, concurrency: int = 10) -> None:
         super().__init__()
         self.settings = settings
+        self.concurrency = concurrency
 
     @property
     def platform(self) -> StreamPlatform:
@@ -196,14 +197,35 @@ class KickApiClient(BaseApiClient):
 
     async def get_livestreams(self, channels: list[Channel]) -> list[Livestream]:
         """Get livestream status for multiple channels."""
+        if not channels:
+            return []
+
         # Kick doesn't have a batch endpoint, so we query individually
-        results: list[Livestream] = []
+        # but run them concurrently with a semaphore to limit parallel requests
+        semaphore = asyncio.Semaphore(self.concurrency)
 
-        for channel in channels:
-            livestream = await self.get_livestream(channel)
-            results.append(livestream)
+        async def fetch_with_semaphore(channel: Channel) -> Livestream:
+            async with semaphore:
+                return await self.get_livestream(channel)
 
-        return results
+        tasks = [fetch_with_semaphore(channel) for channel in channels]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to offline Livestream objects
+        final_results: list[Livestream] = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                final_results.append(
+                    Livestream(
+                        channel=channels[i],
+                        live=False,
+                        error_message=str(result),
+                    )
+                )
+            else:
+                final_results.append(result)
+
+        return final_results
 
     async def get_top_streams(
         self,

@@ -27,9 +27,10 @@ class YouTubeApiClient(BaseApiClient):
     - Get stream metadata (title, viewers, etc.)
     """
 
-    def __init__(self, settings: YouTubeSettings) -> None:
+    def __init__(self, settings: YouTubeSettings, concurrency: int = 4) -> None:
         super().__init__()
         self.settings = settings
+        self.concurrency = concurrency
         self._ytdlp_path: str | None = None
         self._check_ytdlp()
 
@@ -98,17 +99,21 @@ class YouTubeApiClient(BaseApiClient):
         return await loop.run_in_executor(None, self._run_ytdlp, url, extra_args)
 
     async def _get_last_video_date(self, channel: Channel) -> datetime | None:
-        """Get the upload date of the most recent video on the channel."""
+        """Get the date of the most recent livestream on the channel.
+
+        Checks the /streams tab to get the last livestream specifically,
+        rather than regular video uploads.
+        """
         channel_id = channel.channel_id
         if channel_id.startswith("UC"):
-            url = f"https://www.youtube.com/channel/{channel_id}/videos"
+            url = f"https://www.youtube.com/channel/{channel_id}/streams"
         elif channel_id.startswith("@"):
-            url = f"https://www.youtube.com/{channel_id}/videos"
+            url = f"https://www.youtube.com/{channel_id}/streams"
         else:
-            url = f"https://www.youtube.com/@{channel_id}/videos"
+            url = f"https://www.youtube.com/@{channel_id}/streams"
 
         try:
-            # Get just the first (most recent) video with full metadata
+            # Get just the first (most recent) stream with full metadata
             data = await self._run_ytdlp_async(url, ["--playlist-items", "1"])
             if not data:
                 return None
@@ -127,9 +132,66 @@ class YouTubeApiClient(BaseApiClient):
                 return datetime.strptime(upload_date, "%Y%m%d").replace(tzinfo=timezone.utc)
 
         except Exception as e:
-            logger.debug(f"Could not get last video date for {channel.display_name}: {e}")
+            logger.debug(f"Could not get last stream date for {channel.display_name}: {e}")
 
         return None
+
+    async def has_livestream_capability(self, channel: Channel) -> bool:
+        """Check if a channel has livestream capability by probing the /streams tab.
+
+        Returns True if the channel has past livestreams in their streams tab.
+        This is useful for filtering channels that actually do livestreams.
+        """
+        if not self._ytdlp_path:
+            return True  # Can't check without yt-dlp, assume yes
+
+        channel_id = channel.channel_id
+        if channel_id.startswith("UC"):
+            url = f"https://www.youtube.com/channel/{channel_id}/streams"
+        elif channel_id.startswith("@"):
+            url = f"https://www.youtube.com/{channel_id}/streams"
+        else:
+            url = f"https://www.youtube.com/@{channel_id}/streams"
+
+        # Check the streams tab - if it has any entries, the channel does livestreams
+        # Use --flat-playlist to just get metadata without downloading
+        data = await self._run_ytdlp_async(url, ["--flat-playlist", "--playlist-items", "1"])
+        return data is not None
+
+    async def filter_channels_by_livestream(
+        self,
+        channels: list[Channel],
+        progress_callback: callable = None,
+    ) -> list[Channel]:
+        """Filter a list of channels to only those that do livestreams.
+
+        Args:
+            channels: List of channels to filter
+            progress_callback: Optional callback(checked, total, channel_name) for progress
+
+        Returns:
+            List of channels that have livestream capability
+        """
+        if not channels:
+            return []
+
+        # Use semaphore to limit concurrent checks (same as get_livestreams)
+        semaphore = asyncio.Semaphore(4)
+        results: list[tuple[int, Channel, bool]] = []
+
+        async def check_channel(idx: int, channel: Channel) -> tuple[int, Channel, bool]:
+            async with semaphore:
+                has_live = await self.has_livestream_capability(channel)
+                if progress_callback:
+                    progress_callback(idx + 1, len(channels), channel.display_name)
+                return (idx, channel, has_live)
+
+        tasks = [check_channel(i, ch) for i, ch in enumerate(channels)]
+        results = await asyncio.gather(*tasks)
+
+        # Return channels that have livestream capability, preserving order
+        results.sort(key=lambda x: x[0])
+        return [ch for _, ch, has_live in results if has_live]
 
     async def get_channel_info(self, channel_id: str) -> Channel | None:
         """
@@ -204,9 +266,7 @@ class YouTubeApiClient(BaseApiClient):
                 if data.get("channel") or data.get("uploader"):
                     channel.display_name = data.get("channel", data.get("uploader"))
 
-                # Try to get last stream/video date
-                last_live_time = await self._get_last_video_date(channel)
-                return Livestream(channel=channel, live=False, last_live_time=last_live_time)
+                return Livestream(channel=channel, live=False)
 
             # Parse start time
             start_time = None
@@ -246,29 +306,35 @@ class YouTubeApiClient(BaseApiClient):
 
     async def get_livestreams(self, channels: list[Channel]) -> list[Livestream]:
         """Get livestream status for multiple channels."""
-        # Process channels concurrently but limit parallelism
-        results: list[Livestream] = []
+        if not channels:
+            return []
 
-        # Process in batches of 5 to avoid overwhelming the system
-        batch_size = 5
-        for i in range(0, len(channels), batch_size):
-            batch = channels[i : i + batch_size]
-            tasks = [self.get_livestream(channel) for channel in batch]
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Use semaphore to limit concurrent yt-dlp subprocess calls
+        # Each yt-dlp is CPU-intensive, limit based on user settings
+        semaphore = asyncio.Semaphore(self.concurrency)
 
-            for j, result in enumerate(batch_results):
-                if isinstance(result, Exception):
-                    results.append(
-                        Livestream(
-                            channel=batch[j],
-                            live=False,
-                            error_message=str(result),
-                        )
+        async def fetch_with_semaphore(channel: Channel) -> Livestream:
+            async with semaphore:
+                return await self.get_livestream(channel)
+
+        tasks = [fetch_with_semaphore(channel) for channel in channels]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Convert exceptions to offline Livestream objects
+        final_results: list[Livestream] = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                final_results.append(
+                    Livestream(
+                        channel=channels[i],
+                        live=False,
+                        error_message=str(result),
                     )
-                else:
-                    results.append(result)
+                )
+            else:
+                final_results.append(result)
 
-        return results
+        return final_results
 
     async def search_channels(self, query: str, limit: int = 25) -> list[Channel]:
         """Search for channels - not supported without API key."""
