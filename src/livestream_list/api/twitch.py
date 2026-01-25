@@ -484,7 +484,9 @@ class TwitchApiClient(BaseApiClient):
 
         channel_map = {c.channel_id.lower(): c for c in channels}
 
-        # Batch channels into groups of 35 per request
+        # Batch channels into groups for parallel requests. 35 balances GraphQL
+        # query complexity limits with efficient parallelism (fewer large batches
+        # vs. many small ones). Twitch GraphQL has undocumented query size limits.
         batch_size = 35
         all_logins = [c.channel_id for c in channels]
 
