@@ -111,6 +111,7 @@ class ChatWidget(QWidget):
         self._animation_timer.timeout.connect(self._on_animation_tick)
         self._animation_frame = 0
         self._has_animated_emotes = False
+        self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -773,6 +774,9 @@ class ChatWidget(QWidget):
         Args:
             socials: Dict mapping platform names to URLs, e.g. {"discord": "https://..."}
         """
+        # Store socials so we can re-display when setting is toggled
+        self._socials = socials
+
         if not socials or not self.settings.show_socials_banner:
             self._socials_label.hide()
             return
@@ -812,8 +816,11 @@ class ChatWidget(QWidget):
         else:
             self._title_label.hide()
 
-        # Update socials visibility
-        if not self.settings.show_socials_banner:
+        # Update socials visibility - re-display stored socials when toggled on
+        if self.settings.show_socials_banner:
+            if self._socials:
+                self.set_socials(self._socials)
+        else:
             self._socials_label.hide()
 
     def _show_settings_menu(self) -> None:
