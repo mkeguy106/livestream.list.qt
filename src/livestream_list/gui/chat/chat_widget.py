@@ -698,6 +698,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _on_resize_debounced(self) -> None:
         """Force full relayout after resize settles."""
+        self._delegate.invalidate_size_cache()
         self._model.layoutChanged.emit()
 
     def _on_scroll_changed(self, value: int) -> None:
@@ -1286,6 +1287,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
 
     def _on_resize_debounced(self) -> None:
         """Force full relayout after resize settles."""
+        self._delegate.invalidate_size_cache()
         self._model.layoutChanged.emit()
 
     # Search methods provided by ChatSearchMixin:
