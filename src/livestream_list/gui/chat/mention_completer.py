@@ -1,9 +1,8 @@
-"""Inline emote autocomplete triggered by ':'."""
+"""Inline @mention autocomplete triggered by '@'."""
 
 import logging
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
@@ -11,29 +10,26 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...chat.models import ChatEmote
-
 logger = logging.getLogger(__name__)
 
 MAX_SUGGESTIONS = 15
-MIN_TRIGGER_LENGTH = 1  # Minimum chars after ':' to start suggesting
+MIN_TRIGGER_LENGTH = 1  # Minimum chars after '@' to start suggesting
 
 
-class EmoteCompleter(QWidget):
-    """Inline emote autocomplete dropdown.
+class MentionCompleter(QWidget):
+    """Inline @mention autocomplete dropdown.
 
-    Triggered when user types ':' followed by characters in the chat input.
-    Shows matching emote names with preview thumbnails.
+    Triggered when user types '@' followed by characters in the chat input.
+    Shows matching usernames from recent chat messages.
     """
 
-    emote_completed = Signal(str, int, int)  # emote_name, start_pos, end_pos
+    mention_completed = Signal(str, int, int)  # username, start_pos, end_pos
 
     def __init__(self, input_widget: QLineEdit, parent: QWidget | None = None):
         super().__init__(parent)
         self._input = input_widget
-        self._emote_map: dict[str, ChatEmote] = {}  # name -> emote
-        self._emote_cache: dict[str, QPixmap] = {}
-        self._trigger_pos: int = -1  # Position of the ':' trigger
+        self._usernames: dict[str, str] = {}  # display_name_lower -> display_name
+        self._trigger_pos: int = -1  # Position of the '@' trigger
         self._active = False
 
         self._setup_ui()
@@ -42,7 +38,7 @@ class EmoteCompleter(QWidget):
     def _setup_ui(self) -> None:
         """Set up the completer dropdown as a child widget (not a window)."""
         # No window flags - this is a child widget, not a separate window
-        self.setFixedWidth(250)
+        self.setFixedWidth(200)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.hide()
 
@@ -81,13 +77,14 @@ class EmoteCompleter(QWidget):
         """Connect to the input widget's signals."""
         self._input.textChanged.connect(self._on_text_changed)
 
-    def set_emotes(self, emote_map: dict[str, ChatEmote]) -> None:
-        """Set the available emotes for completion."""
-        self._emote_map = emote_map
+    def add_username(self, display_name: str) -> None:
+        """Add a username to the completion list."""
+        if display_name:
+            self._usernames[display_name.lower()] = display_name
 
-    def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
-        """Set the shared emote pixmap cache."""
-        self._emote_cache = cache
+    def clear_usernames(self) -> None:
+        """Clear all tracked usernames."""
+        self._usernames.clear()
 
     def handle_key_press(self, key: int) -> bool:
         """Handle key presses from the input widget.
@@ -119,25 +116,25 @@ class EmoteCompleter(QWidget):
         return False
 
     def _on_text_changed(self, text: str) -> None:
-        """Check for ':' trigger and update suggestions."""
+        """Check for '@' trigger and update suggestions."""
         cursor_pos = self._input.cursorPosition()
 
-        # Find the last ':' before cursor
-        trigger_pos = text.rfind(":", 0, cursor_pos)
+        # Find the last '@' before cursor
+        trigger_pos = text.rfind("@", 0, cursor_pos)
         if trigger_pos < 0:
             self._dismiss()
             return
 
-        # Check that ':' is at start or preceded by space
+        # Check that '@' is at start or preceded by space
         if trigger_pos > 0 and text[trigger_pos - 1] != " ":
             self._dismiss()
             return
 
-        # Get the partial emote name after ':'
+        # Get the partial username after '@'
         partial = text[trigger_pos + 1 : cursor_pos]
 
         # Don't trigger on empty or whitespace
-        if not partial or " " in partial or len(partial) < MIN_TRIGGER_LENGTH:
+        if " " in partial or len(partial) < MIN_TRIGGER_LENGTH:
             self._dismiss()
             return
 
@@ -150,50 +147,27 @@ class EmoteCompleter(QWidget):
         self._list.clear()
         partial_lower = partial.lower()
 
-        # Collect ALL matches first
-        matches: list[tuple[str, ChatEmote]] = []
-        for name, emote in self._emote_map.items():
-            if partial_lower in name.lower():
-                matches.append((name, emote))
+        matches: list[str] = []
+        for name_lower, name in self._usernames.items():
+            if partial_lower in name_lower:
+                matches.append(name)
+                if len(matches) >= MAX_SUGGESTIONS:
+                    break
 
         if not matches:
             self._dismiss()
             return
 
-        # Sort: prefix matches first, then by length (shorter first), then alphabetical
+        # Sort: prefix matches first, then alphabetical
         matches.sort(
             key=lambda x: (
-                not x[0].lower().startswith(partial_lower),
-                len(x[0]),  # Shorter names first
-                x[0].lower(),
+                not x.lower().startswith(partial_lower),
+                x.lower(),
             )
         )
 
-        # Take top MAX_SUGGESTIONS after sorting
-        matches = matches[:MAX_SUGGESTIONS]
-
-        for name, emote in matches:
-            # Format provider label
-            provider_labels = {
-                "twitch": "Twitch",
-                "kick": "Kick",
-                "7tv": "7TV",
-                "bttv": "BTTV",
-                "ffz": "FFZ",
-            }
-            provider_label = provider_labels.get(emote.provider, emote.provider.upper())
-
-            # Display name with provider suffix
-            item = QListWidgetItem(f"{name}  [{provider_label}]")
-            # Store original name for completion
-            item.setData(Qt.ItemDataRole.UserRole, name)
-
-            # Try to set icon from cache
-            cache_key = f"emote:{emote.provider}:{emote.id}"
-            pixmap = self._emote_cache.get(cache_key)
-            if pixmap and not pixmap.isNull():
-                item.setIcon(QIcon(pixmap))
-
+        for name in matches:
+            item = QListWidgetItem(name)
             self._list.addItem(item)
 
         # Select first item
@@ -204,19 +178,20 @@ class EmoteCompleter(QWidget):
         self.show()
 
     def _on_item_activated(self, item: QListWidgetItem) -> None:
-        """Handle emote selection from the list."""
-        # Get original emote name (stored in UserRole, fallback to text)
-        emote_name = item.data(Qt.ItemDataRole.UserRole) or item.text()
+        """Handle username selection from the list."""
+        username = item.text()
         if self._trigger_pos >= 0:
             cursor_pos = self._input.cursorPosition()
             trigger_pos = self._trigger_pos  # Save before setText triggers textChanged
-            # Replace from ':' to cursor with the emote name + space
+            # Replace from '@' to cursor with @username + space
             text = self._input.text()
-            new_text = text[:trigger_pos] + emote_name + " " + text[cursor_pos:]
+            new_text = text[:trigger_pos] + "@" + username + " " + text[cursor_pos:]
             self._input.setText(new_text)
-            self._input.setCursorPosition(trigger_pos + len(emote_name) + 1)
+            self._input.setCursorPosition(trigger_pos + len(username) + 2)
 
         self._dismiss()
+        # Restore focus to input after mouse selection
+        self._input.setFocus()
 
     def _position_popup(self) -> None:
         """Position the popup above the input widget."""
