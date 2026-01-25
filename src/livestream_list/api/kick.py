@@ -1,7 +1,6 @@
 """Kick API client."""
 
 import asyncio
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -10,18 +9,9 @@ import aiohttp
 
 from ..core.models import Channel, Livestream, StreamPlatform
 from ..core.settings import KickSettings
-from .base import BaseApiClient
+from .base import BaseApiClient, safe_json
 
 logger = logging.getLogger(__name__)
-
-
-async def _safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
-    """Safely parse JSON from response, returning None on error."""
-    try:
-        return await resp.json()
-    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-        logger.warning(f"Failed to parse JSON response: {e}")
-        return None
 
 
 class KickApiClient(BaseApiClient):
@@ -82,7 +72,7 @@ class KickApiClient(BaseApiClient):
                     )
                     return None
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return None
 
@@ -106,7 +96,7 @@ class KickApiClient(BaseApiClient):
                 if resp.status != 200:
                     return None
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data or not isinstance(data, list) or len(data) == 0:
                     return None
 
@@ -148,7 +138,7 @@ class KickApiClient(BaseApiClient):
                         error_message=f"HTTP {resp.status}",
                     )
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return Livestream(
                         channel=channel,
@@ -269,7 +259,7 @@ class KickApiClient(BaseApiClient):
                 if resp.status != 200:
                     return []
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data:
                     return []
 
@@ -333,7 +323,7 @@ class KickApiClient(BaseApiClient):
                 if resp.status != 200:
                     return []
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return []
 
@@ -370,7 +360,7 @@ class KickApiClient(BaseApiClient):
                 if resp.status != 200:
                     return []
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data:
                     return []
 

@@ -1,7 +1,6 @@
 """Twitch Helix API client."""
 
 import asyncio
-import json
 import logging
 import webbrowser
 from datetime import datetime
@@ -12,19 +11,10 @@ import aiohttp
 
 from ..core.models import Channel, Livestream, StreamPlatform
 from ..core.settings import TwitchSettings
-from .base import BaseApiClient
+from .base import BaseApiClient, safe_json
 from .oauth_server import OAuthServer
 
 logger = logging.getLogger(__name__)
-
-
-async def _safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
-    """Safely parse JSON from response, returning None on error."""
-    try:
-        return await resp.json()
-    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-        logger.warning(f"Failed to parse JSON response: {e}")
-        return None
 
 # Twitch application client ID for OAuth (Qt version)
 # Registered separately from GTK version to use different OAuth port
@@ -385,7 +375,7 @@ class TwitchApiClient(BaseApiClient):
                     logger.warning(f"GraphQL batch query failed with status {resp.status}")
                     return {}
 
-                data = await _safe_json(resp)
+                data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return {}
                 result_data = data.get("data", {})

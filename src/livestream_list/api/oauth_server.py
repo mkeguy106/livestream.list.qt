@@ -132,7 +132,7 @@ CALLBACK_HTML = """<!DOCTYPE html>
                     })
                     .catch(err => {
                         statusEl.className = 'error';
-                        statusEl.textContent = err.message || 'Failed to save token. Please try again.';
+                        statusEl.textContent = err.message || 'Failed to save token.';
                     });
             } else {
                 statusEl.className = 'error';
