@@ -556,7 +556,10 @@ class ChatWidget(QWidget):
         video_id = getattr(self.livestream, "video_id", None)
         if video_id:
             url = f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
-            webbrowser.open(url)
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                logger.error(f"Failed to open YouTube chat URL: {e}")
 
     def set_emote_cache(self, cache: dict) -> None:
         """Set the shared emote cache on the delegate and completer."""
@@ -950,7 +953,10 @@ class ChatWidget(QWidget):
                             return True
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
-                            webbrowser.open(url)
+                            try:
+                                webbrowser.open(url)
+                            except Exception as e:
+                                logger.error(f"Failed to open URL: {e}")
                             return True
 
         # Cursor changes for clickable elements (URLs, usernames)
@@ -1451,7 +1457,10 @@ class UserHistoryDialog(QDialog):
                         option.rect = self._list_view.visualRect(index)
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
-                            webbrowser.open(url)
+                            try:
+                                webbrowser.open(url)
+                            except Exception as e:
+                                logger.error(f"Failed to open URL: {e}")
                             return True
 
         # Cursor changes for URLs

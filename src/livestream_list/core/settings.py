@@ -1,6 +1,8 @@
 """Settings management for Livestream List."""
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -309,20 +311,44 @@ class Settings:
             store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token)
             store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token)
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(self._to_dict(exclude_secrets=use_keyring), f, indent=2)
+        # Atomic write: write to temp file then rename to prevent corruption on crash
+        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp", prefix="settings_")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._to_dict(exclude_secrets=use_keyring), f, indent=2)
+            os.replace(tmp_path, path)  # Atomic on POSIX
+        except Exception:
+            # Clean up temp file on error
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         if not use_keyring:
             # Fallback: protect the file with restrictive permissions
             secure_file_permissions(str(path))
 
+    @staticmethod
+    def _validate_int(value, default: int, min_val: int = 0, max_val: int | None = None) -> int:
+        """Validate and constrain an integer value."""
+        if not isinstance(value, int):
+            return default
+        if value < min_val:
+            return min_val
+        if max_val is not None and value > max_val:
+            return max_val
+        return value
+
     @classmethod
     def _from_dict(cls, data: dict) -> "Settings":
-        """Create Settings from a dictionary."""
+        """Create Settings from a dictionary with validation."""
         settings = cls()
 
-        # General settings
-        settings.refresh_interval = data.get("refresh_interval", settings.refresh_interval)
+        # General settings with validation
+        settings.refresh_interval = cls._validate_int(
+            data.get("refresh_interval"), 60, min_val=10, max_val=3600
+        )
         settings.minimize_to_tray = data.get("minimize_to_tray", settings.minimize_to_tray)
         settings.start_minimized = data.get("start_minimized", settings.start_minimized)
         settings.check_for_updates = data.get("check_for_updates", settings.check_for_updates)
@@ -403,15 +429,15 @@ class Settings:
                 backend=n.get("backend", "auto"),
             )
 
-        # Window
+        # Window (with validation for reasonable dimensions)
         if "window" in data:
             w = data["window"]
             settings.window = WindowSettings(
-                width=w.get("width", 1000),
-                height=w.get("height", 700),
+                width=cls._validate_int(w.get("width"), 1000, min_val=200, max_val=10000),
+                height=cls._validate_int(w.get("height"), 700, min_val=200, max_val=10000),
                 x=w.get("x"),
                 y=w.get("y"),
-                maximized=w.get("maximized", False),
+                maximized=bool(w.get("maximized", False)),
             )
 
         # Chat
@@ -426,14 +452,20 @@ class Settings:
                 y=window_data.get("y"),
             )
             builtin = BuiltinChatSettings(
-                font_size=builtin_data.get("font_size", 13),
+                font_size=cls._validate_int(
+                    builtin_data.get("font_size"), 13, min_val=8, max_val=72
+                ),
                 show_timestamps=builtin_data.get("show_timestamps", False),
                 show_badges=builtin_data.get("show_badges", True),
                 show_mod_badges=builtin_data.get("show_mod_badges", True),
                 show_emotes=builtin_data.get("show_emotes", True),
                 animate_emotes=builtin_data.get("animate_emotes", True),
-                line_spacing=builtin_data.get("line_spacing", 4),
-                max_messages=builtin_data.get("max_messages", 5000),
+                line_spacing=cls._validate_int(
+                    builtin_data.get("line_spacing"), 4, min_val=0, max_val=20
+                ),
+                max_messages=cls._validate_int(
+                    builtin_data.get("max_messages"), 5000, min_val=100, max_val=50000
+                ),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
                 alt_row_color_even=builtin_data.get("alt_row_color_even", "#00000000"),
@@ -478,12 +510,16 @@ class Settings:
                 show_browser=ci.get("show_browser", True),
             )
 
-        # Performance
+        # Performance (with validation to prevent resource exhaustion)
         if "performance" in data:
             perf = data["performance"]
             settings.performance = PerformanceSettings(
-                youtube_concurrency=perf.get("youtube_concurrency", 10),
-                kick_concurrency=perf.get("kick_concurrency", 10),
+                youtube_concurrency=cls._validate_int(
+                    perf.get("youtube_concurrency"), 10, min_val=1, max_val=50
+                ),
+                kick_concurrency=cls._validate_int(
+                    perf.get("kick_concurrency"), 10, min_val=1, max_val=50
+                ),
             )
 
         return settings

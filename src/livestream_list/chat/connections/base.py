@@ -1,6 +1,8 @@
 """Base chat connection abstract class."""
 
+import asyncio
 import logging
+import random
 from abc import abstractmethod
 
 from PySide6.QtCore import QObject, Signal
@@ -8,6 +10,12 @@ from PySide6.QtCore import QObject, Signal
 from ..models import ChatMessage, ModerationEvent
 
 logger = logging.getLogger(__name__)
+
+# Exponential backoff constants for reconnection
+INITIAL_RECONNECT_DELAY = 1.0  # seconds
+MAX_RECONNECT_DELAY = 60.0  # seconds
+RECONNECT_BACKOFF_FACTOR = 2.0
+RECONNECT_JITTER = 0.1  # 10% jitter to prevent thundering herd
 
 
 class BaseChatConnection(QObject):
@@ -30,6 +38,9 @@ class BaseChatConnection(QObject):
         super().__init__(parent)
         self._channel_id: str = ""
         self._is_connected: bool = False
+        self._reconnect_delay: float = INITIAL_RECONNECT_DELAY
+        self._should_reconnect: bool = True  # Set to False for intentional disconnect
+        self._max_reconnect_attempts: int = 10  # 0 = unlimited
 
     @property
     def channel_id(self) -> str:
@@ -90,3 +101,31 @@ class BaseChatConnection(QObject):
         """Emit an error."""
         logger.error(f"Chat connection error ({self.__class__.__name__}): {message}")
         self.error.emit(message)
+
+    def _reset_backoff(self) -> None:
+        """Reset reconnection backoff delay after successful connection."""
+        self._reconnect_delay = INITIAL_RECONNECT_DELAY
+
+    def _get_next_backoff(self) -> float:
+        """Get the next backoff delay with jitter and update for next call."""
+        delay = self._reconnect_delay
+        # Add jitter (±10%)
+        jitter = delay * RECONNECT_JITTER * (2 * random.random() - 1)
+        delay_with_jitter = delay + jitter
+
+        # Increase delay for next time with exponential backoff
+        self._reconnect_delay = min(
+            self._reconnect_delay * RECONNECT_BACKOFF_FACTOR,
+            MAX_RECONNECT_DELAY,
+        )
+
+        return delay_with_jitter
+
+    async def _sleep_with_backoff(self) -> None:
+        """Sleep for the current backoff delay before reconnecting."""
+        delay = self._get_next_backoff()
+        logger.info(
+            f"{self.__class__.__name__}: reconnecting in {delay:.1f}s "
+            f"(next delay: {self._reconnect_delay:.1f}s)"
+        )
+        await asyncio.sleep(delay)

@@ -850,7 +850,7 @@ class ChatManager(QObject):
             if worker:
                 worker.stop()
                 worker.wait(3000)
-            self._connections.pop(key, None)
+            self._disconnect_connection_signals(key)
 
             # Restart with new token
             livestream = self._livestreams[key]
@@ -880,7 +880,7 @@ class ChatManager(QObject):
             if worker:
                 worker.stop()
                 worker.wait(3000)
-            self._connections.pop(key, None)
+            self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
             self._start_connection(key, livestream)
@@ -909,7 +909,7 @@ class ChatManager(QObject):
             if worker:
                 worker.stop()
                 worker.wait(3000)
-            self._connections.pop(key, None)
+            self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
             self._start_connection(key, livestream)
@@ -923,7 +923,9 @@ class ChatManager(QObject):
             worker.stop()
             worker.wait(3000)
 
-        self._connections.pop(channel_key, None)
+        # Disconnect signals to break reference cycles before removing connection
+        self._disconnect_connection_signals(channel_key)
+
         self._livestreams.pop(channel_key, None)
 
         # Clean up emote fetch worker
@@ -975,6 +977,13 @@ class ChatManager(QObject):
         for key in list(self._workers.keys()):
             self.close_chat(key)
         self._stop_loader()
+
+        # Clean up global emote/badge state when all chats are closed
+        # This prevents unbounded memory growth in long-running sessions
+        self._emote_map.clear()
+        self._badge_url_map.clear()
+        self._queued_badge_urls.clear()
+        self._download_queue.clear()
 
     def is_connected(self, channel_key: str) -> bool:
         """Check if a channel's chat is connected."""
@@ -1217,13 +1226,24 @@ class ChatManager(QObject):
 
         self._loader.start()
 
-    def _on_emote_downloaded(self, key: str, pixmap: object, raw_data: bytes = b"") -> None:
-        """Handle a downloaded emote/badge image."""
-        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+    def _on_emote_downloaded(self, key: str, raw_data: bytes) -> None:
+        """Handle a downloaded emote/badge image - create QPixmap on main thread."""
+        if not raw_data:
+            return
+
+        # Create QPixmap on main thread (GUI thread) as required by Qt
+        pixmap = QPixmap()
+        if pixmap.loadFromData(raw_data):
+            # Scale to standard height
+            if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
+                pixmap = pixmap.scaledToHeight(
+                    DEFAULT_EMOTE_HEIGHT,
+                    mode=Qt.TransformationMode.SmoothTransformation,
+                )
             self._emote_cache.put(key, pixmap)
             # Save raw bytes for emotes so has_animation_data() returns True,
             # preventing re-downloads on future launches.
-            if raw_data and key.startswith("emote:"):
+            if key.startswith("emote:"):
                 self._emote_cache._put_disk_raw(key, raw_data)
 
     def _on_animated_emote_downloaded(self, key: str, raw_data: bytes) -> None:
@@ -1295,3 +1315,20 @@ class ChatManager(QObject):
         elif livestream.channel.platform == StreamPlatform.YOUTUBE:
             kwargs["video_id"] = livestream.video_id
         return kwargs
+
+    def _disconnect_connection_signals(self, channel_key: str) -> None:
+        """Disconnect signals from a connection to break reference cycles.
+
+        This should be called before removing a connection from the dict
+        to prevent memory leaks from signal connections.
+        """
+        connection = self._connections.pop(channel_key, None)
+        if connection:
+            try:
+                connection.messages_received.disconnect()
+                connection.moderation_event.disconnect()
+                connection.error.disconnect()
+                connection.connected.disconnect()
+            except (RuntimeError, TypeError):
+                # Signal may already be disconnected
+                pass
