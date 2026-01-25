@@ -53,6 +53,9 @@ class BaseApiClient(ABC):
         if self._session and not self._session.closed:
             try:
                 await self._session.close()
+                # Allow time for underlying connections to fully close
+                # This prevents "Unclosed connector" warnings from aiohttp
+                await asyncio.sleep(0.1)
             except RuntimeError as e:
                 # Session may be attached to a different event loop
                 # This can happen when sessions are created in worker threads

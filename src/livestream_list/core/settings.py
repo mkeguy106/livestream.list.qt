@@ -71,6 +71,7 @@ class YouTubeSettings:
 
     api_key: str = ""
     cookies: str = ""  # Browser cookies for chat sending (InnerTube)
+    use_ytdlp_fallback: bool = True  # Fall back to yt-dlp if HTML scraping fails
 
 
 @dataclass
@@ -125,6 +126,11 @@ class BuiltinChatSettings:
     tab_inactive_color: str = "#16213e"
     use_platform_name_colors: bool = True
     mention_highlight_color: str = "#33ff8800"  # AARRGGBB: orange at ~20% opacity
+    # Banner settings (stream title + socials)
+    show_stream_title: bool = True
+    banner_bg_color: str = "#16213e"
+    banner_text_color: str = "#cccccc"
+    show_socials_banner: bool = True
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
 
 
@@ -145,7 +151,7 @@ class ChatSettings:
 class PerformanceSettings:
     """Performance-related settings for API concurrency."""
 
-    youtube_concurrency: int = 4  # Concurrent yt-dlp processes for YouTube
+    youtube_concurrency: int = 10  # Concurrent HTTP requests for YouTube (I/O-bound)
     kick_concurrency: int = 10  # Concurrent API calls for Kick
 
 
@@ -357,6 +363,7 @@ class Settings:
             settings.youtube = YouTubeSettings(
                 api_key=yt.get("api_key", ""),
                 cookies=yt.get("cookies", ""),
+                use_ytdlp_fallback=yt.get("use_ytdlp_fallback", True),
             )
 
         # Kick
@@ -436,6 +443,10 @@ class Settings:
                 tab_inactive_color=builtin_data.get("tab_inactive_color", "#16213e"),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 mention_highlight_color=builtin_data.get("mention_highlight_color", "#33ff8800"),
+                show_stream_title=builtin_data.get("show_stream_title", True),
+                banner_bg_color=builtin_data.get("banner_bg_color", "#16213e"),
+                banner_text_color=builtin_data.get("banner_text_color", "#cccccc"),
+                show_socials_banner=builtin_data.get("show_socials_banner", True),
                 window=chat_window,
             )
             settings.chat = ChatSettings(
@@ -471,7 +482,7 @@ class Settings:
         if "performance" in data:
             perf = data["performance"]
             settings.performance = PerformanceSettings(
-                youtube_concurrency=perf.get("youtube_concurrency", 4),
+                youtube_concurrency=perf.get("youtube_concurrency", 10),
                 kick_concurrency=perf.get("kick_concurrency", 10),
             )
 
@@ -511,6 +522,7 @@ class Settings:
             },
             "youtube": {
                 "api_key": self.youtube.api_key,
+                "use_ytdlp_fallback": self.youtube.use_ytdlp_fallback,
                 **({"cookies": self.youtube.cookies} if not exclude_secrets else {}),
             },
             "kick": {
@@ -576,6 +588,10 @@ class Settings:
                     "tab_inactive_color": self.chat.builtin.tab_inactive_color,
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
                     "mention_highlight_color": self.chat.builtin.mention_highlight_color,
+                    "show_stream_title": self.chat.builtin.show_stream_title,
+                    "banner_bg_color": self.chat.builtin.banner_bg_color,
+                    "banner_text_color": self.chat.builtin.banner_text_color,
+                    "show_socials_banner": self.chat.builtin.show_socials_banner,
                     "window": {
                         "width": self.chat.builtin.window.width,
                         "height": self.chat.builtin.window.height,

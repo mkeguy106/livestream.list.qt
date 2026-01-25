@@ -1,6 +1,7 @@
 """Single-channel chat widget with message list and input."""
 
 import logging
+import re
 import webbrowser
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
@@ -30,6 +31,21 @@ from .message_model import ChatMessageModel, MessageRole
 from .user_popup import UserContextMenu
 
 logger = logging.getLogger(__name__)
+
+# Regex to find !command patterns in stream titles
+COMMAND_PATTERN = re.compile(r"(!\w+)")
+
+
+class ClickableTitleLabel(QLabel):
+    """QLabel that supports clickable !command links."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+            | Qt.TextInteractionFlag.LinksAccessibleByMouse
+        )
 
 
 class ChatInput(QLineEdit):
@@ -103,21 +119,27 @@ class ChatWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Stream title bar (shows current stream title)
-        self._title_label = QLabel()
+        # Stream title bar (shows current stream title with clickable !commands)
+        self._title_label = ClickableTitleLabel()
         self._title_label.setWordWrap(True)
         self._title_label.setMaximumHeight(50)  # Limit height for long titles
-        self._title_label.setStyleSheet("""
-            QLabel {
-                background-color: #16213e;
-                color: #ccc;
-                font-size: 11px;
-                padding: 6px 8px;
-                border-bottom: 1px solid #333;
-            }
-        """)
-        self._update_stream_title()
+        self._title_label.setOpenExternalLinks(False)
+        self._title_label.linkActivated.connect(self._on_title_link_clicked)
         layout.addWidget(self._title_label)
+
+        # Socials banner (shows channel socials like Discord, Instagram, etc.)
+        self._socials_label = QLabel()
+        self._socials_label.setWordWrap(True)
+        self._socials_label.setMaximumHeight(30)
+        self._socials_label.setOpenExternalLinks(True)
+        self._socials_label.hide()  # Hidden until socials are loaded
+        layout.addWidget(self._socials_label)
+
+        # Apply banner styling and update title
+        self._update_banner_style()
+        self._update_stream_title()
+        if not self.settings.show_stream_title:
+            self._title_label.hide()
 
         # Search bar (hidden by default)
         self._search_widget = QWidget()
@@ -686,22 +708,113 @@ class ChatWidget(QWidget):
         """Dismiss the hype chat pinned banner."""
         self._hype_banner.hide()
 
+    def _update_banner_style(self) -> None:
+        """Apply banner colors from settings."""
+        bg_color = self.settings.banner_bg_color
+        text_color = self.settings.banner_text_color
+        style = f"""
+            QLabel {{
+                background-color: {bg_color};
+                color: {text_color};
+                font-size: 11px;
+                padding: 6px 8px;
+                border-bottom: 1px solid #333;
+            }}
+            QLabel a {{
+                color: #6db3f2;
+                text-decoration: none;
+            }}
+        """
+        self._title_label.setStyleSheet(style)
+        self._socials_label.setStyleSheet(style)
+
     def _update_stream_title(self) -> None:
         """Update the stream title label from the livestream data."""
         title = ""
         if self.livestream and self.livestream.title:
             title = self.livestream.title
-        if title:
-            self._title_label.setText(title)
-            self._title_label.setToolTip(title)  # Full title on hover
+        if title and self.settings.show_stream_title:
+            # Convert !commands to clickable links
+            html_title = self._format_title_with_commands(title)
+            self._title_label.setText(html_title)
+            self._title_label.setToolTip(title)  # Full title on hover (plain text)
             self._title_label.show()
         else:
             self._title_label.hide()
+
+    def _format_title_with_commands(self, title: str) -> str:
+        """Convert !command patterns in title to clickable links."""
+        import html
+
+        # Escape HTML entities first
+        escaped = html.escape(title)
+        # Replace !command patterns with links
+        html_title = COMMAND_PATTERN.sub(
+            r'<a href="cmd:\1">\1</a>',
+            escaped,
+        )
+        return html_title
+
+    def _on_title_link_clicked(self, url: str) -> None:
+        """Handle clicks on !command links in the title."""
+        if url.startswith("cmd:"):
+            command = url[4:]  # Remove "cmd:" prefix
+            self._input.setText(command)
+            self._input.setFocus()
 
     def update_livestream(self, livestream: Livestream) -> None:
         """Update the livestream data and refresh the title."""
         self.livestream = livestream
         self._update_stream_title()
+
+    def set_socials(self, socials: dict[str, str]) -> None:
+        """Set channel socials and update the banner.
+
+        Args:
+            socials: Dict mapping platform names to URLs, e.g. {"discord": "https://..."}
+        """
+        if not socials or not self.settings.show_socials_banner:
+            self._socials_label.hide()
+            return
+
+        # Format socials as clickable links with icons/emojis
+        social_icons = {
+            "discord": "\U0001F4AC",  # Speech bubble
+            "instagram": "\U0001F4F7",  # Camera
+            "twitter": "\U0001F426",  # Bird
+            "x": "\U0001F426",  # Bird (X/Twitter)
+            "tiktok": "\U0001F3B5",  # Musical note
+            "youtube": "\U0001F3AC",  # Clapper
+            "facebook": "\U0001F465",  # People
+            "patreon": "\U0001F49B",  # Yellow heart
+            "merch": "\U0001F455",  # T-shirt
+        }
+
+        links = []
+        for platform, url in socials.items():
+            icon = social_icons.get(platform.lower(), "\U0001F517")  # Link emoji default
+            label = platform.capitalize()
+            links.append(f'{icon} <a href="{url}">{label}</a>')
+
+        if links:
+            self._socials_label.setText("  ".join(links))
+            self._socials_label.show()
+        else:
+            self._socials_label.hide()
+
+    def update_banner_settings(self) -> None:
+        """Update banner visibility and colors after settings change."""
+        self._update_banner_style()
+
+        # Update title visibility
+        if self.settings.show_stream_title:
+            self._update_stream_title()
+        else:
+            self._title_label.hide()
+
+        # Update socials visibility
+        if not self.settings.show_socials_banner:
+            self._socials_label.hide()
 
     def _show_settings_menu(self) -> None:
         """Show a popup menu with quick chat toggles."""

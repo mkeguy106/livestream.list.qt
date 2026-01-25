@@ -164,7 +164,8 @@ class TwitchChatConnection(BaseChatConnection):
     def __init__(self, oauth_token: str = "", parent=None):
         super().__init__(parent)
         self._oauth_token = oauth_token
-        self._nick = ""  # Set during auth
+        self._nick = ""  # Set during auth (lowercase for IRC)
+        self._display_name = ""  # Display name with proper case (for local echo)
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._should_stop = False
@@ -330,10 +331,11 @@ class TwitchChatConnection(BaseChatConnection):
         elif command == "CLEARMSG":
             self._handle_clearmsg(parsed)
         elif command == "GLOBALUSERSTATE":
-            # Update our nick from server response
+            # Update our nick and display name from server response
             display_name = parsed["tags"].get("display-name", "")
             if display_name:
                 self._nick = display_name.lower()
+                self._display_name = display_name  # Preserve case for local echo
         elif command == "NOTICE":
             text = parsed.get("trailing", "")
             if "Login" in text and ("unsuccessful" in text or "failed" in text):

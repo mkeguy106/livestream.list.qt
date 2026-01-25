@@ -1,9 +1,10 @@
-"""YouTube client using yt-dlp for stream detection."""
+"""YouTube client using HTML scraping for stream detection (yt-dlp fallback)."""
 
 import asyncio
 import hashlib
 import json
 import logging
+import re
 import shutil
 import subprocess
 import time
@@ -17,17 +18,37 @@ from .base import BaseApiClient
 
 logger = logging.getLogger(__name__)
 
+# Regex patterns to extract YouTube page data
+# ytInitialPlayerResponse contains videoDetails with isLive status
+PLAYER_RESPONSE_RE = re.compile(
+    r"var ytInitialPlayerResponse\s*=\s*(\{.+?\});", re.DOTALL
+)
+# ytInitialData contains page structure (used as fallback)
+INITIAL_DATA_RE = re.compile(r"var ytInitialData\s*=\s*({.+?});</script>", re.DOTALL)
+
 
 class YouTubeApiClient(BaseApiClient):
-    """Client for YouTube using yt-dlp for stream detection.
+    """Client for YouTube using HTML scraping for stream detection.
 
-    Uses yt-dlp (no API key required) to:
-    - Resolve channel handles to channel IDs
-    - Detect live streams
-    - Get stream metadata (title, viewers, etc.)
+    Primary method: Scrapes the channel's /live page and parses ytInitialData JSON.
+    This is fast (single HTTP request) and lightweight (no subprocess).
+
+    Fallback: Uses yt-dlp subprocess if scraping fails and use_ytdlp_fallback is enabled.
+
+    No API key required for either method.
     """
 
-    def __init__(self, settings: YouTubeSettings, concurrency: int = 4) -> None:
+    # HTTP headers for scraping YouTube pages
+    SCRAPE_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    def __init__(self, settings: YouTubeSettings, concurrency: int = 10) -> None:
         super().__init__()
         self.settings = settings
         self.concurrency = concurrency
@@ -97,6 +118,284 @@ class YouTubeApiClient(BaseApiClient):
         """Run yt-dlp asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._run_ytdlp, url, extra_args)
+
+    # -------------------------------------------------------------------------
+    # HTML Scraping Methods (Primary - fast and lightweight)
+    # -------------------------------------------------------------------------
+
+    def _build_channel_live_url(self, channel_id: str) -> str:
+        """Build the /live URL for a channel."""
+        if channel_id.startswith("UC"):
+            return f"https://www.youtube.com/channel/{channel_id}/live"
+        elif channel_id.startswith("@"):
+            return f"https://www.youtube.com/{channel_id}/live"
+        else:
+            return f"https://www.youtube.com/@{channel_id}/live"
+
+    async def _fetch_live_page(self, channel_id: str) -> str | None:
+        """Fetch the channel's /live page HTML."""
+        url = self._build_channel_live_url(channel_id)
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with self.session.get(
+                url, headers=self.SCRAPE_HEADERS, timeout=timeout
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.text()
+                else:
+                    logger.debug(f"YouTube /live page returned {resp.status} for {channel_id}")
+        except asyncio.TimeoutError:
+            logger.debug(f"Timeout fetching YouTube /live page for {channel_id}")
+        except aiohttp.ClientError as e:
+            logger.debug(f"Error fetching YouTube /live page for {channel_id}: {e}")
+        return None
+
+    def _parse_player_response(self, html: str) -> dict | None:
+        """Extract ytInitialPlayerResponse JSON from page HTML.
+
+        This contains videoDetails with isLive status.
+        """
+        # Find the start of ytInitialPlayerResponse
+        marker = "var ytInitialPlayerResponse = "
+        start_idx = html.find(marker)
+        if start_idx == -1:
+            return None
+
+        start_idx += len(marker)
+
+        # Find the matching closing brace by counting braces
+        brace_count = 0
+        in_string = False
+        escape_next = False
+        end_idx = start_idx
+
+        for i, char in enumerate(html[start_idx:], start_idx):
+            if escape_next:
+                escape_next = False
+                continue
+
+            if char == "\\":
+                escape_next = True
+                continue
+
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if char == "{":
+                brace_count += 1
+            elif char == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i + 1
+                    break
+
+        if brace_count != 0:
+            return None
+
+        try:
+            json_str = html[start_idx:end_idx]
+            return json.loads(json_str)
+        except json.JSONDecodeError as e:
+            logger.debug(f"Failed to parse ytInitialPlayerResponse: {e}")
+            return None
+
+    def _parse_initial_data(self, html: str) -> dict | None:
+        """Extract ytInitialData JSON from page HTML (fallback)."""
+        match = INITIAL_DATA_RE.search(html)
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except json.JSONDecodeError:
+                pass
+        return None
+
+    def _extract_livestream_from_data(self, data: dict, channel: Channel) -> Livestream | None:
+        """Parse ytInitialData into a Livestream object.
+
+        Returns None if the data doesn't contain valid livestream info.
+        """
+        # Try to get videoDetails (available on /live pages that redirect to a stream)
+        video_details = data.get("videoDetails", {})
+
+        # Check if this is actually a live stream
+        is_live = video_details.get("isLive", False)
+        is_live_content = video_details.get("isLiveContent", False)
+
+        # Update channel display name from video details
+        author = video_details.get("author")
+        if author:
+            channel.display_name = author
+
+        if not (is_live and is_live_content):
+            # Not live - return offline Livestream
+            return Livestream(channel=channel, live=False)
+
+        # Extract start time from microformat
+        start_time = None
+        try:
+            microformat = data.get("microformat", {})
+            player_microformat = microformat.get("playerMicroformatRenderer", {})
+            broadcast_details = player_microformat.get("liveBroadcastDetails", {})
+            start_timestamp = broadcast_details.get("startTimestamp")
+            if start_timestamp:
+                # Parse ISO format like "2024-01-15T12:30:00+00:00"
+                start_time = datetime.fromisoformat(start_timestamp.replace("Z", "+00:00"))
+        except (ValueError, KeyError, TypeError):
+            pass
+
+        # Get viewer count
+        viewers = 0
+        view_count_str = video_details.get("viewCount", "0")
+        try:
+            viewers = int(view_count_str)
+        except (ValueError, TypeError):
+            pass
+
+        # Get title
+        title = video_details.get("title", "")
+
+        # Get video ID (needed for live chat)
+        video_id = video_details.get("videoId")
+
+        # Get thumbnail
+        thumbnail_url = None
+        thumbnails = video_details.get("thumbnail", {}).get("thumbnails", [])
+        if thumbnails:
+            # Get the highest quality thumbnail
+            thumbnail_url = thumbnails[-1].get("url")
+
+        return Livestream(
+            channel=channel,
+            live=True,
+            title=title,
+            viewers=viewers,
+            start_time=start_time,
+            video_id=video_id,
+            thumbnail_url=thumbnail_url,
+            # Note: game/category not directly available in videoDetails
+        )
+
+    def _check_live_indicators(self, html: str) -> bool:
+        """Quick check for live stream indicators in HTML.
+
+        This is a fast fallback when JSON parsing fails.
+        """
+        # Check for live thumbnail indicator
+        if "hqdefault_live.jpg" in html:
+            return True
+        # Check for schema.org live broadcast marker
+        if '"isLiveBroadcast" content="True"' in html:
+            return True
+        if '"isLiveBroadcast":true' in html.lower():
+            return True
+        return False
+
+    async def _get_livestream_scrape(self, channel: Channel) -> Livestream | None:
+        """Get livestream status using HTML scraping.
+
+        Returns Livestream if successful, None if scraping failed.
+        """
+        try:
+            html = await self._fetch_live_page(channel.channel_id)
+            if not html:
+                return None
+
+            # Try ytInitialPlayerResponse first (contains videoDetails with isLive)
+            data = self._parse_player_response(html)
+            if data:
+                return self._extract_livestream_from_data(data, channel)
+
+            # Fallback to ytInitialData
+            data = self._parse_initial_data(html)
+            if data:
+                return self._extract_livestream_from_data(data, channel)
+
+            # Last resort: check for live indicators in HTML
+            # This gives us live/not-live but no metadata
+            if self._check_live_indicators(html):
+                logger.debug(f"Detected live via HTML indicators for {channel.display_name}")
+                return Livestream(
+                    channel=channel,
+                    live=True,
+                    title="",  # No metadata available
+                )
+
+            # No live indicators found - channel is offline
+            return Livestream(channel=channel, live=False)
+
+        except Exception as e:
+            logger.debug(f"HTML scraping error for {channel.display_name}: {e}")
+            return None
+
+    # -------------------------------------------------------------------------
+    # yt-dlp Methods (Fallback - slower but more robust)
+    # -------------------------------------------------------------------------
+
+    async def _get_livestream_ytdlp(self, channel: Channel) -> Livestream:
+        """Get livestream status using yt-dlp subprocess (fallback method)."""
+        if not self._ytdlp_path:
+            return Livestream(
+                channel=channel,
+                live=False,
+                error_message="yt-dlp not installed",
+            )
+
+        url = self._build_channel_live_url(channel.channel_id)
+
+        try:
+            data = await self._run_ytdlp_async(url)
+
+            if not data:
+                return Livestream(channel=channel, live=False)
+
+            # Check if it's actually live
+            is_live = data.get("is_live", False)
+
+            if not is_live:
+                # Update channel display name if we got it
+                if data.get("channel") or data.get("uploader"):
+                    channel.display_name = data.get("channel", data.get("uploader"))
+                return Livestream(channel=channel, live=False)
+
+            # Parse start time
+            start_time = None
+            release_timestamp = data.get("release_timestamp")
+            if release_timestamp:
+                try:
+                    start_time = datetime.fromtimestamp(release_timestamp, tz=timezone.utc)
+                except (ValueError, OSError):
+                    pass
+
+            # Get viewer count
+            viewers = data.get("concurrent_view_count", 0) or 0
+
+            # Update channel display name
+            display_name = data.get("channel", data.get("uploader", channel.display_name))
+            channel.display_name = display_name
+
+            return Livestream(
+                channel=channel,
+                live=True,
+                title=data.get("title", ""),
+                game=data.get("categories", [""])[0] if data.get("categories") else None,
+                viewers=viewers,
+                start_time=start_time,
+                thumbnail_url=data.get("thumbnail"),
+                language=data.get("language"),
+                video_id=data.get("id"),
+            )
+
+        except Exception as e:
+            logger.error(f"yt-dlp error for {channel.display_name}: {e}")
+            return Livestream(
+                channel=channel,
+                live=False,
+                error_message=str(e),
+            )
 
     async def _get_last_video_date(self, channel: Channel) -> datetime | None:
         """Get the date of the most recent livestream on the channel.
@@ -235,82 +534,35 @@ class YouTubeApiClient(BaseApiClient):
         )
 
     async def get_livestream(self, channel: Channel) -> Livestream:
-        """Get livestream status for a channel using yt-dlp."""
-        if not self._ytdlp_path:
-            return Livestream(
-                channel=channel,
-                live=False,
-                error_message="yt-dlp not installed",
-            )
+        """Get livestream status for a channel.
 
-        # Build the channel live URL
-        channel_id = channel.channel_id
-        if channel_id.startswith("UC"):
-            url = f"https://www.youtube.com/channel/{channel_id}/live"
-        elif channel_id.startswith("@"):
-            url = f"https://www.youtube.com/{channel_id}/live"
-        else:
-            url = f"https://www.youtube.com/@{channel_id}/live"
+        Primary: Uses fast HTML scraping of the /live page.
+        Fallback: Uses yt-dlp subprocess if scraping fails and fallback is enabled.
+        """
+        # Primary method: Fast HTML scraping
+        result = await self._get_livestream_scrape(channel)
+        if result is not None:
+            return result
 
-        try:
-            data = await self._run_ytdlp_async(url)
+        # Fallback: yt-dlp subprocess (if enabled and available)
+        if self._ytdlp_path and self.settings.use_ytdlp_fallback:
+            logger.debug(f"Falling back to yt-dlp for {channel.display_name}")
+            return await self._get_livestream_ytdlp(channel)
 
-            if not data:
-                return Livestream(channel=channel, live=False)
-
-            # Check if it's actually live
-            is_live = data.get("is_live", False)
-
-            if not is_live:
-                # Update channel display name if we got it
-                if data.get("channel") or data.get("uploader"):
-                    channel.display_name = data.get("channel", data.get("uploader"))
-
-                return Livestream(channel=channel, live=False)
-
-            # Parse start time
-            start_time = None
-            release_timestamp = data.get("release_timestamp")
-            if release_timestamp:
-                try:
-                    start_time = datetime.fromtimestamp(release_timestamp, tz=timezone.utc)
-                except (ValueError, OSError):
-                    pass
-
-            # Get viewer count
-            viewers = data.get("concurrent_view_count", 0) or 0
-
-            # Update channel display name
-            display_name = data.get("channel", data.get("uploader", channel.display_name))
-            channel.display_name = display_name
-
-            return Livestream(
-                channel=channel,
-                live=True,
-                title=data.get("title", ""),
-                game=data.get("categories", [""])[0] if data.get("categories") else None,
-                viewers=viewers,
-                start_time=start_time,
-                thumbnail_url=data.get("thumbnail"),
-                language=data.get("language"),
-                video_id=data.get("id"),  # YouTube video ID for live chat
-            )
-
-        except Exception as e:
-            logger.error(f"Error checking YouTube stream for {channel.display_name}: {e}")
-            return Livestream(
-                channel=channel,
-                live=False,
-                error_message=str(e),
-            )
+        # Neither method worked
+        return Livestream(channel=channel, live=False)
 
     async def get_livestreams(self, channels: list[Channel]) -> list[Livestream]:
-        """Get livestream status for multiple channels."""
+        """Get livestream status for multiple channels.
+
+        Uses fast HTML scraping for initial status check, then fetches full
+        metadata via yt-dlp for live channels (to get accurate start_time).
+        """
         if not channels:
             return []
 
-        # Use semaphore to limit concurrent yt-dlp subprocess calls
-        # Each yt-dlp is CPU-intensive, limit based on user settings
+        # Use semaphore to limit concurrent HTTP requests
+        # HTML scraping is I/O-bound, so higher concurrency is fine
         semaphore = asyncio.Semaphore(self.concurrency)
 
         async def fetch_with_semaphore(channel: Channel) -> Livestream:
@@ -333,6 +585,31 @@ class YouTubeApiClient(BaseApiClient):
                 )
             else:
                 final_results.append(result)
+
+        # Second pass: fetch full metadata for live channels via yt-dlp
+        # This gets accurate start_time which HTML scraping may miss
+        if self._ytdlp_path:
+            live_indices = [i for i, ls in enumerate(final_results) if ls.live]
+            if live_indices:
+                logger.debug(f"Fetching full metadata for {len(live_indices)} live YT channels")
+                ytdlp_semaphore = asyncio.Semaphore(4)  # Lower concurrency for subprocesses
+
+                async def fetch_ytdlp(idx: int) -> tuple[int, Livestream]:
+                    async with ytdlp_semaphore:
+                        ls = final_results[idx]
+                        full_ls = await self._get_livestream_ytdlp(ls.channel)
+                        # Only use yt-dlp result if it's live and has start_time
+                        if full_ls.live and full_ls.start_time:
+                            return (idx, full_ls)
+                        return (idx, ls)  # Keep original if yt-dlp failed
+
+                ytdlp_tasks = [fetch_ytdlp(idx) for idx in live_indices]
+                ytdlp_results = await asyncio.gather(*ytdlp_tasks, return_exceptions=True)
+
+                for result in ytdlp_results:
+                    if isinstance(result, tuple):
+                        idx, ls = result
+                        final_results[idx] = ls
 
         return final_results
 
