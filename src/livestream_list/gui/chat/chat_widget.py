@@ -340,6 +340,42 @@ class ChatWidget(QWidget):
         self._auth_banner.hide()
         layout.addWidget(self._auth_banner)
 
+        # Restriction banner with "Open in Browser" button (for restricted YouTube chats)
+        self._restriction_banner = QWidget()
+        self._restriction_banner.setStyleSheet("""
+            QWidget {
+                background-color: #2a1a0a;
+                border: 1px solid #503010;
+                border-radius: 3px;
+            }
+        """)
+        restriction_layout = QHBoxLayout(self._restriction_banner)
+        restriction_layout.setContentsMargins(8, 4, 8, 4)
+        restriction_layout.setSpacing(8)
+        self._restriction_label = QLabel()
+        self._restriction_label.setStyleSheet(
+            "color: #f0a030; font-size: 11px; background: transparent; border: none;"
+        )
+        restriction_layout.addWidget(self._restriction_label, 1)
+        self._open_browser_btn = QPushButton("Open in Browser")
+        self._open_browser_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6441a5;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 3px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #7d5bbe;
+            }
+        """)
+        self._open_browser_btn.clicked.connect(self._open_chat_in_browser)
+        restriction_layout.addWidget(self._open_browser_btn)
+        self._restriction_banner.hide()
+        layout.addWidget(self._restriction_banner)
+
         # Emote autocomplete
         self._completer = EmoteCompleter(self._input, parent=self)
         self._input.set_completer(self._completer)
@@ -425,9 +461,37 @@ class ChatWidget(QWidget):
             self._auth_banner.show()
 
     def show_error(self, message: str) -> None:
-        """Show an error message in the auth banner."""
-        self._auth_banner.setText(message)
-        self._auth_banner.show()
+        """Show an error message in the appropriate banner."""
+        from ...core.models import StreamPlatform
+
+        # For YouTube restriction errors, show the banner with "Open in Browser" button
+        if (
+            self.livestream.channel.platform == StreamPlatform.YOUTUBE
+            and "Cannot send:" in message
+            and "Use browser" in message
+        ):
+            # Extract just the restriction message (before "Use browser")
+            restriction_msg = message.split(". Use browser")[0]
+            self._restriction_label.setText(restriction_msg)
+            self._restriction_banner.show()
+            self._auth_banner.hide()
+        else:
+            self._auth_banner.setText(message)
+            self._auth_banner.show()
+            self._restriction_banner.hide()
+
+    def _open_chat_in_browser(self) -> None:
+        """Open the YouTube chat popout in the default browser."""
+        from ...core.models import StreamPlatform
+
+        if self.livestream.channel.platform != StreamPlatform.YOUTUBE:
+            return
+
+        # Get the video ID from the livestream
+        video_id = getattr(self.livestream, "video_id", None)
+        if video_id:
+            url = f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
+            webbrowser.open(url)
 
     def set_emote_cache(self, cache: dict) -> None:
         """Set the shared emote cache on the delegate and completer."""
