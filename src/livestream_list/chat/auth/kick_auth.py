@@ -17,7 +17,12 @@ KICK_OAUTH_BASE = "https://id.kick.com"
 KICK_API_BASE = "https://api.kick.com/public/v1"
 KICK_SCOPES = "chat:write user:read"
 
-# Registered Kick developer app for this project
+# Registered Kick developer app for this project.
+# NOTE: Client secret in source code is acceptable here because:
+# 1. We use PKCE (Proof Key for Code Exchange) which provides security even if the
+#    client secret is known - the code_verifier/challenge proves the client's identity
+# 2. Desktop/native apps are "public clients" that cannot keep secrets anyway
+# 3. OAuth 2.1 with PKCE is designed for this exact scenario
 DEFAULT_KICK_CLIENT_ID = "01KE2K1TM3ZZ4S3824V79RG2FJ"
 DEFAULT_KICK_CLIENT_SECRET = "bc2e8d615c40624929fe3f22a3b7ec468d58aaaab52e383c3c1d6c49ea546668"
 
