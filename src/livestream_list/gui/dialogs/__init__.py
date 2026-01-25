@@ -4,6 +4,7 @@ from .about import AboutDialog
 from .add_channel import AddChannelDialog
 from .export import ExportDialog
 from .import_follows import ImportFollowsDialog
+from .preferences import PreferencesDialog
 from .youtube_import import YouTubeImportDialog
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "AddChannelDialog",
     "ExportDialog",
     "ImportFollowsDialog",
+    "PreferencesDialog",
     "YouTubeImportDialog",
 ]
