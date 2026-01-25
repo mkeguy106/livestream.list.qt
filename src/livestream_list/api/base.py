@@ -1,6 +1,7 @@
 """Base API client interface."""
 
 import asyncio
+import json
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -11,6 +12,27 @@ import aiohttp
 from ..core.models import Channel, Livestream, StreamPlatform
 
 logger = logging.getLogger(__name__)
+
+
+async def safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
+    """Safely parse JSON from response, returning None on error.
+
+    This handles common error cases:
+    - HTML error pages (ContentTypeError)
+    - Malformed JSON (JSONDecodeError)
+    - Empty responses
+
+    Args:
+        resp: aiohttp response object
+
+    Returns:
+        Parsed JSON data or None if parsing failed
+    """
+    try:
+        return await resp.json()
+    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
+        logger.warning(f"Failed to parse JSON response: {e}")
+        return None
 
 # Retry configuration
 DEFAULT_MAX_RETRIES = 3

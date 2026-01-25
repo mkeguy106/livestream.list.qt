@@ -14,7 +14,7 @@ import aiohttp
 
 from ..core.models import Channel, Livestream, StreamPlatform
 from ..core.settings import YouTubeSettings
-from .base import BaseApiClient
+from .base import BaseApiClient, safe_json
 
 logger = logging.getLogger(__name__)
 
@@ -690,7 +690,9 @@ class YouTubeApiClient(BaseApiClient):
                     if resp.status != 200:
                         text = await resp.text()
                         raise ValueError(f"YouTube API returned {resp.status}: {text[:200]}")
-                    data = await resp.json()
+                    data = await safe_json(resp)
+                    if data is None:
+                        raise ValueError("YouTube API returned invalid JSON")
 
                 # Check if authentication succeeded
                 if not channels:  # Only check on first page
