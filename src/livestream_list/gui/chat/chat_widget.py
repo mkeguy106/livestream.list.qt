@@ -48,6 +48,98 @@ class ClickableTitleLabel(QLabel):
         )
 
 
+class DismissibleBanner(QWidget):
+    """Banner widget with a label and dismiss button.
+
+    The banner dynamically resizes based on content (word wrap).
+    The dismiss button hides the banner for the current session only.
+    """
+
+    dismissed = Signal()
+    link_activated = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None, clickable_links: bool = True):
+        super().__init__(parent)
+        self._clickable_external = clickable_links
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Content label - no max height, allows natural word wrap sizing
+        if clickable_links:
+            self._label = QLabel()
+            self._label.setOpenExternalLinks(True)
+        else:
+            self._label = ClickableTitleLabel()
+            self._label.linkActivated.connect(self.link_activated.emit)
+        self._label.setWordWrap(True)
+        self._label.setSizePolicy(
+            self._label.sizePolicy().horizontalPolicy(),
+            self._label.sizePolicy().verticalPolicy(),
+        )
+        layout.addWidget(self._label, 1)
+
+        # Close button - subtle X on the right
+        self._close_btn = QPushButton("×")
+        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.clicked.connect(self._on_dismiss)
+        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+    def _on_dismiss(self) -> None:
+        """Handle dismiss button click."""
+        self.hide()
+        self.dismissed.emit()
+
+    def setText(self, text: str) -> None:  # noqa: N802
+        """Set the banner text."""
+        self._label.setText(text)
+
+    def setToolTip(self, text: str) -> None:  # noqa: N802
+        """Set tooltip on the label."""
+        self._label.setToolTip(text)
+
+    def setStyleSheet(self, style: str) -> None:  # noqa: N802
+        """Apply stylesheet to the banner."""
+        # Extract colors from the QLabel style for the close button
+        super().setStyleSheet(style)
+        self._label.setStyleSheet(style)
+
+    def applyBannerStyle(self, bg_color: str, text_color: str) -> None:  # noqa: N802
+        """Apply banner colors."""
+        label_style = f"""
+            QLabel {{
+                background-color: {bg_color};
+                color: {text_color};
+                font-size: 11px;
+                padding: 6px 8px;
+                border-bottom: 1px solid #333;
+            }}
+            QLabel a {{
+                color: #6db3f2;
+                text-decoration: none;
+            }}
+        """
+        close_style = f"""
+            QPushButton {{
+                background-color: {bg_color};
+                color: {text_color};
+                border: none;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 2px;
+                border-bottom: 1px solid #333;
+            }}
+            QPushButton:hover {{
+                color: #ff6b6b;
+                background-color: rgba(255, 100, 100, 0.2);
+            }}
+        """
+        self._label.setStyleSheet(label_style)
+        self._close_btn.setStyleSheet(close_style)
+
+
 class ChatInput(QLineEdit):
     """Custom QLineEdit that routes key events to completers."""
 
@@ -113,6 +205,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._animation_frame = 0
         self._has_animated_emotes = False
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
+        self._title_dismissed = False  # Track if user dismissed the title banner
+        self._socials_dismissed = False  # Track if user dismissed the socials banner
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -122,26 +216,22 @@ class ChatWidget(QWidget, ChatSearchMixin):
         layout.setSpacing(0)
 
         # Stream title bar (shows current stream title with clickable !commands)
-        self._title_label = ClickableTitleLabel()
-        self._title_label.setWordWrap(True)
-        self._title_label.setMaximumHeight(50)  # Limit height for long titles
-        self._title_label.setOpenExternalLinks(False)
-        self._title_label.linkActivated.connect(self._on_title_link_clicked)
-        layout.addWidget(self._title_label)
+        self._title_banner = DismissibleBanner(clickable_links=False)
+        self._title_banner.link_activated.connect(self._on_title_link_clicked)
+        self._title_banner.dismissed.connect(self._on_title_dismissed)
+        layout.addWidget(self._title_banner)
 
         # Socials banner (shows channel socials like Discord, Instagram, etc.)
-        self._socials_label = QLabel()
-        self._socials_label.setWordWrap(True)
-        self._socials_label.setMaximumHeight(30)
-        self._socials_label.setOpenExternalLinks(True)
-        self._socials_label.hide()  # Hidden until socials are loaded
-        layout.addWidget(self._socials_label)
+        self._socials_banner = DismissibleBanner(clickable_links=True)
+        self._socials_banner.dismissed.connect(self._on_socials_dismissed)
+        self._socials_banner.hide()  # Hidden until socials are loaded
+        layout.addWidget(self._socials_banner)
 
         # Apply banner styling and update title
         self._update_banner_style()
         self._update_stream_title()
         if not self.settings.show_stream_title:
-            self._title_label.hide()
+            self._title_banner.hide()
 
         # Search bar (hidden by default)
         self._search_widget = QWidget()
@@ -718,35 +808,31 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Apply banner colors from settings."""
         bg_color = self.settings.banner_bg_color
         text_color = self.settings.banner_text_color
-        style = f"""
-            QLabel {{
-                background-color: {bg_color};
-                color: {text_color};
-                font-size: 11px;
-                padding: 6px 8px;
-                border-bottom: 1px solid #333;
-            }}
-            QLabel a {{
-                color: #6db3f2;
-                text-decoration: none;
-            }}
-        """
-        self._title_label.setStyleSheet(style)
-        self._socials_label.setStyleSheet(style)
+        self._title_banner.applyBannerStyle(bg_color, text_color)
+        self._socials_banner.applyBannerStyle(bg_color, text_color)
 
     def _update_stream_title(self) -> None:
-        """Update the stream title label from the livestream data."""
+        """Update the stream title banner from the livestream data."""
         title = ""
         if self.livestream and self.livestream.title:
             title = self.livestream.title
-        if title and self.settings.show_stream_title:
+        # Show if we have a title, setting is enabled, and user hasn't dismissed
+        if title and self.settings.show_stream_title and not self._title_dismissed:
             # Convert !commands to clickable links
             html_title = self._format_title_with_commands(title)
-            self._title_label.setText(html_title)
-            self._title_label.setToolTip(title)  # Full title on hover (plain text)
-            self._title_label.show()
+            self._title_banner.setText(html_title)
+            self._title_banner.setToolTip(title)  # Full title on hover (plain text)
+            self._title_banner.show()
         else:
-            self._title_label.hide()
+            self._title_banner.hide()
+
+    def _on_title_dismissed(self) -> None:
+        """Handle title banner dismissal."""
+        self._title_dismissed = True
+
+    def _on_socials_dismissed(self) -> None:
+        """Handle socials banner dismissal."""
+        self._socials_dismissed = True
 
     def _format_title_with_commands(self, title: str) -> str:
         """Convert !command patterns in title to clickable links."""
@@ -782,8 +868,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Store socials so we can re-display when setting is toggled
         self._socials = socials
 
-        if not socials or not self.settings.show_socials_banner:
-            self._socials_label.hide()
+        # Don't show if: no socials, setting is off, or user dismissed it
+        if not socials or not self.settings.show_socials_banner or self._socials_dismissed:
+            self._socials_banner.hide()
             return
 
         # Format socials as clickable links with icons/emojis
@@ -806,27 +893,33 @@ class ChatWidget(QWidget, ChatSearchMixin):
             links.append(f'{icon} <a href="{url}">{label}</a>')
 
         if links:
-            self._socials_label.setText("  ".join(links))
-            self._socials_label.show()
+            self._socials_banner.setText("  ".join(links))
+            self._socials_banner.show()
         else:
-            self._socials_label.hide()
+            self._socials_banner.hide()
 
     def update_banner_settings(self) -> None:
-        """Update banner visibility and colors after settings change."""
+        """Update banner visibility and colors after settings change.
+
+        Note: If user has dismissed a banner, re-enabling the setting will show it again
+        (resets the dismissed state for that banner type).
+        """
         self._update_banner_style()
 
-        # Update title visibility
+        # Update title visibility - re-enabling in settings resets dismissed state
         if self.settings.show_stream_title:
+            self._title_dismissed = False
             self._update_stream_title()
         else:
-            self._title_label.hide()
+            self._title_banner.hide()
 
-        # Update socials visibility - re-display stored socials when toggled on
+        # Update socials visibility - re-enabling in settings resets dismissed state
         if self.settings.show_socials_banner:
+            self._socials_dismissed = False
             if self._socials:
                 self.set_socials(self._socials)
         else:
-            self._socials_label.hide()
+            self._socials_banner.hide()
 
     def _show_settings_menu(self) -> None:
         """Show a popup menu with quick chat toggles."""

@@ -1098,6 +1098,7 @@ class MainWindow(QMainWindow):
                     "favorites_only",
                     "ui_style",
                     "platform_colors",
+                    "font_size",
                     "streamlink",
                     "notifications",
                     "chat",

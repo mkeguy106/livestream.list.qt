@@ -946,10 +946,14 @@ class ChatManager(QObject):
         if worker and worker._loop:
             asyncio.run_coroutine_threadsafe(connection.send_message(text), worker._loop)
 
-            # Local echo: Twitch doesn't echo your own messages back.
-            # Kick DOES echo via websocket, so skip local echo for Kick.
+            # Local echo: Twitch IRC doesn't echo your own messages back.
+            # Kick echoes via Pusher websocket, YouTube echoes via pytchat poll.
+            # Only add local echo for Twitch to avoid duplicates.
             livestream = self._livestreams.get(channel_key)
-            if livestream and livestream.channel.platform != StreamPlatform.KICK:
+            if livestream and livestream.channel.platform not in (
+                StreamPlatform.KICK,
+                StreamPlatform.YOUTUBE,
+            ):
                 # Use display_name (proper case) if available, fall back to nick
                 display_name = getattr(connection, "_display_name", "") or getattr(
                     connection, "_nick", "You"

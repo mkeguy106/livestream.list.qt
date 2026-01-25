@@ -659,10 +659,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 return QRect()
 
-        # Skip badges
-        if self.settings.show_badges and message.user.badges:
+        # Skip badges - must match paint logic for consistent positioning
+        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             for badge in message.user.badges:
-                if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+                is_mod = badge.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod:
+                    continue
+                if not self.settings.show_mod_badges and is_mod:
                     continue
                 x += badge_size + BADGE_SPACING
 
@@ -707,10 +710,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 return None
 
-        # Skip badges
-        if self.settings.show_badges and message.user.badges:
+        # Skip badges - must match paint logic for consistent positioning
+        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             for badge in message.user.badges:
-                if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+                is_mod = badge.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod:
+                    continue
+                if not self.settings.show_mod_badges and is_mod:
                     continue
                 x += badge_size + BADGE_SPACING
 
