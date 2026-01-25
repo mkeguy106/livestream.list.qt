@@ -49,6 +49,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._emote_cache: dict[str, QPixmap] = {}
         self._animated_cache: dict[str, list[QPixmap]] = {}
         self._animation_frame: int = 0
+        # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
+        self._size_cache: dict[tuple, QSize] = {}
+        self._size_cache_max = 500
 
     def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
         """Set the shared emote pixmap cache."""
@@ -61,6 +64,21 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def set_animation_frame(self, frame: int) -> None:
         """Set the current global animation frame counter."""
         self._animation_frame = frame
+
+    def invalidate_size_cache(self) -> None:
+        """Clear the sizeHint cache when settings change or on resize."""
+        self._size_cache.clear()
+
+    def _get_settings_hash(self) -> tuple:
+        """Return a tuple of settings that affect message sizing."""
+        return (
+            self.settings.font_size,
+            self.settings.line_spacing,
+            self.settings.show_timestamps,
+            self.settings.show_badges,
+            self.settings.show_mod_badges,
+            self.settings.show_emotes,
+        )
 
     def _get_emote_height(self, fm: QFontMetrics) -> int:
         """Get emote height scaled to font size."""
@@ -477,11 +495,31 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def sizeHint(  # noqa: N802
         self, option: QStyleOptionViewItem, index: QModelIndex
     ) -> QSize:
-        """Calculate the size needed for a message."""
+        """Calculate the size needed for a message.
+
+        Uses caching to avoid expensive recalculation on every layout pass.
+        Cache is keyed by message ID, available width, and relevant settings.
+        """
         message: ChatMessage | None = index.data(MessageRole)
         if not message:
             return QSize(option.rect.width(), 24)
 
+        # Calculate available width early for cache lookup
+        rect_width = option.rect.width()
+        if rect_width <= 0:
+            parent = self.parent()
+            if parent and hasattr(parent, "viewport"):
+                rect_width = parent.viewport().width()
+            else:
+                rect_width = 400
+        available_width = max(rect_width - PADDING_H * 2, 200)
+
+        # Check cache
+        cache_key = (message.id, available_width, self._get_settings_hash())
+        if cache_key in self._size_cache:
+            return self._size_cache[cache_key]
+
+        # Cache miss - calculate size
         padding_v = self.settings.line_spacing
         font = option.font
         font.setPointSize(self.settings.font_size)
@@ -490,17 +528,6 @@ class ChatMessageDelegate(QStyledItemDelegate):
         badge_size = self._get_badge_size(fm)
         emote_height = self._get_emote_height(fm)
         line_height = max(fm.height(), badge_size) + padding_v
-
-        # Calculate total text width to determine line wrapping
-        rect_width = option.rect.width()
-        if rect_width <= 0:
-            # Fallback: use parent viewport width when option rect is unset
-            parent = self.parent()
-            if parent and hasattr(parent, "viewport"):
-                rect_width = parent.viewport().width()
-            else:
-                rect_width = 400
-        available_width = max(rect_width - PADDING_H * 2, 200)
 
         # Prefix width (timestamp + badges + username)
         prefix_width = 0
@@ -556,7 +583,17 @@ class ChatMessageDelegate(QStyledItemDelegate):
             line_height * (lines + extra_lines) + padding_v * 2,
             emote_height + padding_v * 2,
         )
-        return QSize(available_width, height)
+        result = QSize(available_width, height)
+
+        # Store in cache (with size limit to prevent unbounded growth)
+        if len(self._size_cache) >= self._size_cache_max:
+            # Simple eviction: clear half the cache when full
+            keys = list(self._size_cache.keys())
+            for k in keys[: len(keys) // 2]:
+                del self._size_cache[k]
+        self._size_cache[cache_key] = result
+
+        return result
 
     def helpEvent(  # noqa: N802
         self,

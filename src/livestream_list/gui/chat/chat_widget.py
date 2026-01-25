@@ -7,7 +7,6 @@ import webbrowser
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QDialog,
     QHBoxLayout,
@@ -28,6 +27,7 @@ from .emote_completer import EmoteCompleter
 from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
 from .message_model import ChatMessageModel, MessageRole
+from .search_mixin import ChatSearchMixin
 from .user_popup import UserContextMenu
 
 logger = logging.getLogger(__name__)
@@ -78,11 +78,12 @@ class ChatInput(QLineEdit):
         super().keyPressEvent(event)
 
 
-class ChatWidget(QWidget):
+class ChatWidget(QWidget, ChatSearchMixin):
     """Widget for a single channel's chat.
 
     Contains a QListView for messages, an input field, and a send button.
     Handles auto-scrolling and the "new messages" indicator.
+    Uses ChatSearchMixin for search functionality.
     """
 
     message_sent = Signal(str, str)  # channel_key, text
@@ -697,6 +698,7 @@ class ChatWidget(QWidget):
 
     def _on_resize_debounced(self) -> None:
         """Force full relayout after resize settles."""
+        self._delegate.invalidate_size_cache()
         self._model.layoutChanged.emit()
 
     def _on_scroll_changed(self, value: int) -> None:
@@ -1049,83 +1051,18 @@ class ChatWidget(QWidget):
         self._history_dialogs.add(dialog)
         dialog.show()
 
-    def _toggle_search(self) -> None:
-        """Toggle the search bar visibility."""
-        if self._search_widget.isVisible():
-            self._close_search()
-        else:
-            self._search_widget.show()
-            self._search_input.setFocus()
-            self._search_input.selectAll()
-
-    def _close_search(self) -> None:
-        """Hide the search bar and clear highlights."""
-        self._search_widget.hide()
-        self._search_input.clear()
-        self._search_matches.clear()
-        self._search_current = -1
-        self._search_count_label.setText("")
-
-    def _on_search_text_changed(self, text: str) -> None:
-        """Update search matches when query changes."""
-        self._search_matches.clear()
-        self._search_current = -1
-
-        if not text:
-            self._search_count_label.setText("")
-            return
-
-        query = text.lower()
-        for row in range(self._model.rowCount()):
-            index = self._model.index(row, 0)
-            msg = index.data(MessageRole)
-            if not msg or not isinstance(msg, ChatMessage):
-                continue
-            if query in msg.user.display_name.lower() or query in msg.text.lower():
-                self._search_matches.append(row)
-
-        if self._search_matches:
-            # Start at the most recent match
-            self._search_current = len(self._search_matches) - 1
-            self._scroll_to_search_match()
-        else:
-            self._search_count_label.setText("No matches")
-
-    def _search_next(self) -> None:
-        """Navigate to the next search match."""
-        if not self._search_matches:
-            return
-        self._search_current = (self._search_current + 1) % len(self._search_matches)
-        self._scroll_to_search_match()
-
-    def _search_prev(self) -> None:
-        """Navigate to the previous search match."""
-        if not self._search_matches:
-            return
-        self._search_current = (self._search_current - 1) % len(self._search_matches)
-        self._scroll_to_search_match()
-
-    def _scroll_to_search_match(self) -> None:
-        """Scroll to the current search match and update the count label."""
-        if not self._search_matches or self._search_current < 0:
-            return
-        row = self._search_matches[self._search_current]
-        index = self._model.index(row, 0)
-        self._list_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
-        self._list_view.setCurrentIndex(index)
-        total = len(self._search_matches)
-        current = self._search_current + 1
-        self._search_count_label.setText(f"{current}/{total}")
+    # Search methods provided by ChatSearchMixin:
+    # _toggle_search, _close_search, _on_search_text_changed,
+    # _search_next, _search_prev, _scroll_to_search_match
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handle Escape to close search bar."""
-        if event.key() == Qt.Key.Key_Escape and self._search_widget.isVisible():
-            self._close_search()
+        if self._handle_search_key_press(event.key()):
             return
         super().keyPressEvent(event)
 
 
-class UserHistoryDialog(QDialog):
+class UserHistoryDialog(QDialog, ChatSearchMixin):
     """Dialog showing all messages from a specific user in the current chat session."""
 
     def __init__(
@@ -1350,79 +1287,16 @@ class UserHistoryDialog(QDialog):
 
     def _on_resize_debounced(self) -> None:
         """Force full relayout after resize settles."""
+        self._delegate.invalidate_size_cache()
         self._model.layoutChanged.emit()
 
-    def _toggle_search(self) -> None:
-        """Toggle the search bar visibility."""
-        if self._search_widget.isVisible():
-            self._close_search()
-        else:
-            self._search_widget.show()
-            self._search_input.setFocus()
-            self._search_input.selectAll()
-
-    def _close_search(self) -> None:
-        """Hide the search bar and clear state."""
-        self._search_widget.hide()
-        self._search_input.clear()
-        self._search_matches.clear()
-        self._search_current = -1
-        self._search_count_label.setText("")
-
-    def _on_search_text_changed(self, text: str) -> None:
-        """Update search matches when query changes."""
-        self._search_matches.clear()
-        self._search_current = -1
-
-        if not text:
-            self._search_count_label.setText("")
-            return
-
-        query = text.lower()
-        for row in range(self._model.rowCount()):
-            index = self._model.index(row, 0)
-            msg = index.data(MessageRole)
-            if not msg or not isinstance(msg, ChatMessage):
-                continue
-            if query in msg.user.display_name.lower() or query in msg.text.lower():
-                self._search_matches.append(row)
-
-        if self._search_matches:
-            self._search_current = len(self._search_matches) - 1
-            self._scroll_to_search_match()
-        else:
-            self._search_count_label.setText("No matches")
-
-    def _search_next(self) -> None:
-        """Navigate to the next search match."""
-        if not self._search_matches:
-            return
-        self._search_current = (self._search_current + 1) % len(self._search_matches)
-        self._scroll_to_search_match()
-
-    def _search_prev(self) -> None:
-        """Navigate to the previous search match."""
-        if not self._search_matches:
-            return
-        self._search_current = (self._search_current - 1) % len(self._search_matches)
-        self._scroll_to_search_match()
-
-    def _scroll_to_search_match(self) -> None:
-        """Scroll to the current search match and update count."""
-        if not self._search_matches or self._search_current < 0:
-            return
-        row = self._search_matches[self._search_current]
-        index = self._model.index(row, 0)
-        self._list_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
-        self._list_view.setCurrentIndex(index)
-        total = len(self._search_matches)
-        current = self._search_current + 1
-        self._search_count_label.setText(f"{current}/{total}")
+    # Search methods provided by ChatSearchMixin:
+    # _toggle_search, _close_search, _on_search_text_changed,
+    # _search_next, _search_prev, _scroll_to_search_match
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handle Escape to close search bar."""
-        if event.key() == Qt.Key.Key_Escape and self._search_widget.isVisible():
-            self._close_search()
+        if self._handle_search_key_press(event.key()):
             return
         super().keyPressEvent(event)
 

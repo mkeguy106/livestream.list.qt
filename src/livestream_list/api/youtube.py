@@ -474,7 +474,8 @@ class YouTubeApiClient(BaseApiClient):
         if not channels:
             return []
 
-        # Use semaphore to limit concurrent checks (same as get_livestreams)
+        # Limit concurrent subprocess spawns to avoid resource exhaustion.
+        # Lower than HTTP concurrency since subprocesses are heavier.
         semaphore = asyncio.Semaphore(4)
         results: list[tuple[int, Channel, bool]] = []
 
