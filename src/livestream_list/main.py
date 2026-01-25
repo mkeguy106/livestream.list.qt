@@ -15,6 +15,11 @@ def setup_logging() -> None:
         ],
     )
 
+    # Suppress noisy third-party loggers
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+
 
 def main() -> int:
     """Main entry point."""

@@ -1834,32 +1834,6 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(icons_group)
 
-        # Performance group
-        perf_group = QGroupBox("Performance")
-        perf_layout = QFormLayout(perf_group)
-
-        self.youtube_concurrency_spin = QSpinBox()
-        self.youtube_concurrency_spin.setRange(1, 20)
-        self.youtube_concurrency_spin.setValue(self.app.settings.performance.youtube_concurrency)
-        self.youtube_concurrency_spin.setToolTip(
-            "Number of concurrent yt-dlp processes for checking YouTube channels.\n"
-            "Higher = faster refresh, but more CPU usage."
-        )
-        self.youtube_concurrency_spin.valueChanged.connect(self._on_performance_changed)
-        perf_layout.addRow("YouTube concurrency:", self.youtube_concurrency_spin)
-
-        self.kick_concurrency_spin = QSpinBox()
-        self.kick_concurrency_spin.setRange(1, 30)
-        self.kick_concurrency_spin.setValue(self.app.settings.performance.kick_concurrency)
-        self.kick_concurrency_spin.setToolTip(
-            "Number of concurrent API calls for checking Kick channels.\n"
-            "Higher = faster refresh, but more network usage."
-        )
-        self.kick_concurrency_spin.valueChanged.connect(self._on_performance_changed)
-        perf_layout.addRow("Kick concurrency:", self.kick_concurrency_spin)
-
-        layout.addWidget(perf_group)
-
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(lambda: self._reset_tab_defaults("General"))
         layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
@@ -2062,6 +2036,11 @@ class PreferencesDialog(QDialog):
         self.chat_timestamps_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_timestamps_cb)
 
+        self.chat_name_colors_cb = QCheckBox("Use platform name colors")
+        self.chat_name_colors_cb.setChecked(self.app.settings.chat.builtin.use_platform_name_colors)
+        self.chat_name_colors_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_name_colors_cb)
+
         self.chat_badges_cb = QCheckBox("Show badges")
         self.chat_badges_cb.setChecked(self.app.settings.chat.builtin.show_badges)
         self.chat_badges_cb.stateChanged.connect(self._on_chat_changed)
@@ -2105,6 +2084,12 @@ class PreferencesDialog(QDialog):
             lambda t: self._update_swatch(self.alt_row_even_swatch, t)
         )
         even_color_row.addWidget(self.alt_row_even_edit)
+        self.alt_row_even_reset = QPushButton("Reset")
+        self.alt_row_even_reset.setFixedWidth(50)
+        self.alt_row_even_reset.clicked.connect(
+            lambda: self._reset_color(self.alt_row_even_edit, "#00000000")
+        )
+        even_color_row.addWidget(self.alt_row_even_reset)
         even_color_row.addStretch()
         self.alt_row_even_swatch.clicked.connect(
             lambda: self._pick_color_alpha(self.alt_row_even_edit, self.alt_row_even_swatch)
@@ -2127,6 +2112,12 @@ class PreferencesDialog(QDialog):
             lambda t: self._update_swatch(self.alt_row_odd_swatch, t)
         )
         odd_color_row.addWidget(self.alt_row_odd_edit)
+        self.alt_row_odd_reset = QPushButton("Reset")
+        self.alt_row_odd_reset.setFixedWidth(50)
+        self.alt_row_odd_reset.clicked.connect(
+            lambda: self._reset_color(self.alt_row_odd_edit, "#0fffffff")
+        )
+        odd_color_row.addWidget(self.alt_row_odd_reset)
         odd_color_row.addStretch()
         self.alt_row_odd_swatch.clicked.connect(
             lambda: self._pick_color_alpha(self.alt_row_odd_edit, self.alt_row_odd_swatch)
@@ -2141,17 +2132,14 @@ class PreferencesDialog(QDialog):
             self.alt_row_even_label,
             self.alt_row_even_swatch,
             self.alt_row_even_edit,
+            self.alt_row_even_reset,
             self.alt_row_odd_label,
             self.alt_row_odd_swatch,
             self.alt_row_odd_edit,
+            self.alt_row_odd_reset,
         ):
             w.setVisible(alt_visible)
         self.chat_alt_rows_cb.stateChanged.connect(self._toggle_alt_row_colors)
-
-        self.chat_name_colors_cb = QCheckBox("Use platform name colors")
-        self.chat_name_colors_cb.setChecked(self.app.settings.chat.builtin.use_platform_name_colors)
-        self.chat_name_colors_cb.stateChanged.connect(self._on_chat_changed)
-        builtin_layout.addRow(self.chat_name_colors_cb)
 
         # Tab active color with swatch
         active_row = QHBoxLayout()
@@ -2167,6 +2155,12 @@ class PreferencesDialog(QDialog):
             lambda t: self._update_swatch(self.tab_active_swatch, t)
         )
         active_row.addWidget(self.tab_active_color_edit)
+        self.tab_active_reset = QPushButton("Reset")
+        self.tab_active_reset.setFixedWidth(50)
+        self.tab_active_reset.clicked.connect(
+            lambda: self._reset_color(self.tab_active_color_edit, "#6441a5")
+        )
+        active_row.addWidget(self.tab_active_reset)
         active_row.addStretch()
         self.tab_active_swatch.clicked.connect(
             lambda: self._pick_color(self.tab_active_color_edit, self.tab_active_swatch)
@@ -2188,6 +2182,12 @@ class PreferencesDialog(QDialog):
             lambda t: self._update_swatch(self.tab_inactive_swatch, t)
         )
         inactive_row.addWidget(self.tab_inactive_color_edit)
+        self.tab_inactive_reset = QPushButton("Reset")
+        self.tab_inactive_reset.setFixedWidth(50)
+        self.tab_inactive_reset.clicked.connect(
+            lambda: self._reset_color(self.tab_inactive_color_edit, "#16213e")
+        )
+        inactive_row.addWidget(self.tab_inactive_reset)
         inactive_row.addStretch()
         self.tab_inactive_swatch.clicked.connect(
             lambda: self._pick_color(self.tab_inactive_color_edit, self.tab_inactive_swatch)
@@ -2209,12 +2209,105 @@ class PreferencesDialog(QDialog):
             lambda t: self._update_swatch(self.mention_color_swatch, t)
         )
         mention_row.addWidget(self.mention_color_edit)
+        self.mention_color_reset = QPushButton("Reset")
+        self.mention_color_reset.setFixedWidth(50)
+        self.mention_color_reset.clicked.connect(
+            lambda: self._reset_color(self.mention_color_edit, "#33ff8800")
+        )
+        mention_row.addWidget(self.mention_color_reset)
         mention_row.addStretch()
         self.mention_color_swatch.clicked.connect(
             lambda: self._pick_color_alpha(self.mention_color_edit, self.mention_color_swatch)
         )
         self._update_swatch(self.mention_color_swatch, self.mention_color_edit.text())
         builtin_layout.addRow("Mention highlight:", mention_row)
+
+        # Banner settings separator
+        builtin_layout.addRow(QLabel("<b>Chat Banners</b>"))
+
+        # Show stream title toggle
+        self.show_stream_title_cb = QCheckBox("Show stream title banner")
+        self.show_stream_title_cb.setChecked(self.app.settings.chat.builtin.show_stream_title)
+        self.show_stream_title_cb.stateChanged.connect(self._on_chat_changed)
+        self.show_stream_title_cb.stateChanged.connect(self._toggle_banner_colors)
+        builtin_layout.addRow(self.show_stream_title_cb)
+
+        # Show socials toggle
+        self.show_socials_cb = QCheckBox("Show channel socials banner")
+        self.show_socials_cb.setChecked(self.app.settings.chat.builtin.show_socials_banner)
+        self.show_socials_cb.stateChanged.connect(self._on_chat_changed)
+        self.show_socials_cb.stateChanged.connect(self._toggle_banner_colors)
+        builtin_layout.addRow(self.show_socials_cb)
+
+        # Banner background color picker with reset button
+        banner_bg_row = QHBoxLayout()
+        self.banner_bg_swatch = QPushButton()
+        self.banner_bg_swatch.setFixedSize(24, 24)
+        self.banner_bg_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        banner_bg_row.addWidget(self.banner_bg_swatch)
+        self.banner_bg_edit = QLineEdit()
+        self.banner_bg_edit.setText(self.app.settings.chat.builtin.banner_bg_color)
+        self.banner_bg_edit.setMaximumWidth(100)
+        self.banner_bg_edit.editingFinished.connect(self._on_chat_changed)
+        self.banner_bg_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.banner_bg_swatch, t)
+        )
+        banner_bg_row.addWidget(self.banner_bg_edit)
+        self.banner_bg_reset = QPushButton("Reset")
+        self.banner_bg_reset.setFixedWidth(50)
+        self.banner_bg_reset.clicked.connect(
+            lambda: self._reset_color(self.banner_bg_edit, "#16213e")
+        )
+        banner_bg_row.addWidget(self.banner_bg_reset)
+        banner_bg_row.addStretch()
+        self.banner_bg_swatch.clicked.connect(
+            lambda: self._pick_color(self.banner_bg_edit, self.banner_bg_swatch)
+        )
+        self._update_swatch(self.banner_bg_swatch, self.banner_bg_edit.text())
+        self.banner_bg_label = QLabel("Banner background:")
+        builtin_layout.addRow(self.banner_bg_label, banner_bg_row)
+
+        # Banner text color picker with reset button
+        banner_text_row = QHBoxLayout()
+        self.banner_text_swatch = QPushButton()
+        self.banner_text_swatch.setFixedSize(24, 24)
+        self.banner_text_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
+        banner_text_row.addWidget(self.banner_text_swatch)
+        self.banner_text_edit = QLineEdit()
+        self.banner_text_edit.setText(self.app.settings.chat.builtin.banner_text_color)
+        self.banner_text_edit.setMaximumWidth(100)
+        self.banner_text_edit.editingFinished.connect(self._on_chat_changed)
+        self.banner_text_edit.textChanged.connect(
+            lambda t: self._update_swatch(self.banner_text_swatch, t)
+        )
+        banner_text_row.addWidget(self.banner_text_edit)
+        self.banner_text_reset = QPushButton("Reset")
+        self.banner_text_reset.setFixedWidth(50)
+        self.banner_text_reset.clicked.connect(
+            lambda: self._reset_color(self.banner_text_edit, "#cccccc")
+        )
+        banner_text_row.addWidget(self.banner_text_reset)
+        banner_text_row.addStretch()
+        self.banner_text_swatch.clicked.connect(
+            lambda: self._pick_color(self.banner_text_edit, self.banner_text_swatch)
+        )
+        self._update_swatch(self.banner_text_swatch, self.banner_text_edit.text())
+        self.banner_text_label = QLabel("Banner text:")
+        builtin_layout.addRow(self.banner_text_label, banner_text_row)
+
+        # Show/hide banner color pickers based on checkbox states
+        banner_visible = self.show_stream_title_cb.isChecked() or self.show_socials_cb.isChecked()
+        for w in (
+            self.banner_bg_label,
+            self.banner_bg_swatch,
+            self.banner_bg_edit,
+            self.banner_bg_reset,
+            self.banner_text_label,
+            self.banner_text_swatch,
+            self.banner_text_edit,
+            self.banner_text_reset,
+        ):
+            w.setVisible(banner_visible)
 
         layout.addWidget(self.builtin_group)
 
@@ -2468,12 +2561,6 @@ class PreferencesDialog(QDialog):
         if self.app.main_window:
             self.app.main_window.refresh_stream_list()
 
-    def _on_performance_changed(self, value):
-        """Handle performance settings change."""
-        self.app.settings.performance.youtube_concurrency = self.youtube_concurrency_spin.value()
-        self.app.settings.performance.kick_concurrency = self.kick_concurrency_spin.value()
-        self.app.save_settings()
-        # Note: Changes take effect on next app restart (clients already initialized)
 
     def _on_streamlink_changed(self):
         self.app.settings.streamlink.path = self.sl_path_edit.text()
@@ -2539,6 +2626,15 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.mention_highlight_color = (
             self.mention_color_edit.text().strip() or "#33ff8800"
         )
+        # Banner settings
+        self.app.settings.chat.builtin.show_stream_title = self.show_stream_title_cb.isChecked()
+        self.app.settings.chat.builtin.show_socials_banner = self.show_socials_cb.isChecked()
+        self.app.settings.chat.builtin.banner_bg_color = (
+            self.banner_bg_edit.text().strip() or "#16213e"
+        )
+        self.app.settings.chat.builtin.banner_text_color = (
+            self.banner_text_edit.text().strip() or "#cccccc"
+        )
         providers = []
         if self.emote_7tv_cb.isChecked():
             providers.append("7tv")
@@ -2552,6 +2648,7 @@ class PreferencesDialog(QDialog):
         if self.app._chat_window:
             self.app._chat_window.update_tab_style()
             self.app._chat_window.update_animation_state()
+            self.app._chat_window.update_banner_settings()
 
     def _update_swatch(self, button: QPushButton, hex_color: str) -> None:
         """Update a color swatch button's background from a hex string."""
@@ -2609,11 +2706,33 @@ class PreferencesDialog(QDialog):
             self.alt_row_even_label,
             self.alt_row_even_swatch,
             self.alt_row_even_edit,
+            self.alt_row_even_reset,
             self.alt_row_odd_label,
             self.alt_row_odd_swatch,
             self.alt_row_odd_edit,
+            self.alt_row_odd_reset,
         ):
             w.setVisible(visible)
+
+    def _toggle_banner_colors(self, _state=None):
+        """Show/hide banner color pickers based on checkbox states."""
+        visible = self.show_stream_title_cb.isChecked() or self.show_socials_cb.isChecked()
+        for w in (
+            self.banner_bg_label,
+            self.banner_bg_swatch,
+            self.banner_bg_edit,
+            self.banner_bg_reset,
+            self.banner_text_label,
+            self.banner_text_swatch,
+            self.banner_text_edit,
+            self.banner_text_reset,
+        ):
+            w.setVisible(visible)
+
+    def _reset_color(self, edit: QLineEdit, default_value: str):
+        """Reset a color edit field to its default value."""
+        edit.setText(default_value)
+        self._on_chat_changed()
 
     def _reset_tab_defaults(self, tab_name: str):
         """Reset a preferences tab to default values after confirmation."""
@@ -2717,6 +2836,12 @@ class PreferencesDialog(QDialog):
             self.chat_name_colors_cb.setChecked(builtin.use_platform_name_colors)
             self.tab_active_color_edit.setText(builtin.tab_active_color)
             self.tab_inactive_color_edit.setText(builtin.tab_inactive_color)
+            self.mention_color_edit.setText(builtin.mention_highlight_color)
+            # Banner settings
+            self.show_stream_title_cb.setChecked(builtin.show_stream_title)
+            self.show_socials_cb.setChecked(builtin.show_socials_banner)
+            self.banner_bg_edit.setText(builtin.banner_bg_color)
+            self.banner_text_edit.setText(builtin.banner_text_color)
             self._on_chat_changed()
 
     def _on_twitch_login(self):

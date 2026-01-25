@@ -409,6 +409,11 @@ class ChatWindow(QMainWindow):
         for widget in self._widgets.values():
             widget.update_animation_state()
 
+    def update_banner_settings(self) -> None:
+        """Update banner visibility and colors on all widgets (call after prefs change)."""
+        for widget in self._widgets.values():
+            widget.update_banner_settings()
+
     def _connect_signals(self) -> None:
         """Connect ChatManager signals."""
         self.chat_manager.messages_received.connect(self._on_messages_received)
@@ -419,6 +424,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.emote_cache_updated.connect(self._on_emote_cache_updated)
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
         self.chat_manager.chat_error.connect(self._on_chat_error)
+        self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -426,8 +432,9 @@ class ChatWindow(QMainWindow):
         self._livestreams[channel_key] = livestream
 
         if channel_key in self._widgets:
-            # Focus existing tab
+            # Focus existing tab and update livestream data (e.g., title may have changed)
             widget = self._widgets[channel_key]
+            widget.update_livestream(livestream)
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.setCurrentIndex(idx)
@@ -596,6 +603,12 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.show_error(message)
+
+    def _on_socials_fetched(self, channel_key: str, socials: dict) -> None:
+        """Update a chat widget with fetched social links."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_socials(socials)
 
     def _on_popout_requested(self, channel_key: str) -> None:
         """Pop out a chat widget into its own window."""

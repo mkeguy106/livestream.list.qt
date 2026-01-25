@@ -160,6 +160,9 @@ class Application(QApplication):
         # Load settings
         self.settings = Settings.load()
 
+        # Validate YouTube cookies on startup
+        self._validate_youtube_cookies()
+
         # Connect signal for notification watch button UI updates
         self.open_stream_requested.connect(self._on_notification_open_stream_ui)
 
@@ -267,6 +270,32 @@ class Application(QApplication):
         self.settings.refresh_interval = interval_seconds
         self.settings.save()
         self.start_refresh_timer()
+
+    def _validate_youtube_cookies(self):
+        """Check if YouTube cookies are configured and still valid on startup."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from ..chat.connections.youtube import validate_cookies
+
+        cookies = self.settings.youtube.cookies
+        if not cookies:
+            # No cookies configured - nothing to validate
+            return
+
+        if not validate_cookies(cookies):
+            # Cookies are missing required keys
+            QMessageBox.warning(
+                None,
+                "YouTube Cookies Invalid",
+                "Your YouTube cookies appear to be invalid or incomplete.\n\n"
+                "Please re-import your cookies from browser in:\n"
+                "Preferences > Accounts > YouTube > Import from Browser",
+            )
+            return
+
+        # Note: We only do basic key validation here.
+        # Actual expiry check would require an API call which is slow.
+        # Cookie expiry will be detected when trying to send a message.
 
     def _on_timed_refresh(self):
         """Handle timed refresh."""

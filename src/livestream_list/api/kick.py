@@ -58,12 +58,12 @@ class KickApiClient(BaseApiClient):
         """Get channel info by username."""
         try:
             url = f"{self.BASE_URL}/channels/{channel_id}"
-            logger.info(f"Kick: Fetching channel info from {url}")
+            logger.debug(f"Kick: Fetching channel info from {url}")
             async with self.session.get(
                 url,
                 headers=self._get_headers(),
             ) as resp:
-                logger.info(f"Kick: Response status {resp.status} for {channel_id}")
+                logger.debug(f"Kick: Response status {resp.status} for {channel_id}")
                 if resp.status != 200:
                     text = await resp.text()
                     logger.warning(

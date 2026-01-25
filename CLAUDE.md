@@ -134,6 +134,16 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Emotes**: Supports Twitch, Kick native, 7TV, BTTV, FFZ. Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
+**Channel Socials Banner**: Displays clickable social links (Discord, Twitter, etc.) below the stream title banner. Fetched via `SocialsFetchWorker` (QThread) when chat opens.
+
+- **Twitch**: GraphQL query for `channel.socialMedias` array (returns name + URL directly)
+- **YouTube**: Scrapes `/about` page HTML, extracts `ytInitialData` JSON, navigates to `aboutChannelViewModel.links`. URL format varies by channel ID type:
+  - `UC...` IDs → `https://www.youtube.com/channel/UC.../about`
+  - `@handle` → `https://www.youtube.com/@handle/about`
+  - External links use YouTube redirect with `q=` param containing actual URL
+  - Internal YouTube links (e.g., second channel) have direct URLs without redirect
+- **Kick**: REST API `GET /api/v2/channels/{id}`, extracts social usernames from `user` object, constructs full URLs
+
 ### Key Files
 
 | File | Purpose |
@@ -192,6 +202,7 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | auth_state_changed affects wrong platform | Handler must check each widget's platform, not apply blindly |
 | Kick shows duplicate messages on send | Don't use local echo for Kick (it echoes via websocket unlike Twitch) |
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
+| YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
 
 ## CI/CD - Self-Hosted Runner
 
