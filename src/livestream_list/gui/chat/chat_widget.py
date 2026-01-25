@@ -24,6 +24,7 @@ from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
 from .emote_completer import EmoteCompleter
+from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
 from .message_model import ChatMessageModel, MessageRole
 from .user_popup import UserContextMenu
@@ -32,20 +33,32 @@ logger = logging.getLogger(__name__)
 
 
 class ChatInput(QLineEdit):
-    """Custom QLineEdit that routes key events to the emote completer."""
+    """Custom QLineEdit that routes key events to completers."""
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._completer: EmoteCompleter | None = None
+        self._completers: list = []
 
-    def set_completer(self, completer: EmoteCompleter) -> None:
-        """Set the emote completer to route key events to."""
-        self._completer = completer
+    def add_completer(self, completer) -> None:
+        """Add a completer to the chain."""
+        self._completers.append(completer)
+
+    def event(self, event: QEvent) -> bool:  # noqa: N802
+        """Intercept Tab key before Qt's focus navigation handles it."""
+        if event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            if key_event.key() == Qt.Key.Key_Tab:
+                # Check if any completer wants to handle Tab
+                for completer in self._completers:
+                    if completer.handle_key_press(key_event.key()):
+                        return True
+        return super().event(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Route navigation keys to the completer first."""
-        if self._completer and self._completer.handle_key_press(event.key()):
-            return
+        """Route navigation keys to completers first."""
+        for completer in self._completers:
+            if completer.handle_key_press(event.key()):
+                return
         super().keyPressEvent(event)
 
 
@@ -89,6 +102,22 @@ class ChatWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # Stream title bar (shows current stream title)
+        self._title_label = QLabel()
+        self._title_label.setWordWrap(True)
+        self._title_label.setMaximumHeight(50)  # Limit height for long titles
+        self._title_label.setStyleSheet("""
+            QLabel {
+                background-color: #16213e;
+                color: #ccc;
+                font-size: 11px;
+                padding: 6px 8px;
+                border-bottom: 1px solid #333;
+            }
+        """)
+        self._update_stream_title()
+        layout.addWidget(self._title_label)
 
         # Search bar (hidden by default)
         self._search_widget = QWidget()
@@ -377,8 +406,12 @@ class ChatWidget(QWidget):
         layout.addWidget(self._restriction_banner)
 
         # Emote autocomplete
-        self._completer = EmoteCompleter(self._input, parent=self)
-        self._input.set_completer(self._completer)
+        self._emote_completer = EmoteCompleter(self._input, parent=self)
+        self._input.add_completer(self._emote_completer)
+
+        # Mention autocomplete
+        self._mention_completer = MentionCompleter(self._input, parent=self)
+        self._input.add_completer(self._mention_completer)
 
         # Auth gating
         self.set_authenticated(self._authenticated)
@@ -410,6 +443,10 @@ class ChatWidget(QWidget):
 
         if not filtered:
             return
+
+        # Track usernames for @mention autocomplete
+        for msg in filtered:
+            self._mention_completer.add_username(msg.user.display_name)
 
         # Hide the "Waiting for messages" indicator on first message
         if self._connecting_label.isVisible():
@@ -501,11 +538,11 @@ class ChatWidget(QWidget):
     def set_emote_cache(self, cache: dict) -> None:
         """Set the shared emote cache on the delegate and completer."""
         self._delegate.set_emote_cache(cache)
-        self._completer.set_emote_cache(cache)
+        self._emote_completer.set_emote_cache(cache)
 
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the emote map for autocomplete."""
-        self._completer.set_emotes(emote_map)
+        self._emote_completer.set_emotes(emote_map)
 
     def set_animated_cache(self, cache: dict[str, list]) -> None:
         """Set the animated frame cache on the delegate and start timer if needed."""
@@ -648,6 +685,23 @@ class ChatWidget(QWidget):
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""
         self._hype_banner.hide()
+
+    def _update_stream_title(self) -> None:
+        """Update the stream title label from the livestream data."""
+        title = ""
+        if self.livestream and self.livestream.title:
+            title = self.livestream.title
+        if title:
+            self._title_label.setText(title)
+            self._title_label.setToolTip(title)  # Full title on hover
+            self._title_label.show()
+        else:
+            self._title_label.hide()
+
+    def update_livestream(self, livestream: Livestream) -> None:
+        """Update the livestream data and refresh the title."""
+        self.livestream = livestream
+        self._update_stream_title()
 
     def _show_settings_menu(self) -> None:
         """Show a popup menu with quick chat toggles."""

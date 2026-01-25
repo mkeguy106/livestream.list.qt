@@ -1,4 +1,4 @@
-"""Emote providers for 7TV, BTTV, and FFZ."""
+"""Emote providers for Twitch, Kick, 7TV, BTTV, and FFZ."""
 
 import logging
 from abc import ABC, abstractmethod
@@ -9,9 +9,12 @@ from ..models import ChatEmote
 
 logger = logging.getLogger(__name__)
 
+# Default Twitch client ID for unauthenticated requests
+_DEFAULT_TWITCH_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+
 
 class BaseEmoteProvider(ABC):
-    """Base class for third-party emote providers."""
+    """Base class for emote providers."""
 
     @property
     @abstractmethod
@@ -30,6 +33,101 @@ class BaseEmoteProvider(ABC):
             platform: Platform name ("twitch", "kick", "youtube")
             channel_id: The channel/user ID on the platform.
         """
+
+
+class TwitchProvider(BaseEmoteProvider):
+    """Native Twitch emote provider using Helix API."""
+
+    BASE_URL = "https://api.twitch.tv/helix"
+
+    def __init__(self, oauth_token: str = "", client_id: str = ""):
+        self.oauth_token = oauth_token
+        self.client_id = client_id or _DEFAULT_TWITCH_CLIENT_ID
+
+    @property
+    def name(self) -> str:
+        return "twitch"
+
+    def _get_headers(self) -> dict:
+        """Get headers for Twitch API requests."""
+        headers = {"Client-Id": self.client_id}
+        if self.oauth_token:
+            headers["Authorization"] = f"Bearer {self.oauth_token}"
+        return headers
+
+    async def get_global_emotes(self) -> list[ChatEmote]:
+        """Fetch Twitch global emotes."""
+        emotes: list[ChatEmote] = []
+        try:
+            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
+                async with session.get(
+                    f"{self.BASE_URL}/chat/emotes/global",
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"Twitch global emotes failed: {resp.status}")
+                        return emotes
+                    data = await resp.json()
+
+                    for emote_data in data.get("data", []):
+                        emote = self._parse_emote(emote_data)
+                        if emote:
+                            emotes.append(emote)
+        except Exception as e:
+            logger.debug(f"Twitch global emotes error: {e}")
+
+        return emotes
+
+    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+        """Fetch Twitch channel emotes (subscriber emotes)."""
+        emotes: list[ChatEmote] = []
+        if platform != "twitch":
+            return emotes
+
+        try:
+            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
+                async with session.get(
+                    f"{self.BASE_URL}/chat/emotes",
+                    params={"broadcaster_id": channel_id},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.debug(f"Twitch channel emotes failed: {resp.status}")
+                        return emotes
+                    data = await resp.json()
+
+                    for emote_data in data.get("data", []):
+                        emote = self._parse_emote(emote_data)
+                        if emote:
+                            emotes.append(emote)
+        except Exception as e:
+            logger.debug(f"Twitch channel emotes error for {channel_id}: {e}")
+
+        return emotes
+
+    def _parse_emote(self, data: dict) -> ChatEmote | None:
+        """Parse a Twitch emote from Helix API data."""
+        emote_id = data.get("id", "")
+        name = data.get("name", "")
+
+        if not emote_id or not name:
+            return None
+
+        # Twitch CDN URL - use static format for 2x size
+        # Format options: static/animated, light/dark, 1.0/2.0/3.0
+        images = data.get("images", {})
+        url = images.get("url_2x") or images.get("url_1x", "")
+
+        if not url:
+            # Fallback to template format
+            url = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/light/2.0"
+
+        return ChatEmote(
+            id=emote_id,
+            name=name,
+            url_template=url,
+            provider="twitch",
+        )
 
 
 class SevenTVProvider(BaseEmoteProvider):

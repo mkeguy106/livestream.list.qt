@@ -17,7 +17,7 @@ from .emotes.cache import (
     EmoteLoaderWorker,
     _extract_frames,
 )
-from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider
+from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
 from .models import ChatEmote, ChatMessage, ChatUser
 
 logger = logging.getLogger(__name__)
@@ -112,40 +112,62 @@ class EmoteFetchWorker(QThread):
             loop.close()
 
     async def _resolve_twitch_user_id(self) -> str | None:
-        """Resolve a Twitch login name to numeric user ID via Helix API."""
-        import aiohttp
+        """Resolve a Twitch login name to numeric user ID.
 
-        if not self.oauth_token or not self.client_id:
-            return None
+        Tries Helix API first (if OAuth available), then falls back to public IVR API.
+        """
+        import aiohttp
 
         # If channel_id is already numeric, no need to resolve
         if self.channel_id.isdigit():
             return self.channel_id
 
+        # Try Helix API if we have credentials
+        if self.oauth_token and self.client_id:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {self.oauth_token}",
+                    "Client-Id": self.client_id,
+                }
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.get(
+                        "https://api.twitch.tv/helix/users",
+                        params={"login": self.channel_id},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            users = data.get("data", [])
+                            if users:
+                                user_id = users[0].get("id", "")
+                                if user_id:
+                                    logger.debug(
+                                        f"Resolved Twitch login '{self.channel_id}' "
+                                        f"to user ID {user_id} (Helix)"
+                                    )
+                                    return user_id
+            except Exception as e:
+                logger.debug(f"Helix API failed for {self.channel_id}: {e}")
+
+        # Fallback to public IVR API (no auth required)
         try:
-            headers = {
-                "Authorization": f"Bearer {self.oauth_token}",
-                "Client-Id": self.client_id,
-            }
-            async with aiohttp.ClientSession(headers=headers) as session:
+            async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    "https://api.twitch.tv/helix/users",
-                    params={"login": self.channel_id},
+                    f"https://api.ivr.fi/v2/twitch/user?login={self.channel_id}",
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        users = data.get("data", [])
-                        if users:
-                            user_id = users[0].get("id", "")
+                        if isinstance(data, list) and data:
+                            user_id = data[0].get("id", "")
                             if user_id:
                                 logger.debug(
                                     f"Resolved Twitch login '{self.channel_id}' "
-                                    f"to user ID {user_id}"
+                                    f"to user ID {user_id} (IVR)"
                                 )
                                 return user_id
         except Exception as e:
-            logger.debug(f"Failed to resolve Twitch user ID for {self.channel_id}: {e}")
+            logger.debug(f"IVR API failed for {self.channel_id}: {e}")
 
         return None
 
@@ -153,6 +175,29 @@ class EmoteFetchWorker(QThread):
         """Fetch global + channel emotes from all providers."""
         all_emotes: list[ChatEmote] = []
 
+        # Fetch native platform emotes first
+        if self.platform == "twitch":
+            twitch_provider = TwitchProvider(
+                oauth_token=self.oauth_token,
+                client_id=self.client_id,
+            )
+            try:
+                global_emotes = await twitch_provider.get_global_emotes()
+                all_emotes.extend(global_emotes)
+                logger.debug(f"Fetched {len(global_emotes)} global emotes from twitch")
+            except Exception as e:
+                logger.debug(f"Failed to fetch global emotes from twitch: {e}")
+
+            try:
+                channel_emotes = await twitch_provider.get_channel_emotes(
+                    self.platform, channel_id
+                )
+                all_emotes.extend(channel_emotes)
+                logger.debug(f"Fetched {len(channel_emotes)} channel emotes from twitch")
+            except Exception as e:
+                logger.debug(f"Failed to fetch channel emotes from twitch: {e}")
+
+        # Fetch third-party emotes
         provider_map = {
             "7tv": SevenTVProvider,
             "bttv": BTTVProvider,
@@ -513,13 +558,17 @@ class ChatManager(QObject):
             # Kick DOES echo via websocket, so skip local echo for Kick.
             livestream = self._livestreams.get(channel_key)
             if livestream and livestream.channel.platform != StreamPlatform.KICK:
+                # Use display_name (proper case) if available, fall back to nick
+                display_name = getattr(connection, "_display_name", "") or getattr(
+                    connection, "_nick", "You"
+                )
                 nick = getattr(connection, "_nick", "You")
                 local_msg = ChatMessage(
                     id=str(uuid.uuid4()),
                     user=ChatUser(
                         id="self",
                         name=nick,
-                        display_name=nick,
+                        display_name=display_name,
                         platform=livestream.channel.platform,
                         color=None,
                         badges=[],
@@ -694,10 +743,17 @@ class ChatManager(QObject):
                 # Has raw/animation data on disk but not in memory - load it
                 self._emote_cache.get(emote_key)
 
+        # Debug: log short emote names and emotes containing "om"
+        short_emotes = [e.name for e in emotes if len(e.name) <= 4]
+        om_emotes = [e.name for e in emotes if "om" in e.name.lower()]
         logger.info(
-            f"Loaded {len(emotes)} third-party emotes for {channel_key}, "
+            f"Loaded {len(emotes)} emotes for {channel_key}, "
             f"total emote map: {len(self._emote_map)}"
         )
+        if short_emotes:
+            logger.info(f"Short emotes (<=4 chars): {short_emotes}")
+        if om_emotes:
+            logger.debug(f"Emotes containing 'om': {om_emotes[:20]}")
 
         # Notify widgets immediately so autocomplete has the emote map
         self.emote_cache_updated.emit()
