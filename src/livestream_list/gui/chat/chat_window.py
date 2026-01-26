@@ -19,6 +19,7 @@ from ...chat.manager import ChatManager
 from ...chat.models import ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
+from ..theme import get_theme
 from .chat_widget import ChatWidget
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,9 @@ class _TabButton(QWidget):
         self._active = False
         self._text = text
         self._icon = icon
-        self._active_color = "#1a3a6b"
-        self._inactive_color = "#16213e"
+        theme = get_theme()
+        self._active_color = theme.chat_tab_active
+        self._inactive_color = theme.chat_tab_inactive
         self._hover = False
 
         layout = QHBoxLayout(self)
@@ -75,30 +77,33 @@ class _TabButton(QWidget):
 
         # Text label
         self._label = QLabel(text)
-        self._label.setStyleSheet("color: #ccc; background: transparent;")
+        theme = get_theme()
+        self._label.setStyleSheet(f"color: {theme.text_secondary}; background: transparent;")
         layout.addWidget(self._label)
 
         # Close button
         if closable:
-            close_btn = QPushButton("\u00d7")
-            close_btn.setFixedSize(18, 18)
-            close_btn.setStyleSheet("""
-                QPushButton {
-                    color: #888;
+            self._close_btn = QPushButton("\u00d7")
+            self._close_btn.setFixedSize(18, 18)
+            self._close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    color: {theme.text_muted};
                     background: transparent;
                     border: none;
                     font-size: 14px;
                     font-weight: bold;
                     padding: 0;
-                }
-                QPushButton:hover {
-                    color: white;
+                }}
+                QPushButton:hover {{
+                    color: {theme.text_primary};
                     background-color: rgba(255, 255, 255, 0.15);
                     border-radius: 9px;
-                }
+                }}
             """)
-            close_btn.clicked.connect(self.close_clicked.emit)
-            layout.addWidget(close_btn)
+            self._close_btn.clicked.connect(self.close_clicked.emit)
+            layout.addWidget(self._close_btn)
+        else:
+            self._close_btn = None
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -116,12 +121,13 @@ class _TabButton(QWidget):
         self._update_style()
 
     def _update_style(self) -> None:
+        theme = get_theme()
         if self._active:
             bg = self._active_color
-            text_color = "white"
+            text_color = theme.selection_text
         else:
             bg = self._inactive_color
-            text_color = "#ccc"
+            text_color = theme.text_secondary
         self.setStyleSheet(f"""
             _TabButton {{
                 background-color: {bg};
@@ -130,14 +136,32 @@ class _TabButton(QWidget):
             }}
         """)
         self._label.setStyleSheet(f"color: {text_color}; background: transparent;")
+        # Update close button if present
+        if self._close_btn:
+            self._close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    color: {theme.text_muted};
+                    background: transparent;
+                    border: none;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 0;
+                }}
+                QPushButton:hover {{
+                    color: {theme.text_primary};
+                    background-color: rgba(255, 255, 255, 0.15);
+                    border-radius: 9px;
+                }}
+            """)
 
     def enterEvent(self, event) -> None:  # noqa: N802
         if not self._active:
-            self.setStyleSheet("""
-                _TabButton {
-                    background-color: #1f2b4d;
+            theme = get_theme()
+            self.setStyleSheet(f"""
+                _TabButton {{
+                    background-color: {theme.popup_hover};
                     border: none;
-                }
+                }}
             """)
         super().enterEvent(event)
 
@@ -170,13 +194,14 @@ class _FlowTabBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tabs: list[_TabButton] = []
-        self._active_color = "#1a3a6b"
-        self._inactive_color = "#16213e"
+        theme = get_theme()
+        self._active_color = theme.chat_tab_active
+        self._inactive_color = theme.chat_tab_inactive
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(30)
-        self.setStyleSheet("background-color: #0e1525;")
+        self.setStyleSheet(f"background-color: {theme.window_bg};")
 
     def add_tab(self, icon: QIcon | None, text: str) -> int:
         """Add a new tab button, return its index."""
@@ -285,7 +310,8 @@ class FlowTabWidget(QWidget):
         layout.addWidget(self._tab_bar)
 
         self._stack = QStackedWidget(self)
-        self._stack.setStyleSheet("background-color: #1a1a2e;")
+        theme = get_theme()
+        self._stack.setStyleSheet(f"background-color: {theme.widget_bg};")
         layout.addWidget(self._stack)
 
     def tabBar(self) -> _FlowTabBar:  # noqa: N802
@@ -379,10 +405,6 @@ class ChatWindow(QMainWindow):
         # Flow tab widget (wraps tabs to multiple rows)
         self._tab_widget = FlowTabWidget()
         self._tab_widget.tabCloseRequested.connect(self._on_tab_close)
-        self._tab_widget.setTabColors(
-            self.settings.chat.builtin.tab_active_color,
-            self.settings.chat.builtin.tab_inactive_color,
-        )
 
         self.setCentralWidget(self._tab_widget)
 
@@ -390,19 +412,59 @@ class ChatWindow(QMainWindow):
         tab_bar = self._tab_widget.tabBar()
         tab_bar.context_menu_requested.connect(self._on_tab_context_menu)
 
-        # Window styling
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #0f0f1a;
-            }
-        """)
+        # Apply theme styling (sets tab colors from theme)
+        self.apply_theme()
 
     def update_tab_style(self) -> None:
-        """Refresh tab colors from current settings (call after prefs change)."""
-        self._tab_widget.setTabColors(
-            self.settings.chat.builtin.tab_active_color,
-            self.settings.chat.builtin.tab_inactive_color,
-        )
+        """Refresh tab colors from theme (call after prefs change)."""
+        theme = get_theme()
+        self._tab_widget.setTabColors(theme.chat_tab_active, theme.chat_tab_inactive)
+
+    def apply_theme(self) -> None:
+        """Apply the current theme to the chat window."""
+        # Disable updates during theme change to prevent cascading repaints
+        self.setUpdatesEnabled(False)
+        try:
+            theme = get_theme()
+            self.setStyleSheet(f"""
+                QMainWindow {{
+                    background-color: {theme.chat_bg};
+                    color: {theme.text_primary};
+                }}
+                QWidget {{
+                    background-color: {theme.chat_bg};
+                    color: {theme.text_primary};
+                }}
+                QScrollBar:vertical {{
+                    background-color: {theme.window_bg};
+                    width: 12px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background-color: {theme.border};
+                    border-radius: 4px;
+                    min-height: 20px;
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+            """)
+            # Update tab bar and colors
+            self._tab_widget._tab_bar.setStyleSheet(f"background-color: {theme.window_bg};")
+            self._tab_widget._tab_bar._active_color = theme.chat_tab_active
+            self._tab_widget._tab_bar._inactive_color = theme.chat_tab_inactive
+            for tab in self._tab_widget._tab_bar._tabs:
+                tab._active_color = theme.chat_tab_active
+                tab._inactive_color = theme.chat_tab_inactive
+                tab._update_style()
+            self._tab_widget._stack.setStyleSheet(f"background-color: {theme.widget_bg};")
+            # Update all chat widgets
+            for widget in self._widgets.values():
+                widget.apply_theme()
+            # Update popout windows
+            for popout in self._popout_windows.values():
+                popout.apply_theme()
+        finally:
+            self.setUpdatesEnabled(True)
 
     def update_animation_state(self) -> None:
         """Update animation timers on all widgets (call after prefs change)."""
@@ -487,6 +549,9 @@ class ChatWindow(QMainWindow):
         widget.set_animated_cache(self.chat_manager.emote_cache.animated_dict)
         if self.chat_manager.emote_map:
             widget.set_emote_map(self.chat_manager.emote_map)
+
+        # Apply current theme colors to the new widget
+        widget.apply_theme()
 
         self._widgets[channel_key] = widget
 
@@ -722,15 +787,20 @@ class ChatPopoutWindow(QMainWindow):
         popin_action = toolbar.addAction("Pop In")
         popin_action.triggered.connect(lambda: self.popin_requested.emit(self.channel_key))
 
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #0f0f1a;
-            }
-            QToolBar {
-                background-color: #16213e;
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Apply the current theme to the popout window."""
+        theme = get_theme()
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background-color: {theme.chat_bg};
+            }}
+            QToolBar {{
+                background-color: {theme.chat_input_bg};
                 border: none;
                 padding: 2px;
-            }
+            }}
         """)
 
     def take_widget(self) -> ChatWidget | None:

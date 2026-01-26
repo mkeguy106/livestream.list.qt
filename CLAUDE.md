@@ -144,6 +144,40 @@ The app has a built-in chat client (alternative to opening browser popout chat).
   - Internal YouTube links (e.g., second channel) have direct URLs without redirect
 - **Kick**: REST API `GET /api/v2/channels/{id}`, extracts social usernames from `user` object, constructs full URLs
 
+### Dismissible Banner Pattern
+
+For any banner with a dismiss/close button, use the **overlay X button** approach:
+
+```python
+class DismissibleBanner(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._label = QLabel()
+        self._label.setWordWrap(True)
+        layout.addWidget(self._label, 1)
+
+        # Close button as overlay (NOT in layout)
+        self._close_btn = QPushButton("×", self)
+        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.clicked.connect(self.hide)
+        self._close_btn.raise_()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        # Position in top-right corner
+        self._close_btn.move(self.width() - 24, 4)
+```
+
+**Key points:**
+- Button is a child of the banner but NOT added to the layout
+- Use `resizeEvent` to reposition button when banner resizes
+- Add right padding to label (`padding: 6px 28px 6px 8px`) to avoid text overlap
+- Style button with semi-transparent background: `background-color: rgba(0, 0, 0, 0.3); border-radius: 10px;`
+- This avoids layout issues where the button column shows the wrong background color
+
 ### Key Files
 
 | File | Purpose |

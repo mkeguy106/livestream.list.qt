@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
+from ..theme import get_theme
 from .emote_completer import EmoteCompleter
 from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
@@ -49,10 +50,10 @@ class ClickableTitleLabel(QLabel):
 
 
 class DismissibleBanner(QWidget):
-    """Banner widget with a label and dismiss button.
+    """Banner widget with a label and overlay dismiss button.
 
     The banner dynamically resizes based on content (word wrap).
-    The dismiss button hides the banner for the current session only.
+    The dismiss button floats over the content in the top-right corner.
     """
 
     dismissed = Signal()
@@ -80,12 +81,20 @@ class DismissibleBanner(QWidget):
         )
         layout.addWidget(self._label, 1)
 
-        # Close button - subtle X on the right
-        self._close_btn = QPushButton("×")
+        # Close button - overlay in top-right corner (not in layout)
+        self._close_btn = QPushButton("×", self)
         self._close_btn.setFixedSize(20, 20)
         self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._close_btn.clicked.connect(self._on_dismiss)
-        layout.addWidget(self._close_btn, 0, Qt.AlignmentFlag.AlignTop)
+        self._close_btn.raise_()  # Ensure button is on top
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Reposition close button when banner resizes."""
+        super().resizeEvent(event)
+        # Position button in top-right corner with small margin
+        btn_x = self.width() - self._close_btn.width() - 4
+        btn_y = 4
+        self._close_btn.move(btn_x, btn_y)
 
     def _on_dismiss(self) -> None:
         """Handle dismiss button click."""
@@ -108,36 +117,36 @@ class DismissibleBanner(QWidget):
 
     def applyBannerStyle(self, bg_color: str, text_color: str) -> None:  # noqa: N802
         """Apply banner colors."""
-        label_style = f"""
+        # Style the label (fills the banner)
+        self._label.setStyleSheet(f"""
             QLabel {{
                 background-color: {bg_color};
                 color: {text_color};
                 font-size: 11px;
-                padding: 6px 8px;
+                padding: 6px 28px 6px 8px;
+                border: none;
                 border-bottom: 1px solid #333;
             }}
             QLabel a {{
                 color: #6db3f2;
                 text-decoration: none;
             }}
-        """
-        close_style = f"""
+        """)
+        # Style the overlay close button - semi-transparent, rounds nicely
+        self._close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {bg_color};
+                background-color: rgba(0, 0, 0, 0.3);
                 color: {text_color};
                 border: none;
+                border-radius: 10px;
                 font-size: 14px;
                 font-weight: bold;
-                padding: 2px;
-                border-bottom: 1px solid #333;
             }}
             QPushButton:hover {{
-                color: #ff6b6b;
-                background-color: rgba(255, 100, 100, 0.2);
+                background-color: rgba(255, 100, 100, 0.5);
+                color: #fff;
             }}
-        """
-        self._label.setStyleSheet(label_style)
-        self._close_btn.setStyleSheet(close_style)
+        """)
 
 
 class ChatInput(QLineEdit):
@@ -234,65 +243,39 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._title_banner.hide()
 
         # Search bar (hidden by default)
+        # Object names are used for consolidated stylesheet in apply_theme()
         self._search_widget = QWidget()
-        self._search_widget.setStyleSheet("""
-            QWidget {
-                background-color: #16213e;
-                border-bottom: 1px solid #333;
-            }
-        """)
+        self._search_widget.setObjectName("chat_search_widget")
         search_layout = QHBoxLayout(self._search_widget)
         search_layout.setContentsMargins(6, 4, 6, 4)
         search_layout.setSpacing(4)
 
         self._search_input = QLineEdit()
+        self._search_input.setObjectName("chat_search_input")
         self._search_input.setPlaceholderText("Search messages...")
-        self._search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1a1a2e;
-                border: 1px solid #444;
-                border-radius: 3px;
-                padding: 3px 6px;
-                color: #eee;
-                font-size: 12px;
-            }
-            QLineEdit:focus { border-color: #6441a5; }
-        """)
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._search_input.returnPressed.connect(self._search_next)
         search_layout.addWidget(self._search_input)
 
         self._search_count_label = QLabel("")
-        self._search_count_label.setStyleSheet(
-            "color: #aaa; font-size: 11px; background: transparent; min-width: 50px;"
-        )
+        self._search_count_label.setObjectName("chat_search_count")
         search_layout.addWidget(self._search_count_label)
 
-        search_btn_style = """
-            QPushButton {
-                background: transparent; color: #aaa; border: none;
-                font-size: 14px; padding: 2px 6px;
-            }
-            QPushButton:hover {
-                color: #fff; background: rgba(255,255,255,0.1);
-                border-radius: 3px;
-            }
-        """
         self._search_prev_btn = QPushButton("\u25b2")
+        self._search_prev_btn.setObjectName("chat_search_btn")
         self._search_prev_btn.setFixedSize(24, 24)
-        self._search_prev_btn.setStyleSheet(search_btn_style)
         self._search_prev_btn.clicked.connect(self._search_prev)
         search_layout.addWidget(self._search_prev_btn)
 
         self._search_next_btn = QPushButton("\u25bc")
+        self._search_next_btn.setObjectName("chat_search_btn")
         self._search_next_btn.setFixedSize(24, 24)
-        self._search_next_btn.setStyleSheet(search_btn_style)
         self._search_next_btn.clicked.connect(self._search_next)
         search_layout.addWidget(self._search_next_btn)
 
         self._search_close_btn = QPushButton("\u2715")
+        self._search_close_btn.setObjectName("chat_search_btn")
         self._search_close_btn.setFixedSize(24, 24)
-        self._search_close_btn.setStyleSheet(search_btn_style)
         self._search_close_btn.clicked.connect(self._close_search)
         search_layout.addWidget(self._search_close_btn)
 
@@ -307,6 +290,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._delegate = ChatMessageDelegate(self.settings, parent=self)
 
         self._list_view = QListView()
+        self._list_view.setObjectName("chat_list_view")
         self._list_view.setModel(self._model)
         self._list_view.setItemDelegate(self._delegate)
         self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
@@ -320,29 +304,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._list_view.viewport().setMouseTracking(True)
         self._list_view.viewport().installEventFilter(self)
 
-        # Style the list
-        self._list_view.setStyleSheet("""
-            QListView {
-                background-color: #1a1a2e;
-                border: none;
-                padding: 4px;
-            }
-        """)
-
         layout.addWidget(self._list_view)
 
         # Connecting indicator (shown until connection is established)
         self._connecting_label = QLabel("Connecting to chat...")
+        self._connecting_label.setObjectName("chat_connecting")
         self._connecting_label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
         )
-        self._connecting_label.setStyleSheet("""
-            QLabel {
-                background-color: #1a1a2e;
-                color: #888;
-                font-size: 13px;
-            }
-        """)
         self._connecting_label.setSizePolicy(
             self._connecting_label.sizePolicy().horizontalPolicy(),
             self._list_view.sizePolicy().verticalPolicy(),
@@ -384,19 +353,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # New messages indicator (hidden by default)
         self._new_msg_button = QPushButton("New messages")
-        self._new_msg_button.setStyleSheet("""
-            QPushButton {
-                background-color: #6441a5;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 4px 12px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #7d5bbe;
-            }
-        """)
+        self._new_msg_button.setObjectName("chat_new_msg")
         self._new_msg_button.setFixedHeight(24)
         self._new_msg_button.hide()
         self._new_msg_button.clicked.connect(self._scroll_to_bottom)
@@ -408,60 +365,19 @@ class ChatWidget(QWidget, ChatSearchMixin):
         input_layout.setSpacing(4)
 
         self._input = ChatInput()
-        self._input.setStyleSheet("""
-            QLineEdit {
-                background-color: #16213e;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 6px 8px;
-                color: #eee;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border-color: #6441a5;
-            }
-        """)
+        self._input.setObjectName("chat_input")
         self._input.returnPressed.connect(self._on_send)
         input_layout.addWidget(self._input)
 
         self._send_button = QPushButton("Chat")
-        self._send_button.setStyleSheet("""
-            QPushButton {
-                background-color: #6441a5;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #7d5bbe;
-            }
-            QPushButton:disabled {
-                background-color: #444;
-                color: #888;
-            }
-        """)
+        self._send_button.setObjectName("chat_send_btn")
         self._send_button.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_button)
 
         self._settings_button = QPushButton("\u2699")
+        self._settings_button.setObjectName("chat_settings_btn")
         self._settings_button.setFixedSize(28, 28)
         self._settings_button.setToolTip("Chat settings")
-        self._settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #aaa;
-                border: none;
-                border-radius: 4px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #2a2a4a;
-                color: #eee;
-            }
-        """)
         self._settings_button.clicked.connect(self._show_settings_menu)
         input_layout.addWidget(self._settings_button)
 
@@ -546,6 +462,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Find shortcut (Ctrl+F)
         find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         find_shortcut.activated.connect(self._toggle_search)
+
+        # Note: apply_theme() is called by the parent ChatWindow after widget creation
+        # to avoid duplicate theme application during construction
 
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add messages to the chat.
@@ -806,11 +725,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_banner.hide()
 
     def _update_banner_style(self) -> None:
-        """Apply banner colors from settings."""
-        bg_color = self.settings.banner_bg_color
-        text_color = self.settings.banner_text_color
-        self._title_banner.applyBannerStyle(bg_color, text_color)
-        self._socials_banner.applyBannerStyle(bg_color, text_color)
+        """Apply banner colors from theme."""
+        theme = get_theme()
+        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
 
     def _update_stream_title(self) -> None:
         """Update the stream title banner from the livestream data."""
@@ -922,23 +840,164 @@ class ChatWidget(QWidget, ChatSearchMixin):
         else:
             self._socials_banner.hide()
 
+    def apply_theme(self) -> None:
+        """Apply the current theme to the chat widget.
+
+        Uses a single consolidated stylesheet with ID selectors for performance.
+        This reduces ~15 individual setStyleSheet() calls to 1, significantly
+        reducing layout recalculations during theme switches.
+        """
+        theme = get_theme()
+
+        # Consolidated stylesheet using object name (ID) selectors
+        # This is much faster than setting styles on each widget individually
+        self.setStyleSheet(f"""
+            /* Widget background */
+            ChatWidget {{
+                background-color: {theme.chat_bg};
+            }}
+
+            /* Search widget container */
+            #chat_search_widget {{
+                background-color: {theme.chat_input_bg};
+                border-bottom: 1px solid {theme.border_light};
+            }}
+
+            /* Search input */
+            #chat_search_input {{
+                background-color: {theme.widget_bg};
+                border: 1px solid {theme.border};
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+            #chat_search_input:focus {{
+                border-color: {theme.accent};
+            }}
+
+            /* Search count label */
+            #chat_search_count {{
+                color: {theme.text_muted};
+                font-size: 11px;
+                background: transparent;
+                min-width: 50px;
+            }}
+
+            /* Search buttons (prev, next, close) */
+            #chat_search_btn {{
+                background: transparent;
+                color: {theme.text_muted};
+                border: none;
+                font-size: 14px;
+                padding: 2px 6px;
+            }}
+            #chat_search_btn:hover {{
+                color: {theme.text_primary};
+                background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }}
+
+            /* Message list view */
+            #chat_list_view {{
+                background-color: {theme.chat_bg};
+                border: none;
+            }}
+
+            /* Connecting indicator */
+            #chat_connecting {{
+                background-color: {theme.chat_bg};
+                color: {theme.text_muted};
+                font-size: 13px;
+            }}
+
+            /* New messages button */
+            #chat_new_msg {{
+                background-color: {theme.accent};
+                color: white;
+                border: none;
+                border-radius: 12px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }}
+            #chat_new_msg:hover {{
+                background-color: {theme.accent_hover};
+            }}
+
+            /* Chat input field */
+            #chat_input {{
+                background-color: {theme.chat_input_bg};
+                border: 1px solid {theme.border_light};
+                border-radius: 4px;
+                padding: 6px 8px;
+                color: {theme.text_primary};
+                font-size: 13px;
+            }}
+            #chat_input:focus {{
+                border-color: {theme.accent};
+            }}
+
+            /* Send button */
+            #chat_send_btn {{
+                background-color: {theme.accent};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 12px;
+            }}
+            #chat_send_btn:hover {{
+                background-color: {theme.accent_hover};
+            }}
+            #chat_send_btn:disabled {{
+                background-color: {theme.border};
+                color: {theme.text_muted};
+            }}
+
+            /* Settings button */
+            #chat_settings_btn {{
+                background-color: transparent;
+                color: {theme.text_muted};
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            #chat_settings_btn:hover {{
+                background-color: {theme.popup_hover};
+                color: {theme.text_primary};
+            }}
+        """)
+
+        # Update banners AFTER main stylesheet to prevent cascade override
+        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+
+        # Update delegate theme (loads colors but doesn't repaint - that happens naturally)
+        self._delegate.apply_theme()
+
+        # Update completers theme
+        self._emote_completer.apply_theme()
+        self._mention_completer.apply_theme()
+
     def _show_settings_menu(self) -> None:
         """Show a popup menu with quick chat toggles."""
         from PySide6.QtWidgets import QMenu
 
+        theme = get_theme()
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1a1a2e;
-                color: #eee;
-                border: 1px solid #333;
-            }
-            QMenu::item:selected {
-                background-color: #2a2a4a;
-            }
-            QMenu::indicator:checked {
-                color: #6441a5;
-            }
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {theme.popup_bg};
+                color: {theme.text_primary};
+                border: 1px solid {theme.border};
+            }}
+            QMenu::item:selected {{
+                background-color: {theme.popup_hover};
+            }}
+            QMenu::indicator:checked {{
+                color: {theme.accent};
+            }}
         """)
 
         # Name colors toggle
@@ -1182,80 +1241,38 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
 
         # Header
         self._header = QLabel(f"  {user.display_name} — {len(messages)} messages")
-        self._header.setStyleSheet("""
-            QLabel {
-                background-color: #16213e;
-                color: #eee;
-                padding: 8px;
-                font-weight: bold;
-                font-size: 13px;
-            }
-        """)
         layout.addWidget(self._header)
         self._display_name = user.display_name
 
         # Search bar (hidden by default)
         self._search_widget = QWidget()
-        self._search_widget.setStyleSheet("""
-            QWidget {
-                background-color: #16213e;
-                border-bottom: 1px solid #333;
-            }
-        """)
         search_layout = QHBoxLayout(self._search_widget)
         search_layout.setContentsMargins(6, 4, 6, 4)
         search_layout.setSpacing(4)
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Search messages...")
-        self._search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1a1a2e;
-                border: 1px solid #444;
-                border-radius: 3px;
-                padding: 3px 6px;
-                color: #eee;
-                font-size: 12px;
-            }
-            QLineEdit:focus { border-color: #6441a5; }
-        """)
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._search_input.returnPressed.connect(self._search_next)
         search_layout.addWidget(self._search_input)
 
         self._search_count_label = QLabel("")
-        self._search_count_label.setStyleSheet(
-            "color: #aaa; font-size: 11px; background: transparent; min-width: 50px;"
-        )
         search_layout.addWidget(self._search_count_label)
 
-        search_btn_style = """
-            QPushButton {
-                background: transparent; color: #aaa; border: none;
-                font-size: 14px; padding: 2px 6px;
-            }
-            QPushButton:hover {
-                color: #fff; background: rgba(255,255,255,0.1);
-                border-radius: 3px;
-            }
-        """
-        prev_btn = QPushButton("\u25b2")
-        prev_btn.setFixedSize(24, 24)
-        prev_btn.setStyleSheet(search_btn_style)
-        prev_btn.clicked.connect(self._search_prev)
-        search_layout.addWidget(prev_btn)
+        self._search_prev_btn = QPushButton("\u25b2")
+        self._search_prev_btn.setFixedSize(24, 24)
+        self._search_prev_btn.clicked.connect(self._search_prev)
+        search_layout.addWidget(self._search_prev_btn)
 
-        next_btn = QPushButton("\u25bc")
-        next_btn.setFixedSize(24, 24)
-        next_btn.setStyleSheet(search_btn_style)
-        next_btn.clicked.connect(self._search_next)
-        search_layout.addWidget(next_btn)
+        self._search_next_btn = QPushButton("\u25bc")
+        self._search_next_btn.setFixedSize(24, 24)
+        self._search_next_btn.clicked.connect(self._search_next)
+        search_layout.addWidget(self._search_next_btn)
 
-        close_btn = QPushButton("\u2715")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setStyleSheet(search_btn_style)
-        close_btn.clicked.connect(self._close_search)
-        search_layout.addWidget(close_btn)
+        self._search_close_btn = QPushButton("\u2715")
+        self._search_close_btn.setFixedSize(24, 24)
+        self._search_close_btn.clicked.connect(self._close_search)
+        search_layout.addWidget(self._search_close_btn)
 
         self._search_widget.hide()
         layout.addWidget(self._search_widget)
@@ -1278,13 +1295,6 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         self._list_view.setWordWrap(True)
         self._list_view.setUniformItemSizes(False)
         self._list_view.setSpacing(0)
-        self._list_view.setStyleSheet("""
-            QListView {
-                background-color: #1a1a2e;
-                border: none;
-                padding: 4px;
-            }
-        """)
         layout.addWidget(self._list_view)
 
         # Enable mouse tracking for URL cursor changes and Ctrl+scroll
@@ -1308,11 +1318,77 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         # Scroll to bottom (most recent)
         self._list_view.scrollToBottom()
 
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #0f0f1a;
-            }
+        # Apply theme colors
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Apply the current theme to the dialog."""
+        theme = get_theme()
+
+        # Dialog background
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme.window_bg};
+            }}
         """)
+
+        # Header
+        self._header.setStyleSheet(f"""
+            QLabel {{
+                background-color: {theme.chat_input_bg};
+                color: {theme.text_primary};
+                padding: 8px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+        """)
+
+        # Search widget
+        self._search_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme.chat_input_bg};
+                border-bottom: 1px solid {theme.border_light};
+            }}
+        """)
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme.widget_bg};
+                border: 1px solid {theme.border};
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {theme.accent}; }}
+        """)
+        self._search_count_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; min-width: 50px;"
+        )
+        search_btn_style = f"""
+            QPushButton {{
+                background: transparent; color: {theme.text_muted}; border: none;
+                font-size: 14px; padding: 2px 6px;
+            }}
+            QPushButton:hover {{
+                color: {theme.text_primary}; background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }}
+        """
+        self._search_prev_btn.setStyleSheet(search_btn_style)
+        self._search_next_btn.setStyleSheet(search_btn_style)
+        self._search_close_btn.setStyleSheet(search_btn_style)
+
+        # List view
+        self._list_view.setStyleSheet(f"""
+            QListView {{
+                background-color: {theme.chat_bg};
+                border: none;
+                padding: 4px;
+            }}
+        """)
+
+        # Update delegate theme
+        self._delegate.apply_theme()
 
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add new messages from the tracked user (called by ChatWidget)."""

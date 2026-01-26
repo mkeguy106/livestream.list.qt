@@ -15,6 +15,7 @@ from ..core.monitor import StreamMonitor
 from ..core.settings import Settings
 from ..core.streamlink import StreamlinkLauncher
 from ..notifications.notifier import Notifier
+from .theme import ThemeManager, get_app_stylesheet
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,10 @@ class Application(QApplication):
         """Initialize application components."""
         # Load settings
         self.settings = Settings.load()
+
+        # Initialize theme manager with settings and apply app stylesheet
+        ThemeManager.set_settings(self.settings)
+        self.setStyleSheet(get_app_stylesheet())
 
         # Validate YouTube cookies on startup
         self._validate_youtube_cookies()

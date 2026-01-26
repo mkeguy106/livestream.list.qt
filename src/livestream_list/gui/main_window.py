@@ -33,12 +33,14 @@ from PySide6.QtWidgets import (
 
 from ..core.chat import ChatLauncher
 from ..core.models import Channel, Livestream, SortMode, StreamPlatform, UIStyle
+from ..core.settings import ThemeMode
 from .dialogs import (
     AboutDialog,
     AddChannelDialog,
     ExportDialog,
     PreferencesDialog,
 )
+from .theme import ThemeManager, get_app_stylesheet, get_theme
 
 if TYPE_CHECKING:
     from .app import Application
@@ -105,6 +107,7 @@ class StreamRow(QWidget):
     def _setup_ui(self):
         """Set up the row UI."""
         style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
+        theme = get_theme()
 
         # Font scaling
         default_font_size = QApplication.font().pointSize()
@@ -149,12 +152,14 @@ class StreamRow(QWidget):
         name_row.addWidget(self.name_label)
 
         self.duration_label = QLabel()
-        self.duration_label.setStyleSheet(f"color: gray; font-size: {font_size}pt;")
+        self.duration_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: {font_size}pt;"
+        )
         name_row.addWidget(self.duration_label)
 
         self.playing_label = QLabel()
         self.playing_label.setStyleSheet(
-            f"color: #4CAF50; font-weight: bold; font-size: {font_size}pt;"
+            f"color: {theme.status_live}; font-weight: bold; font-size: {font_size}pt;"
         )
         self.playing_label.setVisible(False)
         name_row.addWidget(self.playing_label)
@@ -162,7 +167,7 @@ class StreamRow(QWidget):
         name_row.addStretch()
 
         self.viewers_label = QLabel()
-        self.viewers_label.setStyleSheet(f"color: gray; font-size: {font_size}pt;")
+        self.viewers_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {font_size}pt;")
         name_row.addWidget(self.viewers_label)
 
         info_layout.addLayout(name_row)
@@ -173,7 +178,7 @@ class StreamRow(QWidget):
 
             title_size = max(8, int(font_size * 0.85))
             self.title_label = QLabel()
-            self.title_label.setStyleSheet(f"color: gray; font-size: {title_size}pt;")
+            self.title_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {title_size}pt;")
             self.title_label.setWordWrap(False)
             # Allow title to shrink and hide when window is small
             self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -309,14 +314,44 @@ class StreamRow(QWidget):
 
         # Play/Stop button
         if self.play_btn:
+            theme = get_theme()
             if is_playing:
                 self.play_btn.setText("■")
                 self.play_btn.setToolTip("Stop playback")
-                self.play_btn.setStyleSheet("color: red;")
+                self.play_btn.setStyleSheet(f"color: {theme.status_error};")
             else:
                 self.play_btn.setText("▶")
                 self.play_btn.setToolTip("Play stream")
                 self.play_btn.setStyleSheet("")
+
+    def apply_theme(self) -> None:
+        """Apply current theme colors without rebuilding the widget.
+
+        This is much faster than destroying and recreating the row
+        since it only updates the stylesheet colors.
+        """
+        theme = get_theme()
+        fs = self._font_size
+
+        # Update duration/last seen label
+        self.duration_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {fs}pt;")
+
+        # Update playing indicator
+        self.playing_label.setStyleSheet(
+            f"color: {theme.status_live}; font-weight: bold; font-size: {fs}pt;"
+        )
+
+        # Update viewers label
+        self.viewers_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {fs}pt;")
+
+        # Update title label if present
+        if self.title_label:
+            title_size = max(8, int(fs * 0.85))
+            self.title_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {title_size}pt;")
+
+        # Update play button color if playing
+        if self.play_btn and self._is_playing:
+            self.play_btn.setStyleSheet(f"color: {theme.status_error};")
 
     def set_selection_mode(self, enabled: bool):
         """Show/hide selection checkbox."""
@@ -561,6 +596,12 @@ class MainWindow(QMainWindow):
         refresh_btn.clicked.connect(self._on_refresh)
         toolbar.addWidget(refresh_btn)
 
+        # Theme toggle button
+        self.theme_btn = QToolButton()
+        self._update_theme_button()
+        self.theme_btn.clicked.connect(self._on_theme_toggle)
+        toolbar.addWidget(self.theme_btn)
+
         toolbar.addSeparator()
 
         # Selection mode button
@@ -637,6 +678,8 @@ class MainWindow(QMainWindow):
         self.hide_offline_cb.setChecked(self.app.settings.hide_offline)
         self.favorites_cb.setChecked(self.app.settings.favorites_only)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
+        # Apply theme
+        self._apply_theme()
 
     def set_loading_complete(self):
         """Switch from loading view to appropriate content view."""
@@ -854,6 +897,140 @@ class MainWindow(QMainWindow):
         """Handle refresh action."""
         self.set_status("Refreshing...")
         self.app.refresh(on_complete=lambda: self.set_status("Ready"))
+
+    def _update_theme_button(self):
+        """Update the theme button text and tooltip based on current mode."""
+        mode = self.app.settings.theme_mode
+        if mode == ThemeMode.AUTO:
+            self.theme_btn.setText("◐")  # Half circle for auto
+            self.theme_btn.setToolTip("Theme: Auto (click to switch to Light)")
+        elif mode == ThemeMode.LIGHT:
+            self.theme_btn.setText("☀")  # Sun for light
+            self.theme_btn.setToolTip("Theme: Light (click to switch to Dark)")
+        else:  # DARK
+            self.theme_btn.setText("☾")  # Moon for dark
+            self.theme_btn.setToolTip("Theme: Dark (click to switch to Auto)")
+
+    def _on_theme_toggle(self):
+        """Cycle through theme modes: Auto -> Light -> Dark -> Auto."""
+        mode = self.app.settings.theme_mode
+        # Remember current visual state before changing
+        was_dark = ThemeManager.is_dark_mode()
+
+        if mode == ThemeMode.AUTO:
+            new_mode = ThemeMode.LIGHT
+        elif mode == ThemeMode.LIGHT:
+            new_mode = ThemeMode.DARK
+        else:
+            new_mode = ThemeMode.AUTO
+
+        self.app.settings.theme_mode = new_mode
+        self.app.save_settings()
+        ThemeManager.set_settings(self.app.settings)
+        ThemeManager.invalidate_cache()
+        self._update_theme_button()
+
+        # Only apply theme if the visual appearance actually changed
+        is_dark = ThemeManager.is_dark_mode()
+        if was_dark != is_dark:
+            self._apply_theme()
+
+    def _apply_theme(self):
+        """Apply the current theme to all windows."""
+        # Disable updates during theme change to prevent cascading repaints
+        self.setUpdatesEnabled(False)
+        try:
+            theme = get_theme()
+            # Apply global app stylesheet (affects all dialogs)
+            self.app.setStyleSheet(get_app_stylesheet())
+            # Apply comprehensive stylesheet to main window
+            self.setStyleSheet(f"""
+                QMainWindow {{
+                    background-color: {theme.window_bg};
+                    color: {theme.text_primary};
+                }}
+                QWidget {{
+                    background-color: {theme.window_bg};
+                    color: {theme.text_primary};
+                }}
+                QToolBar {{
+                    background-color: {theme.toolbar_bg};
+                    border: none;
+                }}
+                QToolButton {{
+                    color: {theme.text_primary};
+                }}
+                QToolButton:checked {{
+                    background-color: {theme.accent};
+                    color: {theme.selection_text};
+                }}
+                QListWidget {{
+                    background-color: {theme.widget_bg};
+                    border: none;
+                }}
+                QListWidget::item {{
+                    background-color: {theme.widget_bg};
+                }}
+                QListWidget::item:selected {{
+                    background-color: {theme.selection_bg};
+                }}
+                QLabel {{
+                    background-color: transparent;
+                }}
+                QCheckBox {{
+                    color: {theme.text_primary};
+                }}
+                QComboBox {{
+                    background-color: {theme.input_bg};
+                    color: {theme.text_primary};
+                    border: 1px solid {theme.border};
+                    padding: 4px;
+                }}
+                QComboBox QAbstractItemView {{
+                    background-color: {theme.popup_bg};
+                    color: {theme.text_primary};
+                    selection-background-color: {theme.selection_bg};
+                }}
+                QLineEdit {{
+                    background-color: {theme.input_bg};
+                    color: {theme.text_primary};
+                    border: 1px solid {theme.border};
+                    padding: 4px;
+                }}
+                QPushButton {{
+                    background-color: {theme.input_bg};
+                    color: {theme.text_primary};
+                    border: 1px solid {theme.border};
+                }}
+                QPushButton:hover {{
+                    background-color: {theme.accent_hover};
+                }}
+                QStatusBar {{
+                    background-color: {theme.toolbar_bg};
+                    color: {theme.text_secondary};
+                }}
+                QProgressBar {{
+                    background-color: {theme.input_bg};
+                    border: 1px solid {theme.border};
+                }}
+                QProgressBar::chunk {{
+                    background-color: {theme.accent};
+                }}
+            """)
+            # Update loading detail label color
+            if hasattr(self, "loading_detail"):
+                self.loading_detail.setStyleSheet(f"color: {theme.text_muted};")
+            if hasattr(self, "all_offline_label"):
+                self.all_offline_label.setStyleSheet(f"color: {theme.text_muted};")
+            # Update existing StreamRows in-place instead of rebuilding
+            # This is much faster than refresh_stream_list() which destroys/recreates all rows
+            for row in self._stream_rows.values():
+                row.apply_theme()
+            # Notify chat window if open
+            if hasattr(self.app, "_chat_window") and self.app._chat_window:
+                self.app._chat_window.apply_theme()
+        finally:
+            self.setUpdatesEnabled(True)
 
     def _on_item_double_clicked(self, item: QListWidgetItem):
         """Handle double-click on list item."""
@@ -1099,6 +1276,7 @@ class MainWindow(QMainWindow):
                     "ui_style",
                     "platform_colors",
                     "font_size",
+                    "theme_mode",
                     "streamlink",
                     "notifications",
                     "chat",

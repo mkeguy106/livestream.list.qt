@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..theme import get_theme
+
 logger = logging.getLogger(__name__)
 
 MAX_SUGGESTIONS = 15
@@ -50,28 +52,37 @@ class MentionCompleter(QWidget):
         self._list = QListWidget()
         self._list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._list.setMaximumHeight(300)
-        self._list.setStyleSheet("""
-            QListWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #444;
-                border-radius: 4px;
-                color: #eee;
-                font-size: 12px;
-                padding: 2px;
-            }
-            QListWidget::item {
-                padding: 4px 8px;
-                border-radius: 2px;
-            }
-            QListWidget::item:selected {
-                background-color: #6441a5;
-            }
-            QListWidget::item:hover {
-                background-color: #1f2b4d;
-            }
-        """)
+        self._apply_list_style()
         self._list.itemClicked.connect(self._on_item_activated)
         layout.addWidget(self._list)
+
+    def _apply_list_style(self) -> None:
+        """Apply theme-aware stylesheet to the list widget."""
+        theme = get_theme()
+        self._list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {theme.popup_bg};
+                border: 1px solid {theme.popup_border};
+                border-radius: 4px;
+                color: {theme.text_primary};
+                font-size: 12px;
+                padding: 2px;
+            }}
+            QListWidget::item {{
+                padding: 4px 8px;
+                border-radius: 2px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {theme.popup_selected};
+            }}
+            QListWidget::item:hover {{
+                background-color: {theme.popup_hover};
+            }}
+        """)
+
+    def apply_theme(self) -> None:
+        """Apply theme colors to the completer."""
+        self._apply_list_style()
 
     def _connect_signals(self) -> None:
         """Connect to the input widget's signals."""

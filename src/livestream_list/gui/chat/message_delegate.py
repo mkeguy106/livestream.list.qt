@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ...chat.models import ChatMessage
 from ...core.settings import BuiltinChatSettings
+from ..theme import get_theme
 from .message_model import MessageRole
 
 # Layout constants
@@ -28,8 +29,6 @@ MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
 
 # URL detection
 URL_RE = re.compile(r'https?://[^\s<>\[\]"\'`)\]]+')
-URL_COLOR = QColor("#58a6ff")
-URL_COLOR_SELECTED = QColor("#90d5ff")  # Lighter blue for contrast on selection highlight
 
 # Shared alignment flags
 ALIGN_LEFT_VCENTER = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -53,6 +52,28 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
         self._size_cache: dict[tuple, QSize] = {}
         self._size_cache_max = 500
+        # Theme colors (updated via apply_theme)
+        self._load_theme_colors()
+
+    def _load_theme_colors(self) -> None:
+        """Load colors from the current theme."""
+        theme = get_theme()
+        self._url_color = QColor(theme.chat_url)
+        self._url_color_selected = QColor(theme.chat_url_selected)
+        self._system_message_color = QColor(theme.chat_system_message)
+        self._text_muted_color = QColor(theme.text_muted)
+        self._alt_row_even = QColor(theme.chat_alt_row_even)
+        self._alt_row_odd = QColor(theme.chat_alt_row_odd)
+        self._mention_highlight = QColor(theme.chat_mention_highlight)
+
+    def apply_theme(self) -> None:
+        """Apply theme colors (call when theme changes).
+
+        Note: We intentionally do NOT invalidate the size cache here because
+        theme colors don't affect message height - only layout-affecting settings
+        (font size, badges, timestamps) require size recalculation.
+        """
+        self._load_theme_colors()
 
     def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
         """Set the shared emote pixmap cache."""
@@ -105,19 +126,22 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if is_selected:
             painter.fillRect(option.rect, option.palette.highlight())
         elif message.is_system:
-            painter.fillRect(option.rect, QColor(100, 50, 150, 40))
+            # System message background - semi-transparent purple
+            sys_bg = QColor(self._system_message_color)
+            sys_bg.setAlpha(40)
+            painter.fillRect(option.rect, sys_bg)
         elif message.is_hype_chat:
             painter.fillRect(option.rect, QColor(200, 170, 50, 30))
             # Left accent bar for hype chat
             accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
             painter.fillRect(accent_rect, QColor(218, 165, 32))
         elif message.is_mention:
-            painter.fillRect(option.rect, QColor(self.settings.mention_highlight_color))
+            painter.fillRect(option.rect, self._mention_highlight)
         elif self.settings.show_alternating_rows:
             if index.row() % 2 == 0:
-                color = QColor(self.settings.alt_row_color_even)
+                color = self._alt_row_even
             else:
-                color = QColor(self.settings.alt_row_color_odd)
+                color = self._alt_row_odd
             if color.alpha() > 0:
                 painter.fillRect(option.rect, color)
 
@@ -146,7 +170,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Timestamp (optional)
         if self.settings.show_timestamps:
             ts_text = message.timestamp.strftime("%H:%M")
-            painter.setPen(highlight_color if is_selected else QColor(128, 128, 128))
+            painter.setPen(highlight_color if is_selected else self._text_muted_color)
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             painter.setFont(ts_font)
@@ -160,7 +184,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             italic_font = QFont(font)
             italic_font.setItalic(True)
             painter.setFont(italic_font)
-            painter.setPen(highlight_color if is_selected else QColor(190, 150, 255))
+            painter.setPen(highlight_color if is_selected else self._system_message_color)
             sys_text = message.system_text
             sys_width = QFontMetrics(italic_font).horizontalAdvance(sys_text)
             remaining = available_width - (x - rect.x())
@@ -413,7 +437,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if draw_word:
                 if in_url:
                     saved_pen = painter.pen()
-                    url_color = URL_COLOR_SELECTED if is_selected else URL_COLOR
+                    url_color = self._url_color_selected if is_selected else self._url_color
                     painter.setPen(url_color)
                     font = painter.font()
                     font.setUnderline(True)

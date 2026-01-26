@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.models import ChatEmote
+from ..theme import get_theme
 
 logger = logging.getLogger(__name__)
 
@@ -51,46 +52,51 @@ class EmotePickerWidget(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search emotes...")
         self._search.textChanged.connect(self._on_search_changed)
-        self._search.setStyleSheet("""
-            QLineEdit {
-                background-color: #16213e;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: #eee;
-                font-size: 12px;
-            }
-        """)
         layout.addWidget(self._search)
 
         # Tab widget for providers
         self._tabs = QTabWidget()
-        self._tabs.setStyleSheet("""
-            QTabWidget::pane {
+        layout.addWidget(self._tabs)
+
+        # Apply theme styling
+        self.apply_theme()
+
+    def apply_theme(self) -> None:
+        """Apply theme colors to the picker."""
+        theme = get_theme()
+        self._search.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme.chat_input_bg};
+                border: 1px solid {theme.border_light};
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+        """)
+        self._tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
                 border: none;
-                background-color: #1a1a2e;
-            }
-            QTabBar::tab {
-                background-color: #16213e;
-                color: #aaa;
+                background-color: {theme.popup_bg};
+            }}
+            QTabBar::tab {{
+                background-color: {theme.chat_input_bg};
+                color: {theme.text_muted};
                 padding: 4px 8px;
                 font-size: 11px;
                 border: none;
-            }
-            QTabBar::tab:selected {
-                color: white;
-                border-bottom: 2px solid #6441a5;
-            }
+            }}
+            QTabBar::tab:selected {{
+                color: {theme.selection_text};
+                border-bottom: 2px solid {theme.accent};
+            }}
         """)
-        layout.addWidget(self._tabs)
-
-        # Window styling
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #333;
+        self.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme.popup_bg};
+                border: 1px solid {theme.border_light};
                 border-radius: 6px;
-            }
+            }}
         """)
 
     def set_emotes(self, emotes_by_provider: dict[str, list[ChatEmote]]) -> None:
@@ -149,6 +155,7 @@ class EmotePickerWidget(QWidget):
 
     def _create_emote_button(self, emote: ChatEmote) -> QPushButton:
         """Create a button for an emote."""
+        theme = get_theme()
         btn = QPushButton()
         btn.setFixedSize(EMOTE_BUTTON_SIZE, EMOTE_BUTTON_SIZE)
         btn.setToolTip(emote.name)
@@ -162,27 +169,20 @@ class EmotePickerWidget(QWidget):
         else:
             # Show name as fallback text
             btn.setText(emote.name[:3])
-            btn.setStyleSheet("""
-                QPushButton {
-                    font-size: 8px;
-                    color: #aaa;
-                }
-            """)
 
-        btn.setStyleSheet(
-            btn.styleSheet()
-            + """
-            QPushButton {
-                background-color: #16213e;
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 8px;
+                color: {theme.text_muted};
+                background-color: {theme.chat_input_bg};
                 border: 1px solid transparent;
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                border-color: #6441a5;
-                background-color: #1f2b4d;
-            }
-        """
-        )
+            }}
+            QPushButton:hover {{
+                border-color: {theme.accent};
+                background-color: {theme.popup_hover};
+            }}
+        """)
 
         btn.clicked.connect(lambda checked=False, name=emote.name: self._on_emote_clicked(name))
         return btn

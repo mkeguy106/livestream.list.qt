@@ -4,11 +4,23 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field
+
+# Import ThemeMode here to avoid circular imports - it's defined in gui.theme
+# but we need a local definition for settings serialization
+from enum import Enum as _Enum
 from pathlib import Path
 
 from appdirs import user_config_dir, user_data_dir
 
 from .models import LaunchMethod, SortMode, StreamQuality, UIStyle
+
+
+class ThemeMode(str, _Enum):
+    """Theme mode options."""
+
+    AUTO = "auto"  # Follow system preference
+    LIGHT = "light"
+    DARK = "dark"
 
 APP_NAME = "livestream-list-qt"
 APP_AUTHOR = "livestream-list-qt"
@@ -196,6 +208,7 @@ class Settings:
     ui_style: UIStyle = UIStyle.DEFAULT
     platform_colors: bool = True  # Color platform icons and channel names
     font_size: int = 0  # 0 = system default, otherwise point size for stream list
+    theme_mode: ThemeMode = ThemeMode.AUTO  # auto, light, or dark
 
     # Platform settings
     twitch: TwitchSettings = field(default_factory=TwitchSettings)
@@ -372,6 +385,11 @@ class Settings:
             settings.ui_style = UIStyle.DEFAULT
         settings.platform_colors = data.get("platform_colors", settings.platform_colors)
         settings.font_size = data.get("font_size", settings.font_size)
+        old_theme_mode = data.get("theme_mode", settings.theme_mode.value)
+        try:
+            settings.theme_mode = ThemeMode(old_theme_mode)
+        except ValueError:
+            settings.theme_mode = ThemeMode.AUTO
 
         # Twitch
         if "twitch" in data:
@@ -544,6 +562,7 @@ class Settings:
             "ui_style": self.ui_style.value,
             "platform_colors": self.platform_colors,
             "font_size": self.font_size,
+            "theme_mode": self.theme_mode.value,
             "twitch": {
                 "client_id": self.twitch.client_id,
                 "client_secret": self.twitch.client_secret,
