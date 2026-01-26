@@ -120,6 +120,32 @@ class ChatWindowSettings:
 
 
 @dataclass
+class ChatColorSettings:
+    """Color settings for chat UI - separate instances for dark and light themes."""
+
+    alt_row_color_even: str = "#00000000"  # AARRGGBB: transparent (default bg)
+    alt_row_color_odd: str = "#0fffffff"  # AARRGGBB: white at ~6% opacity
+    tab_active_color: str = "#6441a5"  # Twitch purple
+    tab_inactive_color: str = "#16213e"  # Dark blue
+    mention_highlight_color: str = "#33ff8800"  # AARRGGBB: orange at ~20% opacity
+    banner_bg_color: str = "#16213e"  # Dark blue
+    banner_text_color: str = "#cccccc"  # Light gray
+
+
+# Default colors for light theme
+def _default_light_colors() -> ChatColorSettings:
+    return ChatColorSettings(
+        alt_row_color_even="#00000000",  # transparent
+        alt_row_color_odd="#0a000000",  # black at ~4% opacity
+        tab_active_color="#6441a5",  # Twitch purple
+        tab_inactive_color="#e0e0e8",  # Light gray-blue
+        mention_highlight_color="#33ff8800",  # orange at ~20% opacity
+        banner_bg_color="#e8e8f0",  # Light gray
+        banner_text_color="#333333",  # Dark gray
+    )
+
+
+@dataclass
 class BuiltinChatSettings:
     """Settings for the built-in chat client."""
 
@@ -133,19 +159,26 @@ class BuiltinChatSettings:
     max_messages: int = 5000
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
     show_alternating_rows: bool = True
-    alt_row_color_even: str = "#00000000"  # AARRGGBB: transparent (default bg)
-    alt_row_color_odd: str = "#0fffffff"  # AARRGGBB: white at ~6% opacity
     blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
-    tab_active_color: str = "#6441a5"
-    tab_inactive_color: str = "#16213e"
     use_platform_name_colors: bool = True
-    mention_highlight_color: str = "#33ff8800"  # AARRGGBB: orange at ~20% opacity
     # Banner settings (stream title + socials)
     show_stream_title: bool = True
-    banner_bg_color: str = "#16213e"
-    banner_text_color: str = "#cccccc"
     show_socials_banner: bool = True
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
+    # Theme-specific color settings
+    dark_colors: ChatColorSettings = field(default_factory=ChatColorSettings)
+    light_colors: ChatColorSettings = field(default_factory=_default_light_colors)
+
+    def get_colors(self, is_dark: bool) -> ChatColorSettings:
+        """Get the color settings for the current theme mode.
+
+        Args:
+            is_dark: True for dark mode, False for light mode.
+
+        Returns:
+            The appropriate ChatColorSettings for the theme.
+        """
+        return self.dark_colors if is_dark else self.light_colors
 
 
 @dataclass
@@ -469,6 +502,90 @@ class Settings:
                 x=window_data.get("x"),
                 y=window_data.get("y"),
             )
+            # Load dark/light color settings (with migration from legacy single-color fields)
+            dark_data = builtin_data.get("dark_colors", {})
+            light_data = builtin_data.get("light_colors", {})
+
+            # Default dark colors
+            dark_defaults = ChatColorSettings()
+            # Default light colors
+            light_defaults = _default_light_colors()
+
+            # Check for legacy fields and migrate to dark_colors if new structure not present
+            if not dark_data:
+                # Migrate legacy fields to dark colors
+                dark_colors = ChatColorSettings(
+                    alt_row_color_even=builtin_data.get(
+                        "alt_row_color_even", dark_defaults.alt_row_color_even
+                    ),
+                    alt_row_color_odd=builtin_data.get(
+                        "alt_row_color_odd", dark_defaults.alt_row_color_odd
+                    ),
+                    tab_active_color=builtin_data.get(
+                        "tab_active_color", dark_defaults.tab_active_color
+                    ),
+                    tab_inactive_color=builtin_data.get(
+                        "tab_inactive_color", dark_defaults.tab_inactive_color
+                    ),
+                    mention_highlight_color=builtin_data.get(
+                        "mention_highlight_color", dark_defaults.mention_highlight_color
+                    ),
+                    banner_bg_color=builtin_data.get(
+                        "banner_bg_color", dark_defaults.banner_bg_color
+                    ),
+                    banner_text_color=builtin_data.get(
+                        "banner_text_color", dark_defaults.banner_text_color
+                    ),
+                )
+            else:
+                dark_colors = ChatColorSettings(
+                    alt_row_color_even=dark_data.get(
+                        "alt_row_color_even", dark_defaults.alt_row_color_even
+                    ),
+                    alt_row_color_odd=dark_data.get(
+                        "alt_row_color_odd", dark_defaults.alt_row_color_odd
+                    ),
+                    tab_active_color=dark_data.get(
+                        "tab_active_color", dark_defaults.tab_active_color
+                    ),
+                    tab_inactive_color=dark_data.get(
+                        "tab_inactive_color", dark_defaults.tab_inactive_color
+                    ),
+                    mention_highlight_color=dark_data.get(
+                        "mention_highlight_color", dark_defaults.mention_highlight_color
+                    ),
+                    banner_bg_color=dark_data.get(
+                        "banner_bg_color", dark_defaults.banner_bg_color
+                    ),
+                    banner_text_color=dark_data.get(
+                        "banner_text_color", dark_defaults.banner_text_color
+                    ),
+                )
+
+            light_colors = ChatColorSettings(
+                alt_row_color_even=light_data.get(
+                    "alt_row_color_even", light_defaults.alt_row_color_even
+                ),
+                alt_row_color_odd=light_data.get(
+                    "alt_row_color_odd", light_defaults.alt_row_color_odd
+                ),
+                tab_active_color=light_data.get(
+                    "tab_active_color", light_defaults.tab_active_color
+                ),
+                tab_inactive_color=light_data.get(
+                    "tab_inactive_color", light_defaults.tab_inactive_color
+                ),
+                mention_highlight_color=light_data.get(
+                    "mention_highlight_color", light_defaults.mention_highlight_color
+                ),
+                banner_bg_color=light_data.get(
+                    "banner_bg_color", light_defaults.banner_bg_color
+                ),
+                banner_text_color=light_data.get(
+                    "banner_text_color", light_defaults.banner_text_color
+                ),
+            )
+
             builtin = BuiltinChatSettings(
                 font_size=cls._validate_int(
                     builtin_data.get("font_size"), 13, min_val=8, max_val=72
@@ -486,18 +603,13 @@ class Settings:
                 ),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
-                alt_row_color_even=builtin_data.get("alt_row_color_even", "#00000000"),
-                alt_row_color_odd=builtin_data.get("alt_row_color_odd", "#0fffffff"),
                 blocked_users=builtin_data.get("blocked_users", []),
-                tab_active_color=builtin_data.get("tab_active_color", "#6441a5"),
-                tab_inactive_color=builtin_data.get("tab_inactive_color", "#16213e"),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
-                mention_highlight_color=builtin_data.get("mention_highlight_color", "#33ff8800"),
                 show_stream_title=builtin_data.get("show_stream_title", True),
-                banner_bg_color=builtin_data.get("banner_bg_color", "#16213e"),
-                banner_text_color=builtin_data.get("banner_text_color", "#cccccc"),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
                 window=chat_window,
+                dark_colors=dark_colors,
+                light_colors=light_colors,
             )
             settings.chat = ChatSettings(
                 enabled=c.get("enabled", True),
@@ -636,17 +748,32 @@ class Settings:
                     "max_messages": self.chat.builtin.max_messages,
                     "emote_providers": self.chat.builtin.emote_providers,
                     "show_alternating_rows": self.chat.builtin.show_alternating_rows,
-                    "alt_row_color_even": self.chat.builtin.alt_row_color_even,
-                    "alt_row_color_odd": self.chat.builtin.alt_row_color_odd,
                     "blocked_users": self.chat.builtin.blocked_users,
-                    "tab_active_color": self.chat.builtin.tab_active_color,
-                    "tab_inactive_color": self.chat.builtin.tab_inactive_color,
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
-                    "mention_highlight_color": self.chat.builtin.mention_highlight_color,
                     "show_stream_title": self.chat.builtin.show_stream_title,
-                    "banner_bg_color": self.chat.builtin.banner_bg_color,
-                    "banner_text_color": self.chat.builtin.banner_text_color,
                     "show_socials_banner": self.chat.builtin.show_socials_banner,
+                    "dark_colors": {
+                        "alt_row_color_even": self.chat.builtin.dark_colors.alt_row_color_even,
+                        "alt_row_color_odd": self.chat.builtin.dark_colors.alt_row_color_odd,
+                        "tab_active_color": self.chat.builtin.dark_colors.tab_active_color,
+                        "tab_inactive_color": self.chat.builtin.dark_colors.tab_inactive_color,
+                        "mention_highlight_color": (
+                            self.chat.builtin.dark_colors.mention_highlight_color
+                        ),
+                        "banner_bg_color": self.chat.builtin.dark_colors.banner_bg_color,
+                        "banner_text_color": self.chat.builtin.dark_colors.banner_text_color,
+                    },
+                    "light_colors": {
+                        "alt_row_color_even": self.chat.builtin.light_colors.alt_row_color_even,
+                        "alt_row_color_odd": self.chat.builtin.light_colors.alt_row_color_odd,
+                        "tab_active_color": self.chat.builtin.light_colors.tab_active_color,
+                        "tab_inactive_color": self.chat.builtin.light_colors.tab_inactive_color,
+                        "mention_highlight_color": (
+                            self.chat.builtin.light_colors.mention_highlight_color
+                        ),
+                        "banner_bg_color": self.chat.builtin.light_colors.banner_bg_color,
+                        "banner_text_color": self.chat.builtin.light_colors.banner_text_color,
+                    },
                     "window": {
                         "width": self.chat.builtin.window.width,
                         "height": self.chat.builtin.window.height,

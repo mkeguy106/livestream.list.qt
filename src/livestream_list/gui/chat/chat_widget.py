@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
-from ..theme import get_theme
+from ..theme import ThemeManager, get_theme
 from .emote_completer import EmoteCompleter
 from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
@@ -725,10 +725,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_banner.hide()
 
     def _update_banner_style(self) -> None:
-        """Apply banner colors from theme."""
-        theme = get_theme()
-        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
-        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        """Apply banner colors from settings (theme-aware)."""
+        is_dark = ThemeManager.is_dark_mode()
+        colors = self.settings.get_colors(is_dark)
+        self._title_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
+        self._socials_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
 
     def _update_stream_title(self) -> None:
         """Update the stream title banner from the livestream data."""
@@ -970,11 +971,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """)
 
         # Update banners AFTER main stylesheet to prevent cascade override
-        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
-        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        # Use settings colors (theme-aware) for banners
+        is_dark = ThemeManager.is_dark_mode()
+        colors = self.settings.get_colors(is_dark)
+        self._title_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
+        self._socials_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
 
-        # Update delegate theme (loads colors but doesn't repaint - that happens naturally)
+        # Update delegate theme and force repaint to show new colors
         self._delegate.apply_theme()
+        self._list_view.viewport().update()
 
         # Update completers theme
         self._emote_completer.apply_theme()
@@ -1387,8 +1392,9 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
             }}
         """)
 
-        # Update delegate theme
+        # Update delegate theme and force repaint
         self._delegate.apply_theme()
+        self._list_view.viewport().update()
 
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add new messages from the tracked user (called by ChatWidget)."""

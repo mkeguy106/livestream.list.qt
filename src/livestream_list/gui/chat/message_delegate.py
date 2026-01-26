@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from ...chat.models import ChatMessage
 from ...core.settings import BuiltinChatSettings
-from ..theme import get_theme
+from ..theme import ThemeManager, get_theme
 from .message_model import MessageRole
 
 # Layout constants
@@ -56,15 +56,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._load_theme_colors()
 
     def _load_theme_colors(self) -> None:
-        """Load colors from the current theme."""
+        """Load colors from the current theme and settings."""
         theme = get_theme()
         self._url_color = QColor(theme.chat_url)
         self._url_color_selected = QColor(theme.chat_url_selected)
         self._system_message_color = QColor(theme.chat_system_message)
         self._text_muted_color = QColor(theme.text_muted)
-        self._alt_row_even = QColor(theme.chat_alt_row_even)
-        self._alt_row_odd = QColor(theme.chat_alt_row_odd)
-        self._mention_highlight = QColor(theme.chat_mention_highlight)
+        # Get user-customizable colors from settings (dark/light mode aware)
+        is_dark = ThemeManager.is_dark_mode()
+        colors = self.settings.get_colors(is_dark)
+        self._alt_row_even = QColor(colors.alt_row_color_even)
+        self._alt_row_odd = QColor(colors.alt_row_color_odd)
+        self._mention_highlight = QColor(colors.mention_highlight_color)
 
     def apply_theme(self) -> None:
         """Apply theme colors (call when theme changes).
