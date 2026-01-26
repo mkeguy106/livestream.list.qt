@@ -63,7 +63,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.10+
 - PySide6 (Qt6)
 - yt-dlp (bundled in Flatpak, for YouTube stream detection)
 - Streamlink (optional, for launching streams)

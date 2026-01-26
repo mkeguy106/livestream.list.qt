@@ -105,6 +105,46 @@ class TwitchProvider(BaseEmoteProvider):
 
         return emotes
 
+    async def get_user_emotes(self, user_id: str) -> list[ChatEmote]:
+        """Fetch all emotes the authenticated user has access to.
+
+        This includes subscriber emotes from channels they're subscribed to,
+        follower emotes, and bits-tier emotes. Requires user:read:emotes scope.
+        """
+        emotes: list[ChatEmote] = []
+        if not self.oauth_token:
+            return emotes
+
+        try:
+            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
+                cursor: str | None = ""
+                while cursor is not None:
+                    params: dict[str, str] = {"user_id": user_id}
+                    if cursor:
+                        params["after"] = cursor
+
+                    async with session.get(
+                        f"{self.BASE_URL}/chat/emotes/user",
+                        params=params,
+                        timeout=aiohttp.ClientTimeout(total=15),
+                    ) as resp:
+                        if resp.status != 200:
+                            logger.debug(f"Twitch user emotes failed: {resp.status}")
+                            return emotes
+                        data = await resp.json()
+
+                        for emote_data in data.get("data", []):
+                            emote = self._parse_emote(emote_data)
+                            if emote:
+                                emotes.append(emote)
+
+                        # Handle pagination
+                        cursor = data.get("pagination", {}).get("cursor")
+        except Exception as e:
+            logger.debug(f"Twitch user emotes error: {e}")
+
+        return emotes
+
     def _parse_emote(self, data: dict) -> ChatEmote | None:
         """Parse a Twitch emote from Helix API data."""
         emote_id = data.get("id", "")

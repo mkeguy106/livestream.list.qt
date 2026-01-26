@@ -402,6 +402,9 @@ class ChatWindow(QMainWindow):
         if ws.x is not None and ws.y is not None:
             self.move(ws.x, ws.y)
 
+        # Menu bar
+        self._setup_menu_bar()
+
         # Flow tab widget (wraps tabs to multiple rows)
         self._tab_widget = FlowTabWidget()
         self._tab_widget.tabCloseRequested.connect(self._on_tab_close)
@@ -414,6 +417,27 @@ class ChatWindow(QMainWindow):
 
         # Apply theme styling (sets tab colors from theme)
         self.apply_theme()
+
+    def _setup_menu_bar(self) -> None:
+        """Set up the menu bar."""
+        menu_bar = self.menuBar()
+
+        # Chat menu
+        chat_menu = menu_bar.addMenu("Chat")
+
+        # Refresh Emotes action
+        refresh_emotes_action = chat_menu.addAction("Refresh Emotes")
+        refresh_emotes_action.setShortcut("Ctrl+Shift+E")
+        refresh_emotes_action.triggered.connect(self._on_refresh_emotes)
+
+        # Settings action
+        settings_action = chat_menu.addAction("Settings...")
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self.chat_settings_requested.emit)
+
+    def _on_refresh_emotes(self) -> None:
+        """Handle refresh emotes menu action."""
+        self.chat_manager.refresh_user_emotes()
 
     def update_tab_style(self) -> None:
         """Refresh tab colors from settings (call after prefs change)."""
@@ -544,6 +568,7 @@ class ChatWindow(QMainWindow):
         widget.message_sent.connect(self._on_message_sent)
         widget.popout_requested.connect(self._on_popout_requested)
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
+        widget.refresh_emotes_requested.connect(self._on_refresh_emotes)
         widget.font_size_changed.connect(self._on_font_size_changed)
         widget.settings_changed.connect(self._on_settings_changed)
 

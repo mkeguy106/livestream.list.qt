@@ -132,7 +132,15 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Kick OAuth**: App credentials hardcoded (`DEFAULT_KICK_CLIENT_ID`/`SECRET` in `chat/auth/kick_auth.py`). Requires `chat:write` and `user:read` scopes enabled in Kick Developer Portal. Uses port 65432 for redirect (`http://localhost:65432/redirect`). Auto-refreshes expired tokens on 401.
 
+**YouTube chat**: Uses pytchat library for reading chat messages. Message sending uses InnerTube API with SAPISIDHASH authentication (requires YouTube cookies: SID, HSID, SSID, APISID, SAPISID). Supports SuperChat tier detection and membership badge rendering.
+
 **Emotes**: Supports Twitch, Kick native, 7TV, BTTV, FFZ. Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
+
+**Emote Caching**:
+- **Image cache**: Two-tier (memory LRU 2000 entries + disk 500MB max) in `~/.local/share/livestream-list-qt/emote_cache/`
+- **User emotes**: Twitch subscriber emotes from other channels fetched via `/chat/emotes/user` (requires `user:read:emotes` scope)
+- **Stale-while-revalidate**: Cached user emotes used immediately, fresh emotes fetched in background. If changed, UI updates automatically.
+- **Manual refresh**: Chat menu → "Refresh Emotes" (Ctrl+Shift+E) clears cache and re-fetches
 
 **Channel Socials Banner**: Displays clickable social links (Discord, Twitter, etc.) below the stream title banner. Fetched via `SocialsFetchWorker` (QThread) when chat opens.
 
@@ -191,6 +199,7 @@ class DismissibleBanner(QWidget):
 | `src/livestream_list/chat/manager.py` | ChatManager - connection lifecycle, emote loading, message routing |
 | `src/livestream_list/chat/connections/twitch.py` | Twitch IRC WebSocket connection |
 | `src/livestream_list/chat/connections/kick.py` | Kick Pusher WebSocket + public API message sending |
+| `src/livestream_list/chat/connections/youtube.py` | YouTube pytchat + InnerTube connection |
 | `src/livestream_list/chat/auth/kick_auth.py` | Kick OAuth 2.1 + PKCE flow |
 | `src/livestream_list/chat/models.py` | ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses |
 | `src/livestream_list/chat/emotes/cache.py` | Shared emote/badge pixmap cache |
@@ -237,6 +246,7 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | Kick shows duplicate messages on send | Don't use local echo for Kick (it echoes via websocket unlike Twitch) |
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 | YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
+| YouTube chat send requires cookies | Copy cookies from browser (SID, HSID, SSID, APISID, SAPISID) into Preferences > Accounts |
 
 ## CI/CD - Self-Hosted Runner
 

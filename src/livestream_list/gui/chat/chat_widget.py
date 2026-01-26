@@ -190,6 +190,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
     message_sent = Signal(str, str)  # channel_key, text
     popout_requested = Signal(str)  # channel_key
     settings_clicked = Signal()
+    refresh_emotes_requested = Signal()  # user wants to refresh emotes
     font_size_changed = Signal(int)  # new font size
     settings_changed = Signal()  # any chat setting toggled
 
@@ -1037,6 +1038,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
         anim_action.toggled.connect(self._toggle_animate_emotes)
 
         menu.addSeparator()
+
+        # Refresh emotes action
+        refresh_action = menu.addAction("Refresh Emotes")
+        refresh_action.triggered.connect(self.refresh_emotes_requested.emit)
+
         more_action = menu.addAction("More Settings...")
         more_action.triggered.connect(self.settings_clicked.emit)
 
