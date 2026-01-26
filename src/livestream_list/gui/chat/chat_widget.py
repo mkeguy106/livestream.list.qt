@@ -521,6 +521,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Emote autocomplete
         self._emote_completer = EmoteCompleter(self._input, parent=self)
+        self._emote_completer.set_platform(self.livestream.channel.platform.value)
         self._input.add_completer(self._emote_completer)
 
         # Mention autocomplete
