@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 MAX_SUGGESTIONS = 15
 MIN_TRIGGER_LENGTH = 1  # Minimum chars after ':' to start suggesting
 
+# 3rd party emote providers that should show for all platforms
+THIRD_PARTY_PROVIDERS = {"7tv", "bttv", "ffz"}
+
 
 class EmoteCompleter(QWidget):
     """Inline emote autocomplete dropdown.
@@ -35,6 +38,7 @@ class EmoteCompleter(QWidget):
         self._emote_cache: dict[str, QPixmap] = {}
         self._trigger_pos: int = -1  # Position of the ':' trigger
         self._active = False
+        self._platform: str = ""  # Current platform (twitch, kick, youtube)
 
         self._setup_ui()
         self._connect_signals()
@@ -88,6 +92,14 @@ class EmoteCompleter(QWidget):
     def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
         """Set the shared emote pixmap cache."""
         self._emote_cache = cache
+
+    def set_platform(self, platform: str) -> None:
+        """Set the current platform for filtering emotes.
+
+        Args:
+            platform: Platform name (twitch, kick, youtube)
+        """
+        self._platform = platform.lower()
 
     def handle_key_press(self, key: int) -> bool:
         """Handle key presses from the input widget.
@@ -150,10 +162,15 @@ class EmoteCompleter(QWidget):
         self._list.clear()
         partial_lower = partial.lower()
 
-        # Collect ALL matches first
+        # Collect matches, filtering by platform
+        # Show emotes from current platform + 3rd party providers (7tv, bttv, ffz)
         matches: list[tuple[str, ChatEmote]] = []
         for name, emote in self._emote_map.items():
-            if partial_lower in name.lower():
+            if partial_lower not in name.lower():
+                continue
+            # Filter: show 3rd party emotes for all platforms,
+            # or platform-specific emotes only for that platform
+            if emote.provider in THIRD_PARTY_PROVIDERS or emote.provider == self._platform:
                 matches.append((name, emote))
 
         if not matches:
