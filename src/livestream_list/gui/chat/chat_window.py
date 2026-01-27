@@ -511,6 +511,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.chat_closed.connect(self._on_chat_closed)
         self.chat_manager.chat_connected.connect(self._on_chat_connected)
         self.chat_manager.emote_cache_updated.connect(self._on_emote_cache_updated)
+        self.chat_manager.emote_map_updated.connect(self._on_emote_map_updated)
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
         self.chat_manager.chat_error.connect(self._on_chat_error)
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
@@ -575,6 +576,7 @@ class ChatWindow(QMainWindow):
         # Set shared emote cache, animated cache, and emote map on the widget
         widget.set_emote_cache(self.chat_manager.emote_cache.pixmap_dict)
         widget.set_animated_cache(self.chat_manager.emote_cache.animated_dict)
+        widget.set_emote_cache_object(self.chat_manager.emote_cache)
         if self.chat_manager.emote_map:
             widget.set_emote_map(self.chat_manager.emote_map)
 
@@ -641,6 +643,27 @@ class ChatWindow(QMainWindow):
             if emote_map:
                 widget.set_emote_map(emote_map)
             widget.repaint_messages()
+
+    def _on_emote_map_updated(self, channel_key: str) -> None:
+        """Backfill third-party emotes for recent messages after emote map updates."""
+        emote_map = self.chat_manager.emote_map
+        if not emote_map:
+            return
+
+        max_messages = 300
+        widgets = []
+        if channel_key:
+            widget = self._widgets.get(channel_key)
+            if widget:
+                widgets = [widget]
+        else:
+            widgets = list(self._widgets.values())
+
+        for widget in widgets:
+            recent = widget.get_recent_messages(max_messages)
+            updated = self.chat_manager.backfill_third_party_emotes(recent)
+            if updated:
+                widget.invalidate_message_layout()
 
     def _on_message_sent(self, channel_key: str, text: str) -> None:
         """Handle a message being sent from a chat widget."""

@@ -2,10 +2,12 @@
 
 import asyncio
 import logging
+import re
+import time
 import uuid
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
 
 from ..core.models import Livestream, StreamPlatform
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Fallback Twitch client ID (same as api.twitch.DEFAULT_CLIENT_ID)
 _DEFAULT_TWITCH_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
+MAX_EMOTE_DOWNLOAD_RETRIES = 2
 
 
 class ChatConnectionWorker(QThread):
@@ -790,6 +793,8 @@ class ChatManager(QObject):
     moderation_received = Signal(str, object)  # channel_key, ModerationEvent
     # Emitted when emote cache is updated (widgets should repaint)
     emote_cache_updated = Signal()
+    # Emitted when emote map is updated (channel_key or "" for all)
+    emote_map_updated = Signal(str)
     # Emitted when auth state changes (True = authenticated)
     auth_state_changed = Signal(bool)
     # Emitted when a connection is established (channel_key)
@@ -815,6 +820,10 @@ class ChatManager(QObject):
         # Emote loader for downloading images
         self._loader: EmoteLoaderWorker | None = None
         self._download_queue: list[tuple[str, str]] = []  # (cache_key, url)
+        self._download_attempts: dict[tuple[str, str], int] = {}
+        self._download_fallbacks: dict[tuple[str, str], str] = {}
+        self._last_download_url: dict[str, str] = {}
+        self._download_blocked_until: dict[tuple[str, str], float] = {}
 
         # Map of emote name -> ChatEmote for all loaded channels
         self._emote_map: dict[str, ChatEmote] = {}
@@ -1052,6 +1061,10 @@ class ChatManager(QObject):
         self._badge_url_map.clear()
         self._queued_badge_urls.clear()
         self._download_queue.clear()
+        self._download_attempts.clear()
+        self._download_fallbacks.clear()
+        self._last_download_url.clear()
+        self._download_blocked_until.clear()
 
     def is_connected(self, channel_key: str) -> bool:
         """Check if a channel's chat is connected."""
@@ -1081,7 +1094,7 @@ class ChatManager(QObject):
                 # Use URL from badge API map, fall back to badge.image_url if set
                 badge_url = self._badge_url_map.get(badge.id) or badge.image_url
                 if badge_url:
-                    self._download_queue.append((badge_key, badge_url))
+                    self._queue_download(badge_key, badge_url)
 
             # Match third-party emotes (7TV, BTTV, FFZ) in message text
             if self._emote_map:
@@ -1095,12 +1108,12 @@ class ChatManager(QObject):
                 if not self._emote_cache.has(emote_key):
                     url = emote.url_template.replace("{size}", "2.0")
                     self._emote_cache.mark_pending(emote_key)
-                    self._download_queue.append((emote_key, url))
+                    self._queue_download(emote_key, url)
                 elif not self._emote_cache.has_animation_data(emote_key):
                     # Legacy PNG-only cache - re-download for animation detection
                     url = emote.url_template.replace("{size}", "2.0")
                     self._emote_cache.mark_pending(emote_key)
-                    self._download_queue.append((emote_key, url))
+                    self._queue_download(emote_key, url)
                 elif emote_key not in self._emote_cache.pixmap_dict:
                     # Cached on disk but not in memory - load it
                     self._emote_cache.get(emote_key)
@@ -1119,6 +1132,52 @@ class ChatManager(QObject):
 
         self.messages_received.emit(channel_key, messages)
 
+    def _queue_download(self, key: str, url: str) -> None:
+        """Queue a download with retry/fallback metadata."""
+        if not url:
+            return
+
+        attempt_key = (key, url)
+        blocked_until = self._download_blocked_until.get(attempt_key, 0)
+        if blocked_until > time.monotonic():
+            return
+        attempts = self._download_attempts.get(attempt_key, 0)
+        if attempts >= MAX_EMOTE_DOWNLOAD_RETRIES:
+            logger.debug(f"Skipping download for {key} (attempts exceeded): {url}")
+            self._download_blocked_until[attempt_key] = time.monotonic() + 60
+            self._emote_cache.clear_pending(key)
+            return
+
+        self._last_download_url[key] = url
+        fallback_url = self._get_fallback_url(key, url)
+        if fallback_url and fallback_url != url:
+            self._download_fallbacks[attempt_key] = fallback_url
+
+        self._download_queue.append((key, url))
+
+    def _get_fallback_url(self, key: str, url: str) -> str | None:
+        """Return a fallback URL for animated Twitch emotes."""
+        if not key.startswith("emote:twitch:"):
+            return None
+        if "/animated/" in url:
+            return url.replace("/animated/", "/static/")
+        return None
+
+    def _schedule_retry(self, key: str, url: str, delay_ms: int) -> None:
+        """Schedule a retry for a failed download."""
+        QTimer.singleShot(delay_ms, lambda: self._retry_download(key, url))
+
+    def _retry_download(self, key: str, url: str) -> None:
+        """Retry a download if still under retry limits."""
+        attempt_key = (key, url)
+        attempts = self._download_attempts.get(attempt_key, 0)
+        if attempts >= MAX_EMOTE_DOWNLOAD_RETRIES:
+            return
+        self._emote_cache.mark_pending(key)
+        self._queue_download(key, url)
+        if self._download_queue:
+            self._start_downloads()
+
     def _get_our_nick(self, channel_key: str) -> str | None:
         """Get the authenticated user's display name for the given channel's connection."""
         connection = self._connections.get(channel_key)
@@ -1135,37 +1194,82 @@ class ChatManager(QObject):
             return
 
         # Build set of character positions already claimed by native emotes
-        claimed: set[int] = set()
-        for start, end, _ in msg.emote_positions:
-            claimed.update(range(start, end))
+        claimed_ranges = [(start, end) for start, end, _ in msg.emote_positions]
 
-        # Split text into words and match against emote map
+        def overlaps(start: int, end: int) -> bool:
+            for s, e in claimed_ranges:
+                if start < e and end > s:
+                    return True
+            return False
+
+        # Match words, allowing punctuation boundaries (e.g., "KEKW!" or "(OMEGALUL)")
         new_positions: list[tuple[int, int, ChatEmote]] = []
-        i = 0
-        while i < len(text):
-            # Skip whitespace
-            if text[i] == " ":
-                i += 1
+        punct_strip = ".,!?;:()[]{}<>\"'`~"
+        for match in re.finditer(r"\S+", text):
+            token = match.group()
+            token_start = match.start()
+            token_end = match.end()
+
+            # Skip URLs to avoid false matches inside links
+            if token.startswith("http://") or token.startswith("https://"):
                 continue
 
-            # Find word boundary
-            j = i
-            while j < len(text) and text[j] != " ":
-                j += 1
+            # Prefer exact match (covers emotes with punctuation in the name)
+            emote = self._emote_map.get(token)
+            if emote:
+                if not overlaps(token_start, token_end):
+                    new_positions.append((token_start, token_end, emote))
+                    claimed_ranges.append((token_start, token_end))
+                continue
 
-            # Check if this word position is already claimed
-            if i not in claimed:
-                word = text[i:j]
-                emote = self._emote_map.get(word)
-                if emote:
-                    new_positions.append((i, j, emote))
+            # Try trimmed match (strip leading/trailing punctuation)
+            left = 0
+            right = len(token)
+            while left < right and token[left] in punct_strip:
+                left += 1
+            while right > left and token[right - 1] in punct_strip:
+                right -= 1
 
-            i = j
+            if left == 0 and right == len(token):
+                continue
+
+            trimmed = token[left:right]
+            if not trimmed:
+                continue
+
+            emote = self._emote_map.get(trimmed)
+            if not emote:
+                continue
+
+            start = token_start + left
+            end = token_start + right
+            if not overlaps(start, end):
+                new_positions.append((start, end, emote))
+                claimed_ranges.append((start, end))
 
         if new_positions:
             # Merge with existing positions and sort by start
             msg.emote_positions = sorted(msg.emote_positions + new_positions, key=lambda x: x[0])
             logger.debug(f"Matched {len(new_positions)} 3rd-party emotes in message")
+
+    def backfill_third_party_emotes(self, messages: list[ChatMessage]) -> int:
+        """Backfill third-party emotes for existing messages.
+
+        Returns number of messages updated.
+        """
+        if not self._emote_map or not messages:
+            return 0
+
+        updated = 0
+        for msg in messages:
+            if not isinstance(msg, ChatMessage):
+                continue
+            before = len(msg.emote_positions)
+            self._match_third_party_emotes(msg)
+            if len(msg.emote_positions) != before:
+                updated += 1
+
+        return updated
 
     def _fetch_emotes_for_channel(self, channel_key: str, livestream: Livestream) -> None:
         """Kick off async emote/badge fetching for a channel."""
@@ -1226,11 +1330,11 @@ class ChatManager(QObject):
             if not self._emote_cache.has(emote_key):
                 # Not cached at all - download
                 self._emote_cache.mark_pending(emote_key)
-                self._download_queue.append((emote_key, emote.url_template))
+                self._queue_download(emote_key, emote.url_template)
             elif not self._emote_cache.has_animation_data(emote_key):
                 # Legacy PNG cache only - re-download for animation detection
                 self._emote_cache.mark_pending(emote_key)
-                self._download_queue.append((emote_key, emote.url_template))
+                self._queue_download(emote_key, emote.url_template)
             elif emote_key not in self._emote_cache.pixmap_dict:
                 # Has raw/animation data on disk but not in memory - load it
                 self._emote_cache.get(emote_key)
@@ -1249,6 +1353,7 @@ class ChatManager(QObject):
 
         # Notify widgets immediately so autocomplete has the emote map
         self.emote_cache_updated.emit()
+        self.emote_map_updated.emit(channel_key)
 
         # Start downloading
         if self._download_queue:
@@ -1284,13 +1389,14 @@ class ChatManager(QObject):
                     emote_key = f"emote:{emote.provider}:{emote.id}"
                     if not self._emote_cache.has(emote_key):
                         self._emote_cache.mark_pending(emote_key)
-                        self._download_queue.append((emote_key, emote.url_template))
+                        self._queue_download(emote_key, emote.url_template)
 
             if self._download_queue:
                 self._start_downloads()
 
             # Notify widgets to refresh
             self.emote_cache_updated.emit()
+            self.emote_map_updated.emit("")
 
         # Update cache for next time
         self._cached_user_emotes = [e for e in emotes if isinstance(e, ChatEmote)]
@@ -1327,7 +1433,7 @@ class ChatManager(QObject):
             badge_id = badge_key.removeprefix("badge:")
             url = badge_map.get(badge_id)
             if url:
-                self._download_queue.append((badge_key, url))
+                self._queue_download(badge_key, url)
                 requeue_count += 1
 
         if requeue_count:
@@ -1347,6 +1453,7 @@ class ChatManager(QObject):
         self._loader = EmoteLoaderWorker(parent=self)
         self._loader.emote_ready.connect(self._on_emote_downloaded)
         self._loader.animated_emote_ready.connect(self._on_animated_emote_downloaded)
+        self._loader.emote_failed.connect(self._on_emote_failed)
         self._loader.finished.connect(self._on_loader_finished)
 
         for key, url in self._download_queue:
@@ -1358,6 +1465,7 @@ class ChatManager(QObject):
     def _on_emote_downloaded(self, key: str, raw_data: bytes) -> None:
         """Handle a downloaded emote/badge image - create QPixmap on main thread."""
         if not raw_data:
+            self._handle_download_failure(key, "empty")
             return
 
         # Create QPixmap on main thread (GUI thread) as required by Qt
@@ -1374,6 +1482,9 @@ class ChatManager(QObject):
             # preventing re-downloads on future launches.
             if key.startswith("emote:"):
                 self._emote_cache._put_disk_raw(key, raw_data)
+            self._clear_download_attempts(key)
+        else:
+            self._handle_download_failure(key, "decode")
 
     def _on_animated_emote_downloaded(self, key: str, raw_data: bytes) -> None:
         """Handle a downloaded animated emote - extract frames on GUI thread."""
@@ -1382,6 +1493,7 @@ class ChatManager(QObject):
             frames, delays = result
             self._emote_cache.put_animated(key, frames, delays)
             self._emote_cache._put_disk_raw(key, raw_data)
+            self._clear_download_attempts(key)
         else:
             # Detection said animated but extraction failed - treat as static
             pixmap = QPixmap()
@@ -1393,6 +1505,51 @@ class ChatManager(QObject):
                     )
                 self._emote_cache.put(key, pixmap)
                 self._emote_cache._put_disk_raw(key, raw_data)
+                self._clear_download_attempts(key)
+            else:
+                self._handle_download_failure(key, "decode")
+
+    def _on_emote_failed(self, key: str, url: str, status: int, reason: str) -> None:
+        """Handle download failures from the loader."""
+        self._handle_download_failure(key, reason, url=url, status=status)
+
+    def _handle_download_failure(
+        self, key: str, reason: str, url: str | None = None, status: int = 0
+    ) -> None:
+        """Clear pending state and schedule retries/fallbacks for failed downloads."""
+        self._emote_cache.clear_pending(key)
+
+        if not url:
+            url = self._last_download_url.get(key, "")
+        if not url:
+            return
+
+        attempt_key = (key, url)
+        attempts = self._download_attempts.get(attempt_key, 0) + 1
+        self._download_attempts[attempt_key] = attempts
+
+        fallback_url = self._download_fallbacks.get(attempt_key)
+        if fallback_url and (status == 404 or reason in {"decode", "empty"}):
+            logger.debug(f"Animated emote missing, falling back to static: {key}")
+            self._schedule_retry(key, fallback_url, delay_ms=150)
+            return
+
+        if attempts < MAX_EMOTE_DOWNLOAD_RETRIES:
+            delay_ms = 200 + attempts * 300
+            logger.debug(
+                f"Retrying emote download ({attempts}/{MAX_EMOTE_DOWNLOAD_RETRIES}) "
+                f"{key} due to {reason}"
+            )
+            self._schedule_retry(key, url, delay_ms=delay_ms)
+
+    def _clear_download_attempts(self, key: str) -> None:
+        """Clear attempt counters once a key succeeds."""
+        for attempt_key in list(self._download_attempts.keys()):
+            if attempt_key[0] == key:
+                self._download_attempts.pop(attempt_key, None)
+                self._download_fallbacks.pop(attempt_key, None)
+                self._download_blocked_until.pop(attempt_key, None)
+        self._last_download_url.pop(key, None)
 
     def _on_emote_loaded(self, key: str) -> None:
         """Handle emote cache updated signal - trigger repaint."""

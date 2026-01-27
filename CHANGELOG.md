@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.12] - 2026-01-27
+
+### Fixed
+- Emote downloads retry with animated fallback to static when needed
+- Third-party emotes match around punctuation and backfill after emote map loads
+- Animated emotes stay animated longer with larger cache + visible rehydration
+
 ## [0.5.18] - 2026-01-10
 
 ### Fixed
@@ -104,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration directory from `~/.config/livestream-list` to `~/.config/livestream-list-qt`
 - Flatpak runtime from GNOME to KDE Platform
 
-[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.18...HEAD
+[Unreleased]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.12.12...HEAD
+[0.12.12]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.12.11...v0.12.12
 [0.5.18]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.17...v0.5.18
 [0.5.17]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.16...v0.5.17
 [0.5.16]: https://github.com/mkeguy106/livestream.list.qt/compare/v0.5.15...v0.5.16

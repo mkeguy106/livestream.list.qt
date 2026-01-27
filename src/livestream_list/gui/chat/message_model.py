@@ -96,3 +96,11 @@ class ChatMessageModel(QAbstractListModel):
         if 0 <= row < len(self._messages):
             return self._messages[row]
         return None
+
+    def get_recent_messages(self, limit: int) -> list[ChatMessage]:
+        """Return up to the last N messages."""
+        if limit <= 0 or not self._messages:
+            return []
+        if len(self._messages) <= limit:
+            return list(self._messages)
+        return list(self._messages)[-limit:]

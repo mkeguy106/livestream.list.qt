@@ -153,14 +153,9 @@ class TwitchProvider(BaseEmoteProvider):
         if not emote_id or not name:
             return None
 
-        # Twitch CDN URL - use static format for 2x size
+        # Twitch CDN URL - prefer animated if available; fall back on 404
         # Format options: static/animated, light/dark, 1.0/2.0/3.0
-        images = data.get("images", {})
-        url = images.get("url_2x") or images.get("url_1x", "")
-
-        if not url:
-            # Fallback to template format
-            url = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/light/2.0"
+        url = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/2.0"
 
         return ChatEmote(
             id=emote_id,

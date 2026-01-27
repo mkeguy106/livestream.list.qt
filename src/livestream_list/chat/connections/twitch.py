@@ -113,7 +113,7 @@ def parse_emote_positions(emotes_tag: str) -> list[tuple[int, int, ChatEmote]]:
         emote = ChatEmote(
             id=emote_id,
             name="",  # Will be filled from message text
-            url_template=f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/{{size}}",
+            url_template=f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/{{size}}",
             provider="twitch",
         )
         for range_str in ranges.split(","):

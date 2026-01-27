@@ -3,6 +3,7 @@
 import logging
 import re
 import webbrowser
+import time
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
+from ...chat.emotes.cache import EmoteCache
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
@@ -214,6 +216,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._animation_timer.timeout.connect(self._on_animation_tick)
         self._animation_frame = 0
         self._has_animated_emotes = False
+        self._emote_cache_obj: EmoteCache | None = None
+        self._last_rehydrate_ts: float = 0.0
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
@@ -509,6 +513,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         else:
             self._new_msg_button.show()
 
+        # Rehydrate animated emotes for newly visible messages
+        if self.settings.animate_emotes:
+            self._rehydrate_visible_animated_emotes()
+
     def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to the message list."""
         self._model.apply_moderation(event)
@@ -578,6 +586,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._delegate.set_emote_cache(cache)
         self._emote_completer.set_emote_cache(cache)
 
+    def set_emote_cache_object(self, cache: EmoteCache) -> None:
+        """Set the shared EmoteCache object for animation rehydration."""
+        self._emote_cache_obj = cache
+
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the emote map for autocomplete."""
         self._emote_completer.set_emotes(emote_map)
@@ -595,6 +607,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _on_animation_tick(self) -> None:
         """Advance the global animation frame and repaint."""
+        self._rehydrate_visible_animated_emotes()
         self._animation_frame += 1
         self._delegate.set_animation_frame(self._animation_frame)
         self._list_view.viewport().update()
@@ -607,9 +620,62 @@ class ChatWidget(QWidget, ChatSearchMixin):
         else:
             self._animation_timer.stop()
 
+    def _rehydrate_visible_animated_emotes(self) -> None:
+        """Rehydrate animated emotes for visible messages if frames were evicted."""
+        if not self._emote_cache_obj or not self.settings.animate_emotes:
+            return
+
+        now = time.monotonic()
+        if now - self._last_rehydrate_ts < 1.0:
+            return
+        self._last_rehydrate_ts = now
+
+        viewport = self._list_view.viewport()
+        if not viewport:
+            return
+
+        top_index = self._list_view.indexAt(viewport.rect().topLeft())
+        bottom_index = self._list_view.indexAt(viewport.rect().bottomLeft())
+
+        if not top_index.isValid():
+            return
+
+        start_row = top_index.row()
+        end_row = bottom_index.row() if bottom_index.isValid() else start_row
+
+        cache = self._emote_cache_obj
+        hydrated = False
+        for row in range(start_row, end_row + 1):
+            msg = self._model.get_message(row)
+            if not msg or not msg.emote_positions:
+                continue
+            for _start, _end, emote in msg.emote_positions:
+                key = f"emote:{emote.provider}:{emote.id}"
+                if cache.has_animation_data(key):
+                    if key in cache.animated_dict:
+                        cache.touch_animated(key)
+                    else:
+                        cache.get(key)
+                        hydrated = True
+
+        if hydrated and not self._has_animated_emotes:
+            self._has_animated_emotes = bool(cache.animated_dict)
+            if self._has_animated_emotes and not self._animation_timer.isActive():
+                self._animation_timer.start(50)
+
     def repaint_messages(self) -> None:
         """Trigger a repaint of visible messages (e.g. after emotes load)."""
         self._list_view.viewport().update()
+
+    def invalidate_message_layout(self) -> None:
+        """Force relayout after message content changes (e.g. backfilled emotes)."""
+        self._delegate.invalidate_size_cache()
+        self._model.layoutChanged.emit()
+        self.repaint_messages()
+
+    def get_recent_messages(self, limit: int = 300) -> list[ChatMessage]:
+        """Get recent messages for backfill operations."""
+        return self._model.get_recent_messages(limit)
 
     def clear(self) -> None:
         """Clear all messages."""
