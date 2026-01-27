@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 CACHE_DIR_NAME = "emote_cache"
 DEFAULT_EMOTE_HEIGHT = 28
 MAX_MEMORY_ENTRIES = 2000
-MAX_ANIMATED_ENTRIES = 100  # Animated emotes use significantly more memory (20-100 frames each)
+MAX_ANIMATED_ENTRIES = 300  # Animated emotes use significantly more memory (20-100 frames each)
 MAX_DISK_CACHE_MB = 500  # Maximum disk cache size in MB
 DISK_CACHE_EVICT_PERCENT = 0.2  # Evict 20% when over limit
 
@@ -158,7 +158,15 @@ class EmoteCache(QObject):
 
     def get_frames(self, key: str) -> list[QPixmap] | None:
         """Get an animated emote's frame list."""
-        return self._animated.get(key)
+        if key in self._animated:
+            self._animated.move_to_end(key)
+            return self._animated[key]
+        return None
+
+    def touch_animated(self, key: str) -> None:
+        """Mark an animated emote as recently used to reduce eviction."""
+        if key in self._animated:
+            self._animated.move_to_end(key)
 
     def has_animated(self, key: str) -> bool:
         """Check if a key has animated frames."""
@@ -265,6 +273,10 @@ class EmoteCache(QObject):
         """Mark a key as being loaded."""
         self._pending.add(key)
 
+    def clear_pending(self, key: str) -> None:
+        """Clear a pending mark for a key (on failure or cancel)."""
+        self._pending.discard(key)
+
     def _put_memory(self, key: str, pixmap: QPixmap) -> None:
         """Store in memory cache with LRU eviction."""
         self._memory[key] = pixmap
@@ -314,14 +326,21 @@ class EmoteCache(QObject):
             if total_size <= max_bytes:
                 return
 
-            # Sort by modification time (oldest first)
-            file_info.sort(key=lambda x: x[1])
-
             # Evict files until under limit (evict at least 20% to avoid frequent cleanups)
+            # Prefer evicting PNGs first so raw (animation-capable) data survives longer.
             target_size = int(max_bytes * (1 - DISK_CACHE_EVICT_PERCENT))
             evicted_count = 0
 
-            for filepath, _mtime, size in file_info:
+            png_files = [info for info in file_info if info[0].suffix == ".png"]
+            raw_files = [info for info in file_info if info[0].suffix == ".raw"]
+            other_files = [info for info in file_info if info[0].suffix not in {".png", ".raw"}]
+
+            # Sort by modification time (oldest first)
+            png_files.sort(key=lambda x: x[1])
+            raw_files.sort(key=lambda x: x[1])
+            other_files.sort(key=lambda x: x[1])
+
+            for filepath, _mtime, size in png_files + other_files + raw_files:
                 if total_size <= target_size:
                     break
                 try:
@@ -363,6 +382,7 @@ class EmoteLoaderWorker(QThread):
     # Both signals send raw bytes - QPixmap must be created on GUI thread
     emote_ready = Signal(str, bytes)  # key, raw_data (static image)
     animated_emote_ready = Signal(str, bytes)  # key, raw_data (frames extracted on main thread)
+    emote_failed = Signal(str, str, int, str)  # key, url, status, reason
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
@@ -397,14 +417,20 @@ class EmoteLoaderWorker(QThread):
                 key, url = self._queue.pop(0)
                 try:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            # Detect animated image without creating QPixmaps
-                            # (QPixmap must be created on the GUI thread)
-                            if _is_animated(data):
-                                self.animated_emote_ready.emit(key, data)
-                            else:
-                                # Emit raw bytes - QPixmap creation happens on main thread
-                                self.emote_ready.emit(key, data)
+                        if resp.status != 200:
+                            self.emote_failed.emit(key, url, resp.status, "http")
+                            continue
+                        data = await resp.read()
+                        if not data:
+                            self.emote_failed.emit(key, url, resp.status, "empty")
+                            continue
+                        # Detect animated image without creating QPixmaps
+                        # (QPixmap must be created on the GUI thread)
+                        if _is_animated(data):
+                            self.animated_emote_ready.emit(key, data)
+                        else:
+                            # Emit raw bytes - QPixmap creation happens on main thread
+                            self.emote_ready.emit(key, data)
                 except Exception as e:
                     logger.debug(f"Failed to download emote {key}: {e}")
+                    self.emote_failed.emit(key, url, 0, "exception")
