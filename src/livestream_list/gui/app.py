@@ -187,6 +187,9 @@ class Application(QApplication):
         # Track active workers to prevent garbage collection
         self._active_workers = []
 
+        # Prevent concurrent refreshes (causes aiohttp timeout errors)
+        self._refresh_in_progress = False
+
         # Main thread watchdog for debugging lockups
         self._watchdog: MainThreadWatchdog | None = None
 
@@ -272,6 +275,14 @@ class Application(QApplication):
 
     def _start_refresh(self, on_complete=None, on_progress=None):
         """Start a refresh operation."""
+        # Prevent concurrent refreshes (causes aiohttp timeout errors)
+        if self._refresh_in_progress:
+            logger.info("Refresh already in progress, ignoring request")
+            if on_complete:
+                on_complete()
+            return
+
+        self._refresh_in_progress = True
 
         async def refresh():
             await self.monitor.refresh()
@@ -283,6 +294,7 @@ class Application(QApplication):
             return {"livestreams": self.monitor.livestreams, "errors": errors}
 
         def on_finished(result):
+            self._refresh_in_progress = False
             self.refresh_complete.emit()
             # Emit error signal if there were any errors
             if result and isinstance(result, dict):
@@ -296,6 +308,7 @@ class Application(QApplication):
                 on_complete()
 
         def on_error(error_msg):
+            self._refresh_in_progress = False
             self.refresh_error.emit(f"Refresh failed: {error_msg}")
             if on_complete:
                 on_complete()
