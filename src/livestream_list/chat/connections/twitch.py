@@ -9,6 +9,7 @@ import aiohttp
 
 from ...core.models import StreamPlatform
 from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
+from ..emotes.image import ImageSet, ImageSpec
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -110,11 +111,28 @@ def parse_emote_positions(emotes_tag: str) -> list[tuple[int, int, ChatEmote]]:
         if ":" not in emote_section:
             continue
         emote_id, ranges = emote_section.split(":", 1)
+        specs: dict[int, ImageSpec] = {}
+        for scale in (1, 2, 3):
+            animated_url = (
+                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/{scale}.0"
+            )
+            static_url = (
+                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/dark/{scale}.0"
+            )
+            key = f"emote:twitch:{emote_id}@{scale}x"
+            specs[scale] = ImageSpec(
+                scale=scale,
+                key=key,
+                url=animated_url,
+                fallback_url=static_url,
+                animated=True,
+            )
         emote = ChatEmote(
             id=emote_id,
             name="",  # Will be filled from message text
-            url_template=f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/{{size}}",
+            url_template=specs[2].url,
             provider="twitch",
+            image_set=ImageSet(specs),
         )
         for range_str in ranges.split(","):
             if "-" in range_str:

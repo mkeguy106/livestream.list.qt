@@ -154,6 +154,19 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(refresh_group)
 
+        # Storage group
+        storage_group = QGroupBox("Storage")
+        storage_layout = QFormLayout(storage_group)
+
+        self.emote_cache_spin = QSpinBox()
+        self.emote_cache_spin.setRange(50, 5000)
+        self.emote_cache_spin.setSuffix(" MB")
+        self.emote_cache_spin.setValue(self.app.settings.emote_cache_mb)
+        self.emote_cache_spin.valueChanged.connect(self._on_emote_cache_changed)
+        storage_layout.addRow("Emote cache size:", self.emote_cache_spin)
+
+        layout.addWidget(storage_group)
+
         # Notifications group
         notif_group = QGroupBox("Notifications")
         notif_layout = QFormLayout(notif_group)
@@ -488,6 +501,11 @@ class PreferencesDialog(QDialog):
         self.chat_alt_rows_cb.setChecked(self.app.settings.chat.builtin.show_alternating_rows)
         self.chat_alt_rows_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_alt_rows_cb)
+
+        self.chat_metrics_cb = QCheckBox("Show metrics in status bar")
+        self.chat_metrics_cb.setChecked(self.app.settings.chat.builtin.show_metrics)
+        self.chat_metrics_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_metrics_cb)
 
         # Theme color selector - allows editing dark or light mode colors
         builtin_layout.addRow(QLabel("<b>Theme Colors</b>"))
@@ -924,6 +942,12 @@ class PreferencesDialog(QDialog):
     def _on_refresh_changed(self, value):
         self.app.update_refresh_interval(value)
 
+    def _on_emote_cache_changed(self, value):
+        self.app.settings.emote_cache_mb = value
+        if self.app.chat_manager:
+            self.app.chat_manager.set_emote_cache_limit(value)
+        self.app.save_settings()
+
     def _on_notif_changed(self):
         self.app.settings.notifications.enabled = self.notif_enabled_cb.isChecked()
         self.app.settings.notifications.sound_enabled = self.notif_sound_cb.isChecked()
@@ -1034,6 +1058,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
         self.app.settings.chat.builtin.animate_emotes = self.chat_animate_emotes_cb.isChecked()
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
+        self.app.settings.chat.builtin.show_metrics = self.chat_metrics_cb.isChecked()
         self.app.settings.chat.builtin.use_platform_name_colors = (
             self.chat_name_colors_cb.isChecked()
         )
@@ -1078,6 +1103,7 @@ class PreferencesDialog(QDialog):
             self.app._chat_window.update_tab_style()
             self.app._chat_window.update_animation_state()
             self.app._chat_window.update_banner_settings()
+            self.app._chat_window.update_metrics_bar()
 
     def _on_color_theme_changed(self) -> None:
         """Reload color pickers when switching between dark/light mode editing."""
@@ -1247,6 +1273,8 @@ class PreferencesDialog(QDialog):
             self.background_cb.setChecked(defaults.close_to_tray)
             # Refresh
             self.refresh_spin.setValue(defaults.refresh_interval)
+            # Storage
+            self.emote_cache_spin.setValue(defaults.emote_cache_mb)
             # Notifications
             self.notif_enabled_cb.setChecked(notif_defaults.enabled)
             self.notif_sound_cb.setChecked(notif_defaults.sound_enabled)
@@ -1312,6 +1340,7 @@ class PreferencesDialog(QDialog):
             self.chat_emotes_cb.setChecked(builtin.show_emotes)
             self.chat_animate_emotes_cb.setChecked(builtin.animate_emotes)
             self.chat_alt_rows_cb.setChecked(builtin.show_alternating_rows)
+            self.chat_metrics_cb.setChecked(builtin.show_metrics)
             self.alt_row_even_edit.setText(builtin.alt_row_color_even)
             self.alt_row_odd_edit.setText(builtin.alt_row_color_odd)
             self.chat_name_colors_cb.setChecked(builtin.use_platform_name_colors)

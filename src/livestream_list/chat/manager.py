@@ -5,28 +5,32 @@ import logging
 import re
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QPixmap
 
 from ..core.models import Livestream, StreamPlatform
 from ..core.settings import Settings
 from .connections.base import BaseChatConnection
-from .emotes.cache import (
-    DEFAULT_EMOTE_HEIGHT,
-    EmoteCache,
-    EmoteLoaderWorker,
-    _extract_frames,
-)
+from .emotes.cache import EmoteCache, DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW
+from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
+from .emotes.matcher import find_third_party_emotes
 from .models import ChatEmote, ChatMessage, ChatUser
 
 logger = logging.getLogger(__name__)
 
 # Fallback Twitch client ID (same as api.twitch.DEFAULT_CLIENT_ID)
 _DEFAULT_TWITCH_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
-MAX_EMOTE_DOWNLOAD_RETRIES = 2
+GLOBAL_EMOTE_TTL = 24 * 60 * 60  # 24 hours
+USER_EMOTE_TTL = 30 * 60  # 30 minutes
+CHANNEL_EMOTE_TTL = 6 * 60 * 60  # 6 hours
+PREFETCH_CONCURRENCY = 1
+MAX_RECENT_CHANNELS = 30
+MESSAGE_FLUSH_INTERVAL_MS = 50
+MAX_MESSAGES_PER_FLUSH = 200
+MAX_PENDING_MESSAGES = 5000
 
 
 class ChatConnectionWorker(QThread):
@@ -64,11 +68,10 @@ class ChatConnectionWorker(QThread):
 
 
 class EmoteFetchWorker(QThread):
-    """Worker thread that fetches emote lists and badge data from providers."""
+    """Worker thread that fetches channel emotes and badge data from providers."""
 
     emotes_fetched = Signal(str, list)  # channel_key, list[ChatEmote]
     badges_fetched = Signal(str, dict)  # channel_key, {badge_id: image_url}
-    user_emotes_fetched = Signal(list)  # list[ChatEmote] - for caching
 
     def __init__(
         self,
@@ -78,7 +81,8 @@ class EmoteFetchWorker(QThread):
         providers: list[str],
         oauth_token: str = "",
         client_id: str = "",
-        cached_user_emotes: list | None = None,
+        fetch_emotes: bool = True,
+        fetch_badges: bool = True,
         parent=None,
     ):
         super().__init__(parent)
@@ -88,26 +92,25 @@ class EmoteFetchWorker(QThread):
         self.providers = providers
         self.oauth_token = oauth_token
         self.client_id = client_id
-        self.cached_user_emotes = cached_user_emotes or []
+        self.fetch_emotes = fetch_emotes
+        self.fetch_badges = fetch_badges
 
     def run(self):
-        """Fetch emotes and badges."""
+        """Fetch channel emotes and badges."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            # Resolve numeric Twitch user ID if needed (for 7TV/BTTV/FFZ APIs)
             resolved_id = self.channel_id
             if self.platform == "twitch":
                 numeric_id = loop.run_until_complete(self._resolve_twitch_user_id())
                 if numeric_id:
                     resolved_id = numeric_id
 
-            emotes = loop.run_until_complete(self._fetch_all(resolved_id))
-            self.emotes_fetched.emit(self.channel_key, emotes)
+            if self.fetch_emotes:
+                emotes = loop.run_until_complete(self._fetch_channel_emotes(resolved_id))
+                self.emotes_fetched.emit(self.channel_key, emotes)
 
-            # Fetch Twitch badges (try authenticated API first, fall back to public)
-            if self.platform == "twitch":
-                # Use resolved numeric ID for badge API too
+            if self.fetch_badges and self.platform == "twitch":
                 self._resolved_broadcaster_id = resolved_id
                 badge_map = loop.run_until_complete(self._fetch_twitch_badges())
                 if badge_map:
@@ -177,38 +180,8 @@ class EmoteFetchWorker(QThread):
 
         return None
 
-    async def _get_authenticated_user_id(self) -> str | None:
-        """Get the user ID of the authenticated user from the OAuth token."""
-        import aiohttp
-
-        if not self.oauth_token or not self.client_id:
-            return None
-
-        try:
-            headers = {
-                "Authorization": f"Bearer {self.oauth_token}",
-                "Client-Id": self.client_id,
-            }
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(
-                    "https://api.twitch.tv/helix/users",
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        users = data.get("data", [])
-                        if users:
-                            user_id = users[0].get("id", "")
-                            if user_id:
-                                logger.debug(f"Authenticated user ID: {user_id}")
-                                return user_id
-        except Exception as e:
-            logger.debug(f"Failed to get authenticated user ID: {e}")
-
-        return None
-
-    async def _fetch_all(self, channel_id: str) -> list[ChatEmote]:
-        """Fetch global + channel emotes from all providers."""
+    async def _fetch_channel_emotes(self, channel_id: str) -> list[ChatEmote]:
+        """Fetch channel emotes from all providers."""
         all_emotes: list[ChatEmote] = []
 
         # Fetch native platform emotes first
@@ -218,13 +191,6 @@ class EmoteFetchWorker(QThread):
                 client_id=self.client_id,
             )
             try:
-                global_emotes = await twitch_provider.get_global_emotes()
-                all_emotes.extend(global_emotes)
-                logger.debug(f"Fetched {len(global_emotes)} global emotes from twitch")
-            except Exception as e:
-                logger.debug(f"Failed to fetch global emotes from twitch: {e}")
-
-            try:
                 channel_emotes = await twitch_provider.get_channel_emotes(
                     self.platform, channel_id
                 )
@@ -232,33 +198,6 @@ class EmoteFetchWorker(QThread):
                 logger.debug(f"Fetched {len(channel_emotes)} channel emotes from twitch")
             except Exception as e:
                 logger.debug(f"Failed to fetch channel emotes from twitch: {e}")
-
-            # Fetch user's subscribed emotes (requires user:read:emotes scope)
-            # Stale-while-revalidate: use cached immediately, fetch fresh in background
-            if self.oauth_token:
-                # Use cached emotes immediately (stale)
-                if self.cached_user_emotes:
-                    all_emotes.extend(self.cached_user_emotes)
-                    logger.debug(
-                        f"Using {len(self.cached_user_emotes)} cached user emotes from twitch"
-                    )
-
-                # Always fetch fresh emotes (revalidate)
-                try:
-                    user_id = await self._get_authenticated_user_id()
-                    if user_id:
-                        fresh_user_emotes = await twitch_provider.get_user_emotes(user_id)
-                        logger.debug(
-                            f"Fetched {len(fresh_user_emotes)} fresh user emotes from twitch"
-                        )
-                        # Emit fresh emotes for caching
-                        self.user_emotes_fetched.emit(fresh_user_emotes)
-
-                        # If we didn't have cached emotes, add fresh ones now
-                        if not self.cached_user_emotes:
-                            all_emotes.extend(fresh_user_emotes)
-                except Exception as e:
-                    logger.debug(f"Failed to fetch user emotes from twitch: {e}")
 
         # Fetch third-party emotes
         provider_map = {
@@ -273,13 +212,6 @@ class EmoteFetchWorker(QThread):
                 continue
 
             provider = provider_cls()
-            try:
-                global_emotes = await provider.get_global_emotes()
-                all_emotes.extend(global_emotes)
-                logger.debug(f"Fetched {len(global_emotes)} global emotes from {name}")
-            except Exception as e:
-                logger.debug(f"Failed to fetch global emotes from {name}: {e}")
-
             try:
                 channel_emotes = await provider.get_channel_emotes(self.platform, channel_id)
                 all_emotes.extend(channel_emotes)
@@ -775,6 +707,135 @@ class SocialsFetchWorker(QThread):
         return None
 
 
+class GlobalEmoteFetchWorker(QThread):
+    """Worker thread that fetches global emotes."""
+
+    emotes_fetched = Signal(dict)  # {"twitch": list[ChatEmote], "common": list[ChatEmote]}
+
+    def __init__(self, providers: list[str], oauth_token: str, client_id: str, parent=None):
+        super().__init__(parent)
+        self.providers = providers
+        self.oauth_token = oauth_token
+        self.client_id = client_id
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(self._fetch_globals())
+            if result:
+                self.emotes_fetched.emit(result)
+        except Exception as e:
+            logger.error(f"Global emote fetch error: {e}")
+        finally:
+            loop.close()
+
+    async def _fetch_globals(self) -> dict:
+        twitch_globals: list[ChatEmote] = []
+        common_globals: list[ChatEmote] = []
+
+        twitch_provider = TwitchProvider(
+            oauth_token=self.oauth_token,
+            client_id=self.client_id,
+        )
+        try:
+            twitch_globals = await twitch_provider.get_global_emotes()
+            logger.debug(f"Fetched {len(twitch_globals)} Twitch global emotes")
+        except Exception as e:
+            logger.debug(f"Failed to fetch Twitch global emotes: {e}")
+
+        provider_map = {
+            "7tv": SevenTVProvider,
+            "bttv": BTTVProvider,
+            "ffz": FFZProvider,
+        }
+        for name in self.providers:
+            provider_cls = provider_map.get(name)
+            if not provider_cls:
+                continue
+            provider = provider_cls()
+            try:
+                emotes = await provider.get_global_emotes()
+                common_globals.extend(emotes)
+                logger.debug(f"Fetched {len(emotes)} global emotes from {name}")
+            except Exception as e:
+                logger.debug(f"Failed to fetch global emotes from {name}: {e}")
+
+        return {"twitch": twitch_globals, "common": common_globals}
+
+
+class UserEmoteFetchWorker(QThread):
+    """Worker thread that fetches Twitch user emotes."""
+
+    user_emotes_fetched = Signal(list)  # list[ChatEmote]
+
+    def __init__(self, oauth_token: str, client_id: str, parent=None):
+        super().__init__(parent)
+        self.oauth_token = oauth_token
+        self.client_id = client_id
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            emotes = loop.run_until_complete(self._fetch_user_emotes())
+            if emotes:
+                self.user_emotes_fetched.emit(emotes)
+        except Exception as e:
+            logger.debug(f"User emote fetch error: {e}")
+        finally:
+            loop.close()
+
+    async def _get_authenticated_user_id(self) -> str | None:
+        """Get the user ID of the authenticated user from the OAuth token."""
+        import aiohttp
+
+        if not self.oauth_token or not self.client_id:
+            return None
+
+        try:
+            headers = {
+                "Authorization": f"Bearer {self.oauth_token}",
+                "Client-Id": self.client_id,
+            }
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(
+                    "https://api.twitch.tv/helix/users",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        users = data.get("data", [])
+                        if users:
+                            user_id = users[0].get("id", "")
+                            if user_id:
+                                return user_id
+        except Exception as e:
+            logger.debug(f"Failed to get authenticated user ID: {e}")
+
+        return None
+
+    async def _fetch_user_emotes(self) -> list[ChatEmote]:
+        if not self.oauth_token:
+            return []
+
+        user_id = await self._get_authenticated_user_id()
+        if not user_id:
+            return []
+
+        twitch_provider = TwitchProvider(
+            oauth_token=self.oauth_token,
+            client_id=self.client_id,
+        )
+        try:
+            emotes = await twitch_provider.get_user_emotes(user_id)
+            logger.debug(f"Fetched {len(emotes)} user emotes")
+            return emotes
+        except Exception as e:
+            logger.debug(f"Failed to fetch user emotes: {e}")
+            return []
+
+
 class ChatManager(QObject):
     """Manages chat connections and coordinates with the UI.
 
@@ -804,39 +865,70 @@ class ChatManager(QObject):
     # Emitted when channel socials are fetched (channel_key, {platform: url})
     socials_fetched = Signal(str, dict)
 
-    def __init__(self, settings: Settings, parent: QObject | None = None):
+    def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
         self.settings = settings
+        self._monitor = monitor
         self._workers: dict[str, ChatConnectionWorker] = {}
         self._connections: dict[str, BaseChatConnection] = {}
         self._livestreams: dict[str, Livestream] = {}
         self._emote_fetch_workers: dict[str, EmoteFetchWorker] = {}
         self._socials_fetch_workers: dict[str, SocialsFetchWorker] = {}
+        self._global_emote_worker: GlobalEmoteFetchWorker | None = None
+        self._user_emote_worker: UserEmoteFetchWorker | None = None
 
         # Emote cache shared across all widgets
         self._emote_cache = EmoteCache(parent=self)
         self._emote_cache.emote_loaded.connect(self._on_emote_loaded)
+        self._emote_cache.set_disk_limit_mb(self.settings.emote_cache_mb)
+        self._gif_timer = GifTimer(parent=self)
+        self._image_expiration_pool = ImageExpirationPool(self._emote_cache, parent=self)
 
-        # Emote loader for downloading images
-        self._loader: EmoteLoaderWorker | None = None
-        self._download_queue: list[tuple[str, str]] = []  # (cache_key, url)
-        self._download_attempts: dict[tuple[str, str], int] = {}
-        self._download_fallbacks: dict[tuple[str, str], str] = {}
-        self._last_download_url: dict[str, str] = {}
-        self._download_blocked_until: dict[tuple[str, str], float] = {}
-
-        # Map of emote name -> ChatEmote for all loaded channels
-        self._emote_map: dict[str, ChatEmote] = {}
-
-        # Cached user emotes (subscriber emotes from other channels)
-        # Uses stale-while-revalidate: cached emotes used immediately, fresh fetched in background
-        self._cached_user_emotes: list[ChatEmote] = []
+        # Global emotes (shared across channels)
+        self._global_common_emotes: dict[str, ChatEmote] = {}
+        self._global_twitch_emotes: dict[str, ChatEmote] = {}
+        # User emotes (Twitch subscriber/follower emotes)
+        self._user_emotes: dict[str, ChatEmote] = {}
+        # Channel-specific emotes: channel_key -> {name: emote}
+        self._channel_emote_maps: dict[str, dict[str, ChatEmote]] = {}
+        # Resolved per-channel emote maps (global + user + channel)
+        self._resolved_emote_maps: dict[str, dict[str, ChatEmote]] = {}
+        self._global_emotes_fetched_at: float = 0.0
+        self._user_emotes_fetched_at: float = 0.0
+        self._channel_emotes_fetched_at: dict[str, float] = {}
 
         # Badge URL mapping from Twitch API: "name/version" -> image_url
         self._badge_url_map: dict[str, str] = {}
+        self._badge_image_sets: dict[str, ImageSet] = {}
+        self._badges_fetched_at: dict[str, float] = {}
 
         # Track which badge URLs we've already queued for download
         self._queued_badge_urls: set[str] = set()
+
+        # Debounce emote cache updates to reduce UI churn
+        self._emote_update_pending = False
+        self._emote_update_timer = QTimer(self)
+        self._emote_update_timer.setSingleShot(True)
+        self._emote_update_timer.timeout.connect(self._emit_emote_cache_update)
+
+        # Prefetch state (favorites/recent/active)
+        self._prefetch_queue: deque[str] = deque()
+        self._prefetch_inflight: set[str] = set()
+        self._prefetch_workers: dict[str, EmoteFetchWorker] = {}
+        self._prefetch_timer = QTimer(self)
+        self._prefetch_timer.timeout.connect(self._process_prefetch_queue)
+        self._prefetch_timer.start(500)
+        self._last_emote_providers = tuple(self.settings.chat.builtin.emote_providers)
+
+        # Message batching to throttle UI updates
+        self._pending_messages: dict[str, list[ChatMessage]] = {}
+        self._message_flush_timer = QTimer(self)
+        self._message_flush_timer.setInterval(MESSAGE_FLUSH_INTERVAL_MS)
+        self._message_flush_timer.timeout.connect(self._flush_pending_messages)
+
+        # Kick off global/user emote fetch in background
+        self._ensure_global_emotes()
+        self._ensure_user_emotes()
 
     @property
     def emote_cache(self) -> EmoteCache:
@@ -844,9 +936,40 @@ class ChatManager(QObject):
         return self._emote_cache
 
     @property
+    def gif_timer(self) -> GifTimer:
+        """Get the shared GIF animation timer."""
+        return self._gif_timer
+
+    def get_metrics(self) -> dict[str, int]:
+        """Return lightweight performance metrics for the UI."""
+        pending_messages = sum(len(v) for v in self._pending_messages.values())
+        return {
+            "emote_mem": len(self._emote_cache.pixmap_dict),
+            "emote_animated": len(self._emote_cache.animated_dict),
+            "emote_pending": self._emote_cache.pending_count(),
+            "disk_bytes": self._emote_cache.get_disk_usage_bytes(),
+            "disk_limit_mb": int(self.settings.emote_cache_mb),
+            "downloads_queued": self._emote_cache.downloads_queued(),
+            "downloads_inflight": self._emote_cache.downloads_inflight(),
+            "prefetch_queue": len(self._prefetch_queue),
+            "prefetch_inflight": len(self._prefetch_inflight),
+            "message_queue": pending_messages,
+        }
+
+    def set_emote_cache_limit(self, mb: int) -> None:
+        """Update emote disk cache limit (MB)."""
+        self._emote_cache.set_disk_limit_mb(mb)
+
+    @property
     def emote_map(self) -> dict[str, ChatEmote]:
-        """Get the combined emote name map."""
-        return self._emote_map
+        """Get the global emote map (third-party globals)."""
+        return self._global_common_emotes
+
+    def get_emote_map(self, channel_key: str) -> dict[str, ChatEmote]:
+        """Get the combined emote map for a specific channel."""
+        if channel_key in self._resolved_emote_maps:
+            return self._resolved_emote_maps[channel_key]
+        return self._rebuild_emote_map(channel_key)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open a chat connection for a livestream."""
@@ -856,6 +979,8 @@ class ChatManager(QObject):
             return
 
         self._livestreams[channel_key] = livestream
+        self._record_recent_channel(channel_key)
+        self._update_prefetch_targets()
         self._start_connection(channel_key, livestream)
 
         # Start emote fetching for this channel
@@ -929,6 +1054,7 @@ class ChatManager(QObject):
             livestream = self._livestreams[key]
             self._start_connection(key, livestream)
 
+        self._ensure_user_emotes(force=True)
         self.auth_state_changed.emit(bool(self.settings.twitch.access_token))
 
     def reconnect_kick(self) -> None:
@@ -1007,6 +1133,120 @@ class ChatManager(QObject):
             fetch_worker.wait(2000)
 
         self.chat_closed.emit(channel_key)
+        self._update_prefetch_targets()
+
+    def on_refresh_complete(self, livestreams: list[Livestream] | None = None) -> None:
+        """Handle refresh complete to update prefetch targets."""
+        if livestreams is None and self._monitor:
+            livestreams = self._monitor.live_streams
+        self._update_prefetch_targets(livestreams)
+        # Keep global/user emotes fresh without manual refresh.
+        self._ensure_global_emotes()
+        self._ensure_user_emotes()
+
+    def _record_recent_channel(self, channel_key: str) -> None:
+        """Record a channel in the recent chat list."""
+        recents = list(self.settings.chat.recent_channels or [])
+        if channel_key in recents:
+            recents.remove(channel_key)
+        recents.insert(0, channel_key)
+        recents = recents[:MAX_RECENT_CHANNELS]
+        self.settings.chat.recent_channels = recents
+        self.settings.save()
+
+    def _update_prefetch_targets(self, livestreams: list[Livestream] | None = None) -> None:
+        """Update prefetch queue based on favorites/recent/active channels."""
+        if not self.settings.chat.builtin.show_emotes:
+            self._prefetch_queue.clear()
+            return
+        if self.settings.emote_cache_mb <= 0:
+            self._prefetch_queue.clear()
+            return
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+
+        def add_key(key: str) -> None:
+            if key and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+
+        # Active chats (highest priority, but will be skipped later)
+        for key in self._connections.keys():
+            add_key(key)
+
+        # Recent chats
+        for key in self.settings.chat.recent_channels or []:
+            add_key(key)
+
+        # Favorites
+        if self._monitor:
+            for channel in self._monitor.channels:
+                if channel.favorite:
+                    add_key(channel.unique_key)
+
+        # Filter to known channels only
+        known = set()
+        if self._monitor:
+            known.update(ch.unique_key for ch in self._monitor.channels)
+        known.update(self._livestreams.keys())
+        ordered = [key for key in ordered if key in known]
+
+        # Rebuild queue, skipping active connections and recent fetches
+        now = time.monotonic()
+        self._prefetch_queue = deque(
+            key
+            for key in ordered
+            if key not in self._connections
+            and key not in self._emote_fetch_workers
+            and key not in self._prefetch_inflight
+            and (now - self._channel_emotes_fetched_at.get(key, 0)) >= CHANNEL_EMOTE_TTL
+        )
+
+    def _process_prefetch_queue(self) -> None:
+        """Prefetch emotes for queued channels in the background."""
+        if not self._prefetch_queue:
+            return
+        if len(self._prefetch_inflight) >= PREFETCH_CONCURRENCY:
+            return
+
+        channel_key = self._prefetch_queue.popleft()
+        if channel_key in self._prefetch_inflight:
+            return
+        channel = None
+        if self._monitor:
+            for ch in self._monitor.channels:
+                if ch.unique_key == channel_key:
+                    channel = ch
+                    break
+        if not channel and channel_key in self._livestreams:
+            channel = self._livestreams[channel_key].channel
+        if not channel:
+            return
+
+        worker = EmoteFetchWorker(
+            channel_key=channel_key,
+            platform=channel.platform.value.lower(),
+            channel_id=channel.channel_id,
+            providers=self.settings.chat.builtin.emote_providers
+            if self.settings.chat.builtin.show_emotes
+            else [],
+            oauth_token=self.settings.twitch.access_token,
+            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
+            fetch_badges=False,
+            parent=self,
+        )
+        worker.emotes_fetched.connect(self._on_emotes_fetched)
+        self._prefetch_workers[channel_key] = worker
+        self._prefetch_inflight.add(channel_key)
+        worker.finished.connect(lambda key=channel_key: self._on_prefetch_finished(key))
+        worker.start()
+
+    def _on_prefetch_finished(self, channel_key: str) -> None:
+        self._prefetch_inflight.discard(channel_key)
+        worker = self._prefetch_workers.pop(channel_key, None)
+        if worker and worker.isRunning():
+            worker.wait(1000)
 
     def send_message(self, channel_key: str, text: str) -> None:
         """Send a message to a channel's chat."""
@@ -1053,18 +1293,20 @@ class ChatManager(QObject):
         """Disconnect all active chat connections."""
         for key in list(self._workers.keys()):
             self.close_chat(key)
-        self._stop_loader()
+        self._prefetch_timer.stop()
+        self._message_flush_timer.stop()
 
         # Clean up global emote/badge state when all chats are closed
         # This prevents unbounded memory growth in long-running sessions
-        self._emote_map.clear()
+        self._global_common_emotes.clear()
+        self._global_twitch_emotes.clear()
+        self._user_emotes.clear()
+        self._channel_emote_maps.clear()
+        self._resolved_emote_maps.clear()
         self._badge_url_map.clear()
+        self._badge_image_sets.clear()
+        self._badges_fetched_at.clear()
         self._queued_badge_urls.clear()
-        self._download_queue.clear()
-        self._download_attempts.clear()
-        self._download_fallbacks.clear()
-        self._last_download_url.clear()
-        self._download_blocked_until.clear()
 
     def is_connected(self, channel_key: str) -> bool:
         """Check if a channel's chat is connected."""
@@ -1076,107 +1318,113 @@ class ChatManager(QObject):
         logger.error(f"Chat error for {channel_key}: {message}")
         self.chat_error.emit(channel_key, message)
 
+    def _bind_emote_image_set(self, emote: ChatEmote) -> ImageSet | None:
+        """Ensure an emote has an ImageSet bound to the shared cache."""
+        image_set = emote.image_set
+        if image_set is None and emote.url_template:
+            specs = {}
+            for scale in (1, 2, 3):
+                key = f"emote:{emote.provider}:{emote.id}@{scale}x"
+                specs[scale] = ImageSpec(scale=scale, key=key, url=emote.url_template)
+            image_set = ImageSet(specs)
+            emote.image_set = image_set
+        if image_set is None:
+            return None
+        bound = image_set.bind(self._emote_cache)
+        if bound is not image_set:
+            emote.image_set = bound
+        return emote.image_set
+
+    def _ensure_badge_image_set(self, badge: ChatBadge) -> ImageSet | None:
+        """Ensure a badge has an ImageSet bound to the shared cache."""
+        if badge.image_set:
+            return badge.image_set
+        url = self._badge_url_map.get(badge.id) or badge.image_url
+        if not url:
+            self._queued_badge_urls.add(badge.id)
+            return None
+        image_set = self._badge_image_sets.get(badge.id)
+        if image_set is None:
+            specs = {
+                scale: ImageSpec(
+                    scale=scale,
+                    key=f"badge:{badge.id}@{scale}x",
+                    url=url,
+                )
+                for scale in (1, 2, 3)
+            }
+            image_set = ImageSet(specs).bind(self._emote_cache)
+            self._badge_image_sets[badge.id] = image_set
+        badge.image_set = image_set
+        return image_set
+
     def _on_messages_received(self, channel_key: str, messages: list) -> None:
-        """Handle incoming messages - queue badge/emote downloads, then forward."""
+        """Enqueue incoming messages for throttled processing."""
+        if not messages:
+            return
+        pending = self._pending_messages.setdefault(channel_key, [])
         for msg in messages:
-            if not isinstance(msg, ChatMessage):
+            if isinstance(msg, ChatMessage):
+                pending.append(msg)
+        if len(pending) > MAX_PENDING_MESSAGES:
+            del pending[: len(pending) - MAX_PENDING_MESSAGES]
+        if not self._message_flush_timer.isActive():
+            self._message_flush_timer.start()
+
+    def _flush_pending_messages(self) -> None:
+        """Process queued messages in batches to avoid UI stalls."""
+        if not self._pending_messages:
+            self._message_flush_timer.stop()
+            return
+
+        for channel_key in list(self._pending_messages.keys()):
+            queue = self._pending_messages.get(channel_key, [])
+            if not queue:
+                self._pending_messages.pop(channel_key, None)
                 continue
+            batch = queue[:MAX_MESSAGES_PER_FLUSH]
+            del queue[:MAX_MESSAGES_PER_FLUSH]
+            if not queue:
+                self._pending_messages.pop(channel_key, None)
+
+            processed = self._process_messages(channel_key, batch)
+            if processed:
+                self.messages_received.emit(channel_key, processed)
+
+        if not self._pending_messages:
+            self._message_flush_timer.stop()
+
+    def _process_messages(self, channel_key: str, messages: list[ChatMessage]) -> list[ChatMessage]:
+        """Handle incoming messages - queue badge/emote downloads, then forward."""
+        if not messages:
+            return []
+        emote_map = self.get_emote_map(channel_key)
+        for msg in messages:
             # Queue badge image downloads
             for badge in msg.user.badges:
-                badge_key = f"badge:{badge.id}"
-                if self._emote_cache.has(badge_key) or badge_key in self._queued_badge_urls:
-                    # Ensure loaded into memory if only on disk
-                    if badge_key not in self._emote_cache.pixmap_dict:
-                        self._emote_cache.get(badge_key)
-                    continue
-                # Mark as seen (will be re-queued when badge map arrives)
-                self._queued_badge_urls.add(badge_key)
-                # Use URL from badge API map, fall back to badge.image_url if set
-                badge_url = self._badge_url_map.get(badge.id) or badge.image_url
-                if badge_url:
-                    self._queue_download(badge_key, badge_url)
+                badge_set = self._ensure_badge_image_set(badge)
+                if badge_set:
+                    badge_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
             # Match third-party emotes (7TV, BTTV, FFZ) in message text
-            if self._emote_map:
-                self._match_third_party_emotes(msg)
+            if emote_map:
+                self._match_third_party_emotes(msg, emote_map)
 
             # Queue emote image downloads (native + third-party)
             for start, end, emote in msg.emote_positions:
-                emote_key = f"emote:{emote.provider}:{emote.id}"
-                if self._emote_cache.is_pending(emote_key):
-                    continue
-                if not self._emote_cache.has(emote_key):
-                    url = emote.url_template.replace("{size}", "2.0")
-                    self._emote_cache.mark_pending(emote_key)
-                    self._queue_download(emote_key, url)
-                elif not self._emote_cache.has_animation_data(emote_key):
-                    # Legacy PNG-only cache - re-download for animation detection
-                    url = emote.url_template.replace("{size}", "2.0")
-                    self._emote_cache.mark_pending(emote_key)
-                    self._queue_download(emote_key, url)
-                elif emote_key not in self._emote_cache.pixmap_dict:
-                    # Cached on disk but not in memory - load it
-                    self._emote_cache.get(emote_key)
+                image_set = self._bind_emote_image_set(emote)
+                if image_set:
+                    image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
         # Detect @mentions of our username
         our_nick = self._get_our_nick(channel_key)
         if our_nick:
             mention_pattern = f"@{our_nick}".lower()
             for msg in messages:
-                if isinstance(msg, ChatMessage) and mention_pattern in msg.text.lower():
+                if mention_pattern in msg.text.lower():
                     msg.is_mention = True
 
-        # Start downloading if we have items queued
-        if self._download_queue:
-            self._start_downloads()
-
-        self.messages_received.emit(channel_key, messages)
-
-    def _queue_download(self, key: str, url: str) -> None:
-        """Queue a download with retry/fallback metadata."""
-        if not url:
-            return
-
-        attempt_key = (key, url)
-        blocked_until = self._download_blocked_until.get(attempt_key, 0)
-        if blocked_until > time.monotonic():
-            return
-        attempts = self._download_attempts.get(attempt_key, 0)
-        if attempts >= MAX_EMOTE_DOWNLOAD_RETRIES:
-            logger.debug(f"Skipping download for {key} (attempts exceeded): {url}")
-            self._download_blocked_until[attempt_key] = time.monotonic() + 60
-            self._emote_cache.clear_pending(key)
-            return
-
-        self._last_download_url[key] = url
-        fallback_url = self._get_fallback_url(key, url)
-        if fallback_url and fallback_url != url:
-            self._download_fallbacks[attempt_key] = fallback_url
-
-        self._download_queue.append((key, url))
-
-    def _get_fallback_url(self, key: str, url: str) -> str | None:
-        """Return a fallback URL for animated Twitch emotes."""
-        if not key.startswith("emote:twitch:"):
-            return None
-        if "/animated/" in url:
-            return url.replace("/animated/", "/static/")
-        return None
-
-    def _schedule_retry(self, key: str, url: str, delay_ms: int) -> None:
-        """Schedule a retry for a failed download."""
-        QTimer.singleShot(delay_ms, lambda: self._retry_download(key, url))
-
-    def _retry_download(self, key: str, url: str) -> None:
-        """Retry a download if still under retry limits."""
-        attempt_key = (key, url)
-        attempts = self._download_attempts.get(attempt_key, 0)
-        if attempts >= MAX_EMOTE_DOWNLOAD_RETRIES:
-            return
-        self._emote_cache.mark_pending(key)
-        self._queue_download(key, url)
-        if self._download_queue:
-            self._start_downloads()
+        return messages
 
     def _get_our_nick(self, channel_key: str) -> str | None:
         """Get the authenticated user's display name for the given channel's connection."""
@@ -1187,77 +1435,39 @@ class ChatManager(QObject):
                 return nick
         return None
 
-    def _match_third_party_emotes(self, msg: ChatMessage) -> None:
+    def _rebuild_emote_map(self, channel_key: str) -> dict[str, ChatEmote]:
+        """Build and cache a per-channel emote map."""
+        merged: dict[str, ChatEmote] = {}
+        merged.update(self._global_common_emotes)
+        livestream = self._livestreams.get(channel_key)
+        if livestream and livestream.channel.platform == StreamPlatform.TWITCH:
+            merged.update(self._global_twitch_emotes)
+            merged.update(self._user_emotes)
+        merged.update(self._channel_emote_maps.get(channel_key, {}))
+        self._resolved_emote_maps[channel_key] = merged
+        return merged
+
+    def _match_third_party_emotes(self, msg: ChatMessage, emote_map: dict[str, ChatEmote]) -> None:
         """Scan message text for third-party emote names and add to emote_positions."""
         text = msg.text
-        if not text:
+        if not text or not emote_map:
             return
-
-        # Build set of character positions already claimed by native emotes
-        claimed_ranges = [(start, end) for start, end, _ in msg.emote_positions]
-
-        def overlaps(start: int, end: int) -> bool:
-            for s, e in claimed_ranges:
-                if start < e and end > s:
-                    return True
-            return False
-
-        # Match words, allowing punctuation boundaries (e.g., "KEKW!" or "(OMEGALUL)")
-        new_positions: list[tuple[int, int, ChatEmote]] = []
-        punct_strip = ".,!?;:()[]{}<>\"'`~"
-        for match in re.finditer(r"\S+", text):
-            token = match.group()
-            token_start = match.start()
-            token_end = match.end()
-
-            # Skip URLs to avoid false matches inside links
-            if token.startswith("http://") or token.startswith("https://"):
-                continue
-
-            # Prefer exact match (covers emotes with punctuation in the name)
-            emote = self._emote_map.get(token)
-            if emote:
-                if not overlaps(token_start, token_end):
-                    new_positions.append((token_start, token_end, emote))
-                    claimed_ranges.append((token_start, token_end))
-                continue
-
-            # Try trimmed match (strip leading/trailing punctuation)
-            left = 0
-            right = len(token)
-            while left < right and token[left] in punct_strip:
-                left += 1
-            while right > left and token[right - 1] in punct_strip:
-                right -= 1
-
-            if left == 0 and right == len(token):
-                continue
-
-            trimmed = token[left:right]
-            if not trimmed:
-                continue
-
-            emote = self._emote_map.get(trimmed)
-            if not emote:
-                continue
-
-            start = token_start + left
-            end = token_start + right
-            if not overlaps(start, end):
-                new_positions.append((start, end, emote))
-                claimed_ranges.append((start, end))
+        new_positions = find_third_party_emotes(
+            text, emote_map, [(start, end) for start, end, _ in msg.emote_positions]
+        )
 
         if new_positions:
             # Merge with existing positions and sort by start
             msg.emote_positions = sorted(msg.emote_positions + new_positions, key=lambda x: x[0])
             logger.debug(f"Matched {len(new_positions)} 3rd-party emotes in message")
 
-    def backfill_third_party_emotes(self, messages: list[ChatMessage]) -> int:
+    def backfill_third_party_emotes(self, channel_key: str, messages: list[ChatMessage]) -> int:
         """Backfill third-party emotes for existing messages.
 
         Returns number of messages updated.
         """
-        if not self._emote_map or not messages:
+        emote_map = self.get_emote_map(channel_key)
+        if not emote_map or not messages:
             return 0
 
         updated = 0
@@ -1265,7 +1475,7 @@ class ChatManager(QObject):
             if not isinstance(msg, ChatMessage):
                 continue
             before = len(msg.emote_positions)
-            self._match_third_party_emotes(msg)
+            self._match_third_party_emotes(msg, emote_map)
             if len(msg.emote_positions) != before:
                 updated += 1
 
@@ -1273,12 +1483,39 @@ class ChatManager(QObject):
 
     def _fetch_emotes_for_channel(self, channel_key: str, livestream: Livestream) -> None:
         """Kick off async emote/badge fetching for a channel."""
+        self._ensure_global_emotes()
+        if livestream.channel.platform == StreamPlatform.TWITCH:
+            self._ensure_user_emotes()
         providers = self.settings.chat.builtin.emote_providers
         platform_name = livestream.channel.platform.value.lower()
         channel_id = livestream.channel.channel_id
 
-        # Pass cached user emotes for stale-while-revalidate (Twitch only)
-        cached_user_emotes = self._cached_user_emotes if platform_name == "twitch" else []
+        now = time.monotonic()
+        last_fetch = self._channel_emotes_fetched_at.get(channel_key, 0)
+        badges_stale = (
+            livestream.channel.platform == StreamPlatform.TWITCH
+            and (now - self._badges_fetched_at.get(channel_key, 0)) >= CHANNEL_EMOTE_TTL
+        )
+        if last_fetch and (now - last_fetch) < CHANNEL_EMOTE_TTL:
+            self._resolved_emote_maps.pop(channel_key, None)
+            self._rebuild_emote_map(channel_key)
+            self.emote_map_updated.emit(channel_key)
+            if badges_stale:
+                badge_worker = EmoteFetchWorker(
+                    channel_key=channel_key,
+                    platform=platform_name,
+                    channel_id=channel_id,
+                    providers=providers,
+                    oauth_token=self.settings.twitch.access_token,
+                    client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
+                    fetch_emotes=False,
+                    fetch_badges=True,
+                    parent=self,
+                )
+                badge_worker.badges_fetched.connect(self._on_badges_fetched)
+                self._emote_fetch_workers[channel_key] = badge_worker
+                badge_worker.start()
+            return
 
         worker = EmoteFetchWorker(
             channel_key=channel_key,
@@ -1287,12 +1524,12 @@ class ChatManager(QObject):
             providers=providers if self.settings.chat.builtin.show_emotes else [],
             oauth_token=self.settings.twitch.access_token,
             client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
-            cached_user_emotes=cached_user_emotes,
+            fetch_emotes=True,
+            fetch_badges=True,
             parent=self,
         )
         worker.emotes_fetched.connect(self._on_emotes_fetched)
         worker.badges_fetched.connect(self._on_badges_fetched)
-        worker.user_emotes_fetched.connect(self._on_user_emotes_fetched)
         self._emote_fetch_workers[channel_key] = worker
         worker.start()
 
@@ -1318,33 +1555,27 @@ class ChatManager(QObject):
 
     def _on_emotes_fetched(self, channel_key: str, emotes: list) -> None:
         """Handle fetched emote list - add to map and queue image downloads."""
+        download_priority = (
+            DOWNLOAD_PRIORITY_LOW if channel_key in self._prefetch_inflight else DOWNLOAD_PRIORITY_HIGH
+        )
+        channel_map = self._channel_emote_maps.setdefault(channel_key, {})
         for emote in emotes:
             if not isinstance(emote, ChatEmote):
                 continue
-            self._emote_map[emote.name] = emote
-
-            # Queue image download (or load from disk cache)
-            emote_key = f"emote:{emote.provider}:{emote.id}"
-            if self._emote_cache.is_pending(emote_key):
-                continue
-            if not self._emote_cache.has(emote_key):
-                # Not cached at all - download
-                self._emote_cache.mark_pending(emote_key)
-                self._queue_download(emote_key, emote.url_template)
-            elif not self._emote_cache.has_animation_data(emote_key):
-                # Legacy PNG cache only - re-download for animation detection
-                self._emote_cache.mark_pending(emote_key)
-                self._queue_download(emote_key, emote.url_template)
-            elif emote_key not in self._emote_cache.pixmap_dict:
-                # Has raw/animation data on disk but not in memory - load it
-                self._emote_cache.get(emote_key)
+            image_set = self._bind_emote_image_set(emote)
+            if image_set:
+                image_set.prefetch(scale=2.0, priority=download_priority)
+            channel_map[emote.name] = emote
 
         # Debug: log short emote names and emotes containing "om"
         short_emotes = [e.name for e in emotes if len(e.name) <= 4]
         om_emotes = [e.name for e in emotes if "om" in e.name.lower()]
+        self._resolved_emote_maps.pop(channel_key, None)
+        resolved_map = self._rebuild_emote_map(channel_key)
+        self._channel_emotes_fetched_at[channel_key] = time.monotonic()
         logger.info(
             f"Loaded {len(emotes)} emotes for {channel_key}, "
-            f"total emote map: {len(self._emote_map)}"
+            f"emote map size: {len(resolved_map)}"
         )
         if short_emotes:
             logger.info(f"Short emotes (<=4 chars): {short_emotes}")
@@ -1352,12 +1583,11 @@ class ChatManager(QObject):
             logger.debug(f"Emotes containing 'om': {om_emotes[:20]}")
 
         # Notify widgets immediately so autocomplete has the emote map
-        self.emote_cache_updated.emit()
-        self.emote_map_updated.emit(channel_key)
+        if channel_key in self._livestreams:
+            self.emote_cache_updated.emit()
+            self.emote_map_updated.emit(channel_key)
 
-        # Start downloading
-        if self._download_queue:
-            self._start_downloads()
+        # Downloads are handled by the image store
 
     def _on_user_emotes_fetched(self, emotes: list) -> None:
         """Handle fresh user emotes from background fetch - update cache.
@@ -1368,9 +1598,9 @@ class ChatManager(QObject):
         if not emotes:
             return
 
-        # Check if emotes changed (compare by emote IDs)
-        old_ids = {e.id for e in self._cached_user_emotes}
-        new_ids = {e.id for e in emotes if isinstance(e, ChatEmote)}
+        old_ids = {e.id for e in self._user_emotes.values()}
+        new_list = [e for e in emotes if isinstance(e, ChatEmote)]
+        new_ids = {e.id for e in new_list}
 
         if old_ids != new_ids:
             added = new_ids - old_ids
@@ -1380,193 +1610,150 @@ class ChatManager(QObject):
                 f"(total: {len(new_ids)})"
             )
 
-            # Add new emotes to the map and queue downloads
-            for emote in emotes:
-                if not isinstance(emote, ChatEmote):
-                    continue
+            self._user_emotes = {e.name: e for e in new_list}
+
+            for emote in new_list:
                 if emote.id in added:
-                    self._emote_map[emote.name] = emote
-                    emote_key = f"emote:{emote.provider}:{emote.id}"
-                    if not self._emote_cache.has(emote_key):
-                        self._emote_cache.mark_pending(emote_key)
-                        self._queue_download(emote_key, emote.url_template)
+                    image_set = self._bind_emote_image_set(emote)
+                    if image_set:
+                        image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
-            if self._download_queue:
-                self._start_downloads()
+            # Refresh emote maps for all Twitch channels
+            for channel_key, livestream in self._livestreams.items():
+                if livestream.channel.platform == StreamPlatform.TWITCH:
+                    self._resolved_emote_maps.pop(channel_key, None)
+                    self._rebuild_emote_map(channel_key)
 
-            # Notify widgets to refresh
             self.emote_cache_updated.emit()
             self.emote_map_updated.emit("")
 
-        # Update cache for next time
-        self._cached_user_emotes = [e for e in emotes if isinstance(e, ChatEmote)]
-        logger.debug(f"User emotes cache updated: {len(self._cached_user_emotes)} emotes")
-
-    def refresh_user_emotes(self) -> None:
-        """Manually refresh user emotes by clearing cache and re-fetching.
-
-        Call this when the user wants to force-refresh their emotes
-        (e.g., after subscribing to a new channel).
-        """
-        logger.info("Manual user emotes refresh requested")
-        self._cached_user_emotes = []
-
-        # Re-fetch emotes for all open Twitch channels
-        for channel_key, livestream in self._livestreams.items():
-            if livestream.channel.platform == StreamPlatform.TWITCH:
-                self._fetch_emotes_for_channel(channel_key, livestream)
+        self._user_emotes_fetched_at = time.monotonic()
 
     def _on_badges_fetched(self, channel_key: str, badge_map: dict) -> None:
         """Handle fetched badge URL data from Twitch API."""
         self._badge_url_map.update(badge_map)
+        self._badges_fetched_at[channel_key] = time.monotonic()
         logger.info(f"Badge URL map updated: {len(self._badge_url_map)} entries")
+
+        # Build or update badge image sets
+        for badge_id, url in badge_map.items():
+            if badge_id not in self._badge_image_sets:
+                specs = {
+                    scale: ImageSpec(
+                        scale=scale,
+                        key=f"badge:{badge_id}@{scale}x",
+                        url=url,
+                    )
+                    for scale in (1, 2, 3)
+                }
+                self._badge_image_sets[badge_id] = ImageSet(specs).bind(self._emote_cache)
 
         # Re-queue badges that were attempted before the map was ready
         requeue_count = 0
-        for badge_key in list(self._queued_badge_urls):
-            if self._emote_cache.has(badge_key):
-                # Ensure loaded into memory if only on disk
-                if badge_key not in self._emote_cache.pixmap_dict:
-                    self._emote_cache.get(badge_key)
-                continue
-            # Extract badge_id from "badge:name/version"
-            badge_id = badge_key.removeprefix("badge:")
-            url = badge_map.get(badge_id)
-            if url:
-                self._queue_download(badge_key, url)
+        for badge_id in list(self._queued_badge_urls):
+            cleaned_id = badge_id.removeprefix("badge:")
+            image_set = self._badge_image_sets.get(cleaned_id)
+            if image_set:
+                image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
+                self._queued_badge_urls.discard(badge_id)
                 requeue_count += 1
 
         if requeue_count:
             logger.debug(f"Re-queued {requeue_count} badges with correct URLs")
-            self._start_downloads()
 
-    def _start_downloads(self) -> None:
-        """Start or continue the emote loader worker."""
-        if self._loader and self._loader.isRunning():
-            # Worker is running, it will pick up items when it checks queue
-            for key, url in self._download_queue:
-                self._loader.enqueue(key, url)
-            self._download_queue.clear()
+    def on_emote_settings_changed(self) -> None:
+        """Handle changes to emote provider settings."""
+        providers = tuple(self.settings.chat.builtin.emote_providers)
+        if providers == self._last_emote_providers:
             return
+        self._last_emote_providers = providers
+        self._global_common_emotes.clear()
+        self._global_emotes_fetched_at = 0.0
+        self._channel_emote_maps.clear()
+        self._resolved_emote_maps.clear()
+        self._channel_emotes_fetched_at.clear()
+        self._ensure_global_emotes(force=True)
+        for channel_key, livestream in self._livestreams.items():
+            self._fetch_emotes_for_channel(channel_key, livestream)
 
-        # Create new loader
-        self._loader = EmoteLoaderWorker(parent=self)
-        self._loader.emote_ready.connect(self._on_emote_downloaded)
-        self._loader.animated_emote_ready.connect(self._on_animated_emote_downloaded)
-        self._loader.emote_failed.connect(self._on_emote_failed)
-        self._loader.finished.connect(self._on_loader_finished)
-
-        for key, url in self._download_queue:
-            self._loader.enqueue(key, url)
-        self._download_queue.clear()
-
-        self._loader.start()
-
-    def _on_emote_downloaded(self, key: str, raw_data: bytes) -> None:
-        """Handle a downloaded emote/badge image - create QPixmap on main thread."""
-        if not raw_data:
-            self._handle_download_failure(key, "empty")
+    def _ensure_global_emotes(self, force: bool = False) -> None:
+        """Fetch global emotes if stale."""
+        if not self.settings.chat.builtin.show_emotes:
             return
-
-        # Create QPixmap on main thread (GUI thread) as required by Qt
-        pixmap = QPixmap()
-        if pixmap.loadFromData(raw_data):
-            # Scale to standard height
-            if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
-                pixmap = pixmap.scaledToHeight(
-                    DEFAULT_EMOTE_HEIGHT,
-                    mode=Qt.TransformationMode.SmoothTransformation,
-                )
-            self._emote_cache.put(key, pixmap)
-            # Save raw bytes for emotes so has_animation_data() returns True,
-            # preventing re-downloads on future launches.
-            if key.startswith("emote:"):
-                self._emote_cache._put_disk_raw(key, raw_data)
-            self._clear_download_attempts(key)
-        else:
-            self._handle_download_failure(key, "decode")
-
-    def _on_animated_emote_downloaded(self, key: str, raw_data: bytes) -> None:
-        """Handle a downloaded animated emote - extract frames on GUI thread."""
-        result = _extract_frames(raw_data)
-        if result:
-            frames, delays = result
-            self._emote_cache.put_animated(key, frames, delays)
-            self._emote_cache._put_disk_raw(key, raw_data)
-            self._clear_download_attempts(key)
-        else:
-            # Detection said animated but extraction failed - treat as static
-            pixmap = QPixmap()
-            if pixmap.loadFromData(raw_data):
-                if pixmap.height() > 0 and pixmap.height() != DEFAULT_EMOTE_HEIGHT:
-                    pixmap = pixmap.scaledToHeight(
-                        DEFAULT_EMOTE_HEIGHT,
-                        mode=Qt.TransformationMode.SmoothTransformation,
-                    )
-                self._emote_cache.put(key, pixmap)
-                self._emote_cache._put_disk_raw(key, raw_data)
-                self._clear_download_attempts(key)
-            else:
-                self._handle_download_failure(key, "decode")
-
-    def _on_emote_failed(self, key: str, url: str, status: int, reason: str) -> None:
-        """Handle download failures from the loader."""
-        self._handle_download_failure(key, reason, url=url, status=status)
-
-    def _handle_download_failure(
-        self, key: str, reason: str, url: str | None = None, status: int = 0
-    ) -> None:
-        """Clear pending state and schedule retries/fallbacks for failed downloads."""
-        self._emote_cache.clear_pending(key)
-
-        if not url:
-            url = self._last_download_url.get(key, "")
-        if not url:
+        if self._global_emote_worker and self._global_emote_worker.isRunning():
             return
-
-        attempt_key = (key, url)
-        attempts = self._download_attempts.get(attempt_key, 0) + 1
-        self._download_attempts[attempt_key] = attempts
-
-        fallback_url = self._download_fallbacks.get(attempt_key)
-        if fallback_url and (status == 404 or reason in {"decode", "empty"}):
-            logger.debug(f"Animated emote missing, falling back to static: {key}")
-            self._schedule_retry(key, fallback_url, delay_ms=150)
+        now = time.monotonic()
+        if not force and self._global_common_emotes and (
+            now - self._global_emotes_fetched_at < GLOBAL_EMOTE_TTL
+        ):
             return
+        self._global_emote_worker = GlobalEmoteFetchWorker(
+            providers=self.settings.chat.builtin.emote_providers,
+            oauth_token=self.settings.twitch.access_token,
+            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
+            parent=self,
+        )
+        self._global_emote_worker.emotes_fetched.connect(self._on_global_emotes_fetched)
+        self._global_emote_worker.start()
 
-        if attempts < MAX_EMOTE_DOWNLOAD_RETRIES:
-            delay_ms = 200 + attempts * 300
-            logger.debug(
-                f"Retrying emote download ({attempts}/{MAX_EMOTE_DOWNLOAD_RETRIES}) "
-                f"{key} due to {reason}"
-            )
-            self._schedule_retry(key, url, delay_ms=delay_ms)
+    def _on_global_emotes_fetched(self, payload: dict) -> None:
+        """Handle global emote fetch results."""
+        twitch_list = payload.get("twitch", [])
+        common_list = payload.get("common", [])
+        self._global_twitch_emotes = {}
+        for emote in twitch_list:
+            if not isinstance(emote, ChatEmote):
+                continue
+            image_set = self._bind_emote_image_set(emote)
+            if image_set:
+                image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_LOW)
+            self._global_twitch_emotes[emote.name] = emote
 
-    def _clear_download_attempts(self, key: str) -> None:
-        """Clear attempt counters once a key succeeds."""
-        for attempt_key in list(self._download_attempts.keys()):
-            if attempt_key[0] == key:
-                self._download_attempts.pop(attempt_key, None)
-                self._download_fallbacks.pop(attempt_key, None)
-                self._download_blocked_until.pop(attempt_key, None)
-        self._last_download_url.pop(key, None)
+        self._global_common_emotes = {}
+        for emote in common_list:
+            if not isinstance(emote, ChatEmote):
+                continue
+            image_set = self._bind_emote_image_set(emote)
+            if image_set:
+                image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_LOW)
+            self._global_common_emotes[emote.name] = emote
+        self._global_emotes_fetched_at = time.monotonic()
+
+        # Rebuild emote maps for all open chats
+        for channel_key in self._livestreams.keys():
+            self._resolved_emote_maps.pop(channel_key, None)
+            self._rebuild_emote_map(channel_key)
+
+        self.emote_map_updated.emit("")
+
+    def _ensure_user_emotes(self, force: bool = False) -> None:
+        """Fetch user emotes if stale."""
+        if not self.settings.chat.builtin.show_emotes:
+            return
+        if not self.settings.twitch.access_token:
+            return
+        if self._user_emote_worker and self._user_emote_worker.isRunning():
+            return
+        now = time.monotonic()
+        if not force and self._user_emotes and (now - self._user_emotes_fetched_at < USER_EMOTE_TTL):
+            return
+        self._user_emote_worker = UserEmoteFetchWorker(
+            oauth_token=self.settings.twitch.access_token,
+            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
+            parent=self,
+        )
+        self._user_emote_worker.user_emotes_fetched.connect(self._on_user_emotes_fetched)
+        self._user_emote_worker.start()
 
     def _on_emote_loaded(self, key: str) -> None:
         """Handle emote cache updated signal - trigger repaint."""
+        if not self._emote_update_pending:
+            self._emote_update_pending = True
+            self._emote_update_timer.start(50)
+
+    def _emit_emote_cache_update(self) -> None:
+        self._emote_update_pending = False
         self.emote_cache_updated.emit()
-
-    def _on_loader_finished(self) -> None:
-        """Handle loader worker finishing."""
-        # If more items were queued while running, start again
-        if self._download_queue:
-            self._start_downloads()
-
-    def _stop_loader(self) -> None:
-        """Stop the emote loader worker."""
-        if self._loader:
-            self._loader.stop()
-            self._loader.wait(3000)
-            self._loader = None
 
     def _create_connection(self, platform: StreamPlatform) -> BaseChatConnection | None:
         """Create a chat connection for the given platform."""

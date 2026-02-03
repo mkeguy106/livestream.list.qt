@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 import aiohttp
 
 from ..models import ChatEmote
+from .image import ImageSet, ImageSpec
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +156,31 @@ class TwitchProvider(BaseEmoteProvider):
 
         # Twitch CDN URL - prefer animated if available; fall back on 404
         # Format options: static/animated, light/dark, 1.0/2.0/3.0
-        url = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/2.0"
+        specs: dict[int, ImageSpec] = {}
+        for scale in (1, 2, 3):
+            animated_url = (
+                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/{scale}.0"
+            )
+            static_url = (
+                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/dark/{scale}.0"
+            )
+            key = f"emote:twitch:{emote_id}@{scale}x"
+            specs[scale] = ImageSpec(
+                scale=scale,
+                key=key,
+                url=animated_url,
+                fallback_url=static_url,
+                animated=True,
+            )
+        image_set = ImageSet(specs)
+        url = specs[2].url
 
         return ChatEmote(
             id=emote_id,
             name=name,
             url_template=url,
             provider="twitch",
+            image_set=image_set,
         )
 
 
@@ -234,8 +253,13 @@ class SevenTVProvider(BaseEmoteProvider):
         if base_url.startswith("//"):
             base_url = "https:" + base_url
 
-        # Use 2x size for good quality at 28px
-        url_template = f"{base_url}/2x.webp"
+        specs: dict[int, ImageSpec] = {}
+        for scale in (1, 2, 3):
+            url = f"{base_url}/{scale}x.webp"
+            key = f"emote:7tv:{emote_id}@{scale}x"
+            specs[scale] = ImageSpec(scale=scale, key=key, url=url)
+        image_set = ImageSet(specs)
+        url_template = specs[2].url
 
         flags = emote_data.get("flags", 0)
         zero_width = bool(flags & 1)  # ZeroWidth flag
@@ -246,6 +270,7 @@ class SevenTVProvider(BaseEmoteProvider):
             url_template=url_template,
             provider="7tv",
             zero_width=zero_width,
+            image_set=image_set,
         )
 
 
@@ -322,13 +347,20 @@ class BTTVProvider(BaseEmoteProvider):
             return None
 
         # BTTV CDN: https://cdn.betterttv.net/emote/{id}/{size}x
-        url_template = f"https://cdn.betterttv.net/emote/{emote_id}/2x"
+        specs: dict[int, ImageSpec] = {}
+        for scale in (1, 2, 3):
+            url = f"https://cdn.betterttv.net/emote/{emote_id}/{scale}x"
+            key = f"emote:bttv:{emote_id}@{scale}x"
+            specs[scale] = ImageSpec(scale=scale, key=key, url=url)
+        image_set = ImageSet(specs)
+        url_template = specs[2].url
 
         return ChatEmote(
             id=emote_id,
             name=code,
             url_template=url_template,
             provider="bttv",
+            image_set=image_set,
         )
 
 
@@ -409,9 +441,25 @@ class FFZProvider(BaseEmoteProvider):
         if not url:
             return None
 
+        specs: dict[int, ImageSpec] = {}
+        for size_str, raw_url in urls.items():
+            if not raw_url:
+                continue
+            full_url = raw_url
+            if full_url.startswith("//"):
+                full_url = "https:" + full_url
+            try:
+                scale = int(size_str)
+            except ValueError:
+                continue
+            key = f"emote:ffz:{emote_id}@{scale}x"
+            specs[scale] = ImageSpec(scale=scale, key=key, url=full_url)
+        image_set = ImageSet(specs) if specs else None
+
         return ChatEmote(
             id=emote_id,
             name=name,
             url_template=url,
             provider="ffz",
+            image_set=image_set,
         )

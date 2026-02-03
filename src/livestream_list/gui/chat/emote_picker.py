@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...chat.emotes.cache import EmoteCache
 from ...chat.models import ChatEmote
 from ..theme import get_theme
 
@@ -35,7 +36,7 @@ class EmotePickerWidget(QWidget):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._emotes: dict[str, list[ChatEmote]] = {}  # provider -> emotes
-        self._emote_cache: dict[str, QPixmap] = {}
+        self._image_store: EmoteCache | None = None
         self._all_buttons: list[tuple[QPushButton, ChatEmote]] = []
         self._setup_ui()
 
@@ -104,9 +105,15 @@ class EmotePickerWidget(QWidget):
         self._emotes = emotes_by_provider
         self._rebuild_tabs()
 
-    def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
-        """Set the shared emote pixmap cache."""
-        self._emote_cache = cache
+    def set_image_store(self, store: EmoteCache) -> None:
+        """Set the shared image store."""
+        self._image_store = store
+
+    def _current_scale(self) -> float:
+        try:
+            return float(self.devicePixelRatioF())
+        except Exception:
+            return 1.0
 
     def show_picker(self, pos) -> None:
         """Show the picker at the given position."""
@@ -160,14 +167,21 @@ class EmotePickerWidget(QWidget):
         btn.setFixedSize(EMOTE_BUTTON_SIZE, EMOTE_BUTTON_SIZE)
         btn.setToolTip(emote.name)
 
-        # Try to set icon from cache
-        cache_key = f"emote:{emote.provider}:{emote.id}"
-        pixmap = self._emote_cache.get(cache_key)
-        if pixmap and not pixmap.isNull():
-            btn.setIcon(QIcon(pixmap))
-            btn.setIconSize(pixmap.size())
+        # Try to set icon from image set
+        if self._image_store and emote.image_set:
+            image_set = emote.image_set.bind(self._image_store)
+            emote.image_set = image_set
+            image_ref = image_set.get_image_or_loaded(scale=self._current_scale())
+            if image_ref:
+                pixmap = image_ref.pixmap_or_load()
+                if pixmap and not pixmap.isNull():
+                    btn.setIcon(QIcon(pixmap))
+                    btn.setIconSize(pixmap.size())
+                else:
+                    btn.setText(emote.name[:3])
+            else:
+                btn.setText(emote.name[:3])
         else:
-            # Show name as fallback text
             btn.setText(emote.name[:3])
 
         btn.setStyleSheet(f"""

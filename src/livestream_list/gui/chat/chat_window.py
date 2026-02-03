@@ -2,13 +2,14 @@
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
+    QStatusBar,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -387,6 +388,9 @@ class ChatWindow(QMainWindow):
         self._widgets: dict[str, ChatWidget] = {}
         self._livestreams: dict[str, Livestream] = {}
         self._popout_windows: dict[str, ChatPopoutWindow] = {}
+        self._metrics_timer: QTimer | None = None
+        self._metrics_label: QLabel | None = None
+        self._backfill_versions: dict[str, int] = {}
 
         self._setup_ui()
         self._connect_signals()
@@ -411,12 +415,30 @@ class ChatWindow(QMainWindow):
 
         self.setCentralWidget(self._tab_widget)
 
+        # Status bar metrics
+        self._setup_status_bar()
+
         # Tab bar context menu for pop-out
         tab_bar = self._tab_widget.tabBar()
         tab_bar.context_menu_requested.connect(self._on_tab_context_menu)
 
         # Apply theme styling (sets tab colors from theme)
         self.apply_theme()
+
+    def _setup_status_bar(self) -> None:
+        """Set up the status bar metrics panel."""
+        status_bar = QStatusBar(self)
+        status_bar.setSizeGripEnabled(False)
+        self._metrics_label = QLabel("")
+        self._metrics_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        status_bar.addPermanentWidget(self._metrics_label, 1)
+        self.setStatusBar(status_bar)
+
+        self._metrics_timer = QTimer(self)
+        self._metrics_timer.setInterval(1000)
+        self._metrics_timer.timeout.connect(self._update_metrics)
+        self._metrics_timer.start()
+        self._update_metrics()
 
     def _setup_menu_bar(self) -> None:
         """Set up the menu bar."""
@@ -425,19 +447,10 @@ class ChatWindow(QMainWindow):
         # Chat menu
         chat_menu = menu_bar.addMenu("Chat")
 
-        # Refresh Emotes action
-        refresh_emotes_action = chat_menu.addAction("Refresh Emotes")
-        refresh_emotes_action.setShortcut("Ctrl+Shift+E")
-        refresh_emotes_action.triggered.connect(self._on_refresh_emotes)
-
         # Settings action
         settings_action = chat_menu.addAction("Settings...")
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self.chat_settings_requested.emit)
-
-    def _on_refresh_emotes(self) -> None:
-        """Handle refresh emotes menu action."""
-        self.chat_manager.refresh_user_emotes()
 
     def update_tab_style(self) -> None:
         """Refresh tab colors from settings (call after prefs change)."""
@@ -459,6 +472,14 @@ class ChatWindow(QMainWindow):
                 QWidget {{
                     background-color: {theme.chat_bg};
                     color: {theme.text_primary};
+                }}
+                QStatusBar {{
+                    background-color: {theme.window_bg};
+                    color: {theme.text_muted};
+                    border-top: 1px solid {theme.border};
+                }}
+                QStatusBar QLabel {{
+                    color: {theme.text_muted};
                 }}
                 QScrollBar:vertical {{
                     background-color: {theme.window_bg};
@@ -493,15 +514,50 @@ class ChatWindow(QMainWindow):
         finally:
             self.setUpdatesEnabled(True)
 
+    def _update_metrics(self) -> None:
+        """Refresh status bar metrics from ChatManager."""
+        bar = self.statusBar()
+        if not bar:
+            return
+        if not self.settings.chat.builtin.show_metrics:
+            if bar.isVisible():
+                bar.setVisible(False)
+            return
+        if not bar.isVisible():
+            bar.setVisible(True)
+
+        metrics = self.chat_manager.get_metrics()
+        disk_mb = metrics["disk_bytes"] // (1024 * 1024)
+        text = (
+            f"Emotes {metrics['emote_mem']}/{metrics['emote_animated']} "
+            f"(pending {metrics['emote_pending']}) | "
+            f"Disk {disk_mb}/{metrics['disk_limit_mb']} MB | "
+            f"DL {metrics['downloads_queued']}+{metrics['downloads_inflight']} | "
+            f"Prefetch {metrics['prefetch_queue']}/{metrics['prefetch_inflight']} | "
+            f"MsgQ {metrics['message_queue']}"
+        )
+        if self._metrics_label:
+            self._metrics_label.setText(text)
+
     def update_animation_state(self) -> None:
         """Update animation timers on all widgets (call after prefs change)."""
+        animate = self.settings.chat.builtin.animate_emotes
+        has_any = any(w.has_animated_emotes() for w in self._widgets.values())
+        if animate and has_any:
+            self.chat_manager.gif_timer.start()
+        else:
+            self.chat_manager.gif_timer.stop()
         for widget in self._widgets.values():
-            widget.update_animation_state()
+            widget.set_animation_enabled(animate)
 
     def update_banner_settings(self) -> None:
         """Update banner visibility and colors on all widgets (call after prefs change)."""
         for widget in self._widgets.values():
             widget.update_banner_settings()
+
+    def update_metrics_bar(self) -> None:
+        """Refresh status bar metrics/visibility."""
+        self._update_metrics()
 
     def _connect_signals(self) -> None:
         """Connect ChatManager signals."""
@@ -569,16 +625,13 @@ class ChatWindow(QMainWindow):
         widget.message_sent.connect(self._on_message_sent)
         widget.popout_requested.connect(self._on_popout_requested)
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
-        widget.refresh_emotes_requested.connect(self._on_refresh_emotes)
         widget.font_size_changed.connect(self._on_font_size_changed)
         widget.settings_changed.connect(self._on_settings_changed)
 
-        # Set shared emote cache, animated cache, and emote map on the widget
-        widget.set_emote_cache(self.chat_manager.emote_cache.pixmap_dict)
-        widget.set_animated_cache(self.chat_manager.emote_cache.animated_dict)
-        widget.set_emote_cache_object(self.chat_manager.emote_cache)
-        if self.chat_manager.emote_map:
-            widget.set_emote_map(self.chat_manager.emote_map)
+        # Set shared image store and emote map on the widget
+        widget.set_image_store(self.chat_manager.emote_cache)
+        widget.set_gif_timer(self.chat_manager.gif_timer)
+        widget.set_emote_map(self.chat_manager.get_emote_map(channel_key))
 
         # Apply current theme colors to the new widget
         widget.apply_theme()
@@ -634,23 +687,13 @@ class ChatWindow(QMainWindow):
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - update cache refs and repaint."""
-        cache_dict = self.chat_manager.emote_cache.pixmap_dict
-        animated_dict = self.chat_manager.emote_cache.animated_dict
-        emote_map = self.chat_manager.emote_map
         for widget in self._widgets.values():
-            widget.set_emote_cache(cache_dict)
-            widget.set_animated_cache(animated_dict)
-            if emote_map:
-                widget.set_emote_map(emote_map)
+            widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
             widget.repaint_messages()
+        self.update_animation_state()
 
     def _on_emote_map_updated(self, channel_key: str) -> None:
         """Backfill third-party emotes for recent messages after emote map updates."""
-        emote_map = self.chat_manager.emote_map
-        if not emote_map:
-            return
-
-        max_messages = 300
         widgets = []
         if channel_key:
             widget = self._widgets.get(channel_key)
@@ -660,10 +703,37 @@ class ChatWindow(QMainWindow):
             widgets = list(self._widgets.values())
 
         for widget in widgets:
-            recent = widget.get_recent_messages(max_messages)
-            updated = self.chat_manager.backfill_third_party_emotes(recent)
-            if updated:
-                widget.invalidate_message_layout()
+            self._schedule_emote_backfill(widget)
+
+    def _schedule_emote_backfill(self, widget: ChatWidget) -> None:
+        """Backfill third-party emotes in batches to avoid UI stalls."""
+        channel_key = widget.channel_key
+        version = self._backfill_versions.get(channel_key, 0) + 1
+        self._backfill_versions[channel_key] = version
+
+        messages = widget.get_all_messages()
+        if not messages:
+            return
+
+        batch_size = 200
+        updated_any = False
+
+        def process_batch(start: int = 0) -> None:
+            nonlocal updated_any
+            if self._backfill_versions.get(channel_key) != version:
+                return
+            if channel_key not in self._widgets:
+                return
+            batch = messages[start : start + batch_size]
+            if not batch:
+                if updated_any:
+                    widget.invalidate_message_layout()
+                return
+            updated = self.chat_manager.backfill_third_party_emotes(channel_key, batch)
+            updated_any = updated_any or bool(updated)
+            QTimer.singleShot(0, lambda: process_batch(start + batch_size))
+
+        process_batch()
 
     def _on_message_sent(self, channel_key: str, text: str) -> None:
         """Handle a message being sent from a chat widget."""
@@ -680,6 +750,8 @@ class ChatWindow(QMainWindow):
     def _on_settings_changed(self) -> None:
         """Persist chat setting toggles and relayout all widgets."""
         self.settings.save()
+        self.chat_manager.on_emote_settings_changed()
+        self.chat_manager._update_prefetch_targets()
         for widget in self._widgets.values():
             widget._model.layoutChanged.emit()
 

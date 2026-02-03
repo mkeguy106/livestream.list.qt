@@ -192,7 +192,6 @@ class ChatWidget(QWidget, ChatSearchMixin):
     message_sent = Signal(str, str)  # channel_key, text
     popout_requested = Signal(str)  # channel_key
     settings_clicked = Signal()
-    refresh_emotes_requested = Signal()  # user wants to refresh emotes
     font_size_changed = Signal(int)  # new font size
     settings_changed = Signal()  # any chat setting toggled
 
@@ -212,11 +211,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._auto_scroll = True
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
-        self._animation_timer = QTimer(self)
-        self._animation_timer.timeout.connect(self._on_animation_tick)
-        self._animation_frame = 0
-        self._has_animated_emotes = False
-        self._emote_cache_obj: EmoteCache | None = None
+        self._gif_timer = None
+        self._animation_time_ms = 0
+        self._image_store: EmoteCache | None = None
         self._last_rehydrate_ts: float = 0.0
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._title_dismissed = False  # Track if user dismissed the title banner
@@ -581,48 +578,60 @@ class ChatWidget(QWidget, ChatSearchMixin):
             except Exception as e:
                 logger.error(f"Failed to open YouTube chat URL: {e}")
 
-    def set_emote_cache(self, cache: dict) -> None:
-        """Set the shared emote cache on the delegate and completer."""
-        self._delegate.set_emote_cache(cache)
-        self._emote_completer.set_emote_cache(cache)
-
-    def set_emote_cache_object(self, cache: EmoteCache) -> None:
-        """Set the shared EmoteCache object for animation rehydration."""
-        self._emote_cache_obj = cache
+    def set_image_store(self, store: EmoteCache) -> None:
+        """Set the shared image store on the delegate and completer."""
+        self._image_store = store
+        self._delegate.set_image_store(store)
+        self._emote_completer.set_image_store(store)
 
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the emote map for autocomplete."""
         self._emote_completer.set_emotes(emote_map)
 
-    def set_animated_cache(self, cache: dict[str, list]) -> None:
-        """Set the animated frame cache on the delegate and start timer if needed."""
-        self._delegate.set_animated_cache(cache)
-        had_animated = self._has_animated_emotes
-        self._has_animated_emotes = bool(cache)
-        if self._has_animated_emotes and self.settings.animate_emotes:
-            if not self._animation_timer.isActive():
-                self._animation_timer.start(50)  # 20fps
-        elif not self._has_animated_emotes and had_animated:
-            self._animation_timer.stop()
+    def _current_scale(self) -> float:
+        """Return the current device scale factor for image selection."""
+        try:
+            return float(self.devicePixelRatioF())
+        except Exception:
+            return 1.0
 
-    def _on_animation_tick(self) -> None:
-        """Advance the global animation frame and repaint."""
+    def _get_emote_image_ref(self, emote: ChatEmote):
+        """Get a bound ImageRef for the given emote."""
+        if not self._image_store or not emote.image_set:
+            return None
+        image_set = emote.image_set.bind(self._image_store)
+        emote.image_set = image_set
+        return image_set.get_image_or_loaded(scale=self._current_scale())
+
+    def set_gif_timer(self, timer) -> None:
+        """Attach a shared GIF timer for animation frames."""
+        if self._gif_timer is not None:
+            try:
+                self._gif_timer.tick.disconnect(self.on_gif_tick)
+            except Exception:
+                pass
+        self._gif_timer = timer
+        self._gif_timer.tick.connect(self.on_gif_tick)
+
+    def set_animation_enabled(self, enabled: bool) -> None:
+        """Update animation enabled state."""
+        self.settings.animate_emotes = enabled
+
+    def has_animated_emotes(self) -> bool:
+        return bool(self._image_store and self._image_store.animated_dict)
+
+    def on_gif_tick(self, elapsed_ms: int) -> None:
+        """Advance animation frame from shared timer."""
+        if not self.settings.animate_emotes:
+            return
         self._rehydrate_visible_animated_emotes()
-        self._animation_frame += 1
-        self._delegate.set_animation_frame(self._animation_frame)
+        self._animation_time_ms = elapsed_ms
+        self._delegate.set_animation_frame(self._animation_time_ms)
         self._list_view.viewport().update()
-
-    def update_animation_state(self) -> None:
-        """Start or stop the animation timer based on settings."""
-        if self._has_animated_emotes and self.settings.animate_emotes:
-            if not self._animation_timer.isActive():
-                self._animation_timer.start(50)
-        else:
-            self._animation_timer.stop()
 
     def _rehydrate_visible_animated_emotes(self) -> None:
         """Rehydrate animated emotes for visible messages if frames were evicted."""
-        if not self._emote_cache_obj or not self.settings.animate_emotes:
+        if not self._image_store or not self.settings.animate_emotes:
             return
 
         now = time.monotonic()
@@ -643,25 +652,21 @@ class ChatWidget(QWidget, ChatSearchMixin):
         start_row = top_index.row()
         end_row = bottom_index.row() if bottom_index.isValid() else start_row
 
-        cache = self._emote_cache_obj
-        hydrated = False
+        cache = self._image_store
         for row in range(start_row, end_row + 1):
             msg = self._model.get_message(row)
             if not msg or not msg.emote_positions:
                 continue
             for _start, _end, emote in msg.emote_positions:
-                key = f"emote:{emote.provider}:{emote.id}"
+                image_ref = self._get_emote_image_ref(emote)
+                if not image_ref:
+                    continue
+                key = image_ref.key
                 if cache.has_animation_data(key):
                     if key in cache.animated_dict:
                         cache.touch_animated(key)
                     else:
-                        cache.get(key)
-                        hydrated = True
-
-        if hydrated and not self._has_animated_emotes:
-            self._has_animated_emotes = bool(cache.animated_dict)
-            if self._has_animated_emotes and not self._animation_timer.isActive():
-                self._animation_timer.start(50)
+                        cache.request_animation_frames(key)
 
     def repaint_messages(self) -> None:
         """Trigger a repaint of visible messages (e.g. after emotes load)."""
@@ -676,6 +681,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def get_recent_messages(self, limit: int = 300) -> list[ChatMessage]:
         """Get recent messages for backfill operations."""
         return self._model.get_recent_messages(limit)
+
+    def get_all_messages(self) -> list[ChatMessage]:
+        """Get all messages for full backfill operations."""
+        return self._model.get_all_messages()
 
     def clear(self) -> None:
         """Clear all messages."""
@@ -752,15 +761,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
             menu.exec(self._list_view.viewport().mapToGlobal(pos))
 
     def hideEvent(self, event) -> None:  # noqa: N802
-        """Stop animation timer when widget is hidden."""
-        self._animation_timer.stop()
+        """Handle widget hidden."""
         super().hideEvent(event)
 
     def showEvent(self, event) -> None:  # noqa: N802
-        """Restart animation timer when widget is shown (if applicable)."""
+        """Handle widget shown."""
         super().showEvent(event)
-        if self._has_animated_emotes and self.settings.animate_emotes:
-            self._animation_timer.start(50)
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         """Invalidate item layout cache on resize to prevent text overlap."""
@@ -1105,10 +1111,6 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         menu.addSeparator()
 
-        # Refresh emotes action
-        refresh_action = menu.addAction("Refresh Emotes")
-        refresh_action.triggered.connect(self.refresh_emotes_requested.emit)
-
         more_action = menu.addAction("More Settings...")
         more_action.triggered.connect(self.settings_clicked.emit)
 
@@ -1272,7 +1274,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             user=user,
             messages=user_messages,
             settings=self.settings,
-            emote_cache=self._delegate._emote_cache,
+            image_store=self._image_store,
             parent=self,
         )
         # Non-modal: main window stays interactive, multiple dialogs allowed
@@ -1300,7 +1302,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         user,
         messages: list[ChatMessage],
         settings: BuiltinChatSettings,
-        emote_cache: dict,
+        image_store: EmoteCache | None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -1360,7 +1362,8 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         # Message list using the same delegate
         self._model = ChatMessageModel(max_messages=5000, parent=self)
         self._delegate = ChatMessageDelegate(settings, parent=self)
-        self._delegate.set_emote_cache(emote_cache)
+        if image_store:
+            self._delegate.set_image_store(image_store)
 
         self._list_view = QListView()
         self._list_view.setModel(self._model)

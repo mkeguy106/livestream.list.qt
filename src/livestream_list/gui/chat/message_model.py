@@ -104,3 +104,7 @@ class ChatMessageModel(QAbstractListModel):
         if len(self._messages) <= limit:
             return list(self._messages)
         return list(self._messages)[-limit:]
+
+    def get_all_messages(self) -> list[ChatMessage]:
+        """Return all messages in the model."""
+        return list(self._messages)

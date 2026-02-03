@@ -13,6 +13,7 @@ import aiohttp
 from ...core.models import StreamPlatform
 from ...core.settings import KickSettings
 from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
+from ..emotes.image import ImageSet, ImageSpec
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -389,6 +390,16 @@ class KickChatConnection(BaseChatConnection):
                 name=emote_name,
                 url_template=KICK_EMOTE_URL.format(id=emote_id),
                 provider="kick",
+                image_set=ImageSet(
+                    {
+                        scale: ImageSpec(
+                            scale=scale,
+                            key=f"emote:kick:{emote_id}@{scale}x",
+                            url=KICK_EMOTE_URL.format(id=emote_id),
+                        )
+                        for scale in (1, 2, 3)
+                    }
+                ),
             )
             emote_positions.append((start, end, emote))
             last_end = match.end()

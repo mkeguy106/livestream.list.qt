@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from ...core.models import StreamPlatform
 from ...core.settings import YouTubeSettings
 from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser
+from ..emotes.image import ImageSet, ImageSpec
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -414,11 +415,20 @@ class YouTubeChatConnection(BaseChatConnection):
                     end = len(full_text)
 
                     if emote_url:
+                        specs: dict[int, ImageSpec] = {}
+                        for scale in (1, 2, 3):
+                            key = f"emote:youtube:{emote_id or emote_txt}@{scale}x"
+                            specs[scale] = ImageSpec(
+                                scale=scale,
+                                key=key,
+                                url=emote_url,
+                            )
                         emote = ChatEmote(
                             id=emote_id or emote_txt,
                             name=emote_txt,
                             url_template=emote_url,
                             provider="youtube",
+                            image_set=ImageSet(specs),
                         )
                         emote_positions.append((start, end, emote))
 

@@ -159,6 +159,7 @@ class BuiltinChatSettings:
     max_messages: int = 5000
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
     show_alternating_rows: bool = True
+    show_metrics: bool = True
     blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
     use_platform_name_colors: bool = True
     # Banner settings (stream title + socials)
@@ -191,6 +192,7 @@ class ChatSettings:
     url_type: int = 0  # 0=Popout, 1=Embedded, 2=Default (legacy)
     auto_open: bool = False  # Auto-open chat when launching stream
     new_window: bool = True  # Open chat in new window instead of tab
+    recent_channels: list[str] = field(default_factory=list)  # recent chat channel keys
     builtin: BuiltinChatSettings = field(default_factory=BuiltinChatSettings)
 
 
@@ -233,6 +235,7 @@ class Settings:
     autostart: bool = False  # Launch on system startup
     close_to_tray: bool = False  # Minimize to tray instead of closing
     close_to_tray_asked: bool = False  # Whether user has been asked about close behavior
+    emote_cache_mb: int = 500  # Disk cache size for emotes (MB)
 
     # UI preferences
     sort_mode: SortMode = SortMode.VIEWERS
@@ -401,6 +404,9 @@ class Settings:
         settings.autostart = data.get("autostart", settings.autostart)
         settings.close_to_tray = data.get("close_to_tray", settings.close_to_tray)
         settings.close_to_tray_asked = data.get("close_to_tray_asked", settings.close_to_tray_asked)
+        settings.emote_cache_mb = cls._validate_int(
+            data.get("emote_cache_mb"), 500, min_val=50, max_val=5000
+        )
 
         # UI preferences
         old_sort_mode = data.get("sort_mode", settings.sort_mode.value)
@@ -603,6 +609,7 @@ class Settings:
                 ),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
+                show_metrics=builtin_data.get("show_metrics", True),
                 blocked_users=builtin_data.get("blocked_users", []),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
@@ -618,6 +625,7 @@ class Settings:
                 url_type=c.get("url_type", 0),
                 auto_open=c.get("auto_open", False),
                 new_window=c.get("new_window", True),
+                recent_channels=c.get("recent_channels", []),
                 builtin=builtin,
             )
 
@@ -668,6 +676,7 @@ class Settings:
             "autostart": self.autostart,
             "close_to_tray": self.close_to_tray,
             "close_to_tray_asked": self.close_to_tray_asked,
+            "emote_cache_mb": self.emote_cache_mb,
             "sort_mode": self.sort_mode.value,
             "hide_offline": self.hide_offline,
             "favorites_only": self.favorites_only,
@@ -737,6 +746,7 @@ class Settings:
                 "url_type": self.chat.url_type,
                 "auto_open": self.chat.auto_open,
                 "new_window": self.chat.new_window,
+                "recent_channels": self.chat.recent_channels,
                 "builtin": {
                     "font_size": self.chat.builtin.font_size,
                     "show_timestamps": self.chat.builtin.show_timestamps,
@@ -748,6 +758,7 @@ class Settings:
                     "max_messages": self.chat.builtin.max_messages,
                     "emote_providers": self.chat.builtin.emote_providers,
                     "show_alternating_rows": self.chat.builtin.show_alternating_rows,
+                    "show_metrics": self.chat.builtin.show_metrics,
                     "blocked_users": self.chat.builtin.blocked_users,
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
                     "show_stream_title": self.chat.builtin.show_stream_title,

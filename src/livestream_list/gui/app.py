@@ -191,7 +191,8 @@ class Application(QApplication):
         self.notification_bridge = NotificationBridge(self.notifier)
 
         # Initialize chat manager
-        self.chat_manager = ChatManager(self.settings, parent=self)
+        self.chat_manager = ChatManager(self.settings, monitor=self.monitor, parent=self)
+        self.refresh_complete.connect(self.chat_manager.on_refresh_complete)
 
         # Set up monitor callbacks
         self.monitor.on_stream_online(self._on_stream_online)

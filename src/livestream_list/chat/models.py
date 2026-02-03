@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..core.models import StreamPlatform
+from .emotes.image import ImageSet
 
 
 @dataclass
@@ -12,9 +13,10 @@ class ChatEmote:
 
     id: str
     name: str  # Text code (e.g., "KEKW")
-    url_template: str  # URL with {size} placeholder
+    url_template: str  # Legacy URL (2x or default)
     provider: str  # "twitch", "7tv", "bttv", "ffz"
     zero_width: bool = False  # 7TV overlay emotes
+    image_set: ImageSet | None = None
 
 
 @dataclass
@@ -24,6 +26,7 @@ class ChatBadge:
     id: str
     name: str
     image_url: str
+    image_set: ImageSet | None = None
 
 
 @dataclass

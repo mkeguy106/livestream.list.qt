@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...chat.emotes.cache import EmoteCache
 from ...chat.models import ChatMessage
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
@@ -46,12 +47,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def __init__(self, settings: BuiltinChatSettings, parent: QWidget | None = None):
         super().__init__(parent)
         self.settings = settings
-        self._emote_cache: dict[str, QPixmap] = {}
-        self._animated_cache: dict[str, list[QPixmap]] = {}
-        self._animation_frame: int = 0
+        self._image_store: EmoteCache | None = None
+        self._animation_time_ms: int = 0
         # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
         self._size_cache: dict[tuple, QSize] = {}
         self._size_cache_max = 500
+        self._scaled_cache: dict[tuple[str, int], QPixmap] = {}
+        self._scaled_cache_max = 800
+        self._scaled_animated_cache: dict[tuple[str, int], list[QPixmap]] = {}
+        self._scaled_animated_cache_max = 200
         # Theme colors (updated via apply_theme)
         self._load_theme_colors()
 
@@ -78,17 +82,20 @@ class ChatMessageDelegate(QStyledItemDelegate):
         """
         self._load_theme_colors()
 
-    def set_emote_cache(self, cache: dict[str, QPixmap]) -> None:
-        """Set the shared emote pixmap cache."""
-        self._emote_cache = cache
+    def set_image_store(self, store: EmoteCache) -> None:
+        """Set the shared image store."""
+        self._image_store = store
+        self._scaled_cache.clear()
+        self._scaled_animated_cache.clear()
 
     def set_animated_cache(self, cache: dict[str, list[QPixmap]]) -> None:
-        """Set the shared animated frame cache."""
-        self._animated_cache = cache
+        """Legacy no-op: animated frames are now fetched from the image store."""
+        self._scaled_cache.clear()
+        self._scaled_animated_cache.clear()
 
-    def set_animation_frame(self, frame: int) -> None:
-        """Set the current global animation frame counter."""
-        self._animation_frame = frame
+    def set_animation_frame(self, elapsed_ms: int) -> None:
+        """Set the current global animation time (ms)."""
+        self._animation_time_ms = elapsed_ms
 
     def invalidate_size_cache(self) -> None:
         """Clear the sizeHint cache when settings change or on resize."""
@@ -108,6 +115,110 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def _get_emote_height(self, fm: QFontMetrics) -> int:
         """Get emote height scaled to font size."""
         return int(fm.height() * 1.3)
+
+    def _current_scale(self, painter: QPainter) -> float:
+        try:
+            return float(painter.device().devicePixelRatioF())
+        except Exception:
+            return 1.0
+
+    def _current_scale_from_option(self, option: QStyleOptionViewItem) -> float:
+        widget = option.widget
+        if widget is not None:
+            try:
+                return float(widget.devicePixelRatioF())
+            except Exception:
+                return 1.0
+        return 1.0
+
+    def _get_image_ref_for_scale(self, emote, scale: float):
+        if not self._image_store or not getattr(emote, "image_set", None):
+            return None
+        image_set = emote.image_set.bind(self._image_store)
+        emote.image_set = image_set
+        return image_set.get_image_or_loaded(scale=scale)
+
+    def _get_image_ref(self, emote, painter: QPainter):
+        return self._get_image_ref_for_scale(emote, self._current_scale(painter))
+
+    def _get_badge_image_ref_for_scale(self, badge, scale: float):
+        if not self._image_store or not getattr(badge, "image_set", None):
+            return None
+        image_set = badge.image_set.bind(self._image_store)
+        badge.image_set = image_set
+        return image_set.get_image_or_loaded(scale=scale)
+
+    def _get_loaded_pixmap(self, image_ref) -> QPixmap | None:
+        if not image_ref:
+            return None
+        frames = image_ref.store.get_frames(image_ref.key)
+        if frames:
+            return frames[0]
+        if image_ref.is_loaded():
+            pixmap = image_ref.store.get(image_ref.key)
+            if pixmap and not pixmap.isNull():
+                return pixmap
+        return None
+
+    @staticmethod
+    def _scaled_width(pixmap: QPixmap, height: int) -> int:
+        if pixmap.isNull() or pixmap.height() <= 0 or height <= 0:
+            return 0
+        return max(1, int(round(pixmap.width() * (height / pixmap.height()))))
+
+    def _get_scaled_pixmap(self, key: str, pixmap: QPixmap, height: int) -> QPixmap:
+        """Return a cached scaled pixmap for the given key/height."""
+        cache_key = (key, height)
+        cached = self._scaled_cache.get(cache_key)
+        if cached and not cached.isNull():
+            return cached
+        smooth = Qt.TransformationMode.SmoothTransformation
+        scaled = pixmap.scaledToHeight(height, smooth)
+        if len(self._scaled_cache) >= self._scaled_cache_max:
+            keys = list(self._scaled_cache.keys())
+            for k in keys[: len(keys) // 2]:
+                del self._scaled_cache[k]
+        self._scaled_cache[cache_key] = scaled
+        return scaled
+
+    def _get_scaled_animated_frames(
+        self, key: str, frames: list[QPixmap], height: int
+    ) -> list[QPixmap]:
+        """Return cached scaled frames for an animated emote."""
+        cache_key = (key, height)
+        cached = self._scaled_animated_cache.get(cache_key)
+        if cached:
+            return cached
+        smooth = Qt.TransformationMode.SmoothTransformation
+        scaled = [frame.scaledToHeight(height, smooth) for frame in frames]
+        if len(self._scaled_animated_cache) >= self._scaled_animated_cache_max:
+            keys = list(self._scaled_animated_cache.keys())
+            for k in keys[: len(keys) // 2]:
+                del self._scaled_animated_cache[k]
+        self._scaled_animated_cache[cache_key] = scaled
+        return scaled
+
+    def _select_animated_frame(self, image_ref, frames: list[QPixmap]) -> QPixmap | None:
+        """Select the correct animation frame based on per-frame delays."""
+        if not frames:
+            return None
+        delays = None
+        if self._image_store and image_ref:
+            delays = self._image_store.get_frame_delays(image_ref.key)
+        if delays and len(delays) == len(frames):
+            total = sum(delays)
+            if total > 0:
+                t = self._animation_time_ms % total
+                idx = 0
+                for delay in delays:
+                    if t < delay:
+                        break
+                    t -= delay
+                    idx += 1
+                return frames[idx % len(frames)]
+        # Fallback: fixed 50ms cadence
+        idx = (self._animation_time_ms // 50) % len(frames)
+        return frames[idx]
 
     def _get_badge_size(self, fm: QFontMetrics) -> int:
         """Get badge size scaled to font size."""
@@ -213,8 +324,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 # Skip mod badges if show_mod_badges is off
                 if not self.settings.show_mod_badges and is_mod_badge:
                     continue
-                badge_key = f"badge:{badge.id}"
-                pixmap = self._emote_cache.get(badge_key)
+                if not badge.image_set or not self._image_store:
+                    continue
+                image_set = badge.image_set.bind(self._image_store)
+                badge.image_set = image_set
+                image_ref = image_set.get_image_or_loaded(scale=self._current_scale(painter))
+                pixmap = image_ref.pixmap_or_load() if image_ref else None
                 if pixmap and not pixmap.isNull():
                     painter.drawPixmap(x, badge_y, badge_size, badge_size, pixmap)
                     x += badge_size + BADGE_SPACING
@@ -305,10 +420,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
         right_edge = x + available_width
         last_end = 0
         url_ranges = self._get_url_ranges(text)
+        last_emote_rect: QRect | None = None
 
         for start, end, emote in emote_positions:
             # Draw text before emote (word-by-word wrapping)
             if start > last_end:
+                prev_y = current_y
                 segment = text[last_end:start]
                 current_x, current_y = self._draw_wrapping_text(
                     painter,
@@ -324,26 +441,44 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     text_offset=last_end,
                     is_selected=is_selected,
                 )
+                if current_y != prev_y:
+                    last_emote_rect = None
 
             # Draw emote (wrap whole emote if it doesn't fit)
-            emote_key = f"emote:{emote.provider}:{emote.id}"
-            frames = self._animated_cache.get(emote_key)
+            image_ref = self._get_image_ref(emote, painter)
+            frames = image_ref.frames_or_load() if image_ref else None
             if frames and self.settings.animate_emotes:
-                frame_idx = self._animation_frame % len(frames)
-                pixmap = frames[frame_idx]
+                key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
+                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height)
+                pixmap = self._select_animated_frame(image_ref, scaled_frames)
             elif frames:
-                pixmap = frames[0]
+                key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
+                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height)
+                pixmap = scaled_frames[0] if scaled_frames else frames[0]
             else:
-                pixmap = self._emote_cache.get(emote_key)
+                pixmap = image_ref.pixmap_or_load() if image_ref else None
             if pixmap and not pixmap.isNull():
-                smooth = Qt.TransformationMode.SmoothTransformation
-                scaled = pixmap.scaledToHeight(emote_height, smooth)
+                if frames:
+                    scaled = pixmap
+                else:
+                    key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
+                    scaled = self._get_scaled_pixmap(key, pixmap, emote_height)
                 emote_w = scaled.width()
+                if emote.zero_width and last_emote_rect is not None:
+                    overlay_x = int(
+                        last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2
+                    )
+                    overlay_y = int(last_emote_rect.y())
+                    painter.drawPixmap(overlay_x, overlay_y, scaled)
+                    last_end = end
+                    continue
                 if current_x + emote_w > right_edge and current_x > start_x:
                     current_x = start_x
                     current_y += line_height
+                    last_emote_rect = None
                 emote_y = current_y + (line_height - emote_height) // 2
                 painter.drawPixmap(int(current_x), int(emote_y), scaled)
+                last_emote_rect = QRect(int(current_x), int(emote_y), int(emote_w), emote_height)
                 current_x += emote_w
             else:
                 emote_text = text[start:end] if end <= len(text) else emote.name
@@ -359,6 +494,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     is_moderated,
                     is_selected=is_selected,
                 )
+                last_emote_rect = None
 
             last_end = end
 
@@ -562,6 +698,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         font = option.font
         font.setPointSize(self.settings.font_size)
         fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
         emote_height = self._get_emote_height(fm)
@@ -597,7 +734,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         if self.settings.show_emotes and message.emote_positions:
             lines = self._compute_wrapped_lines_with_emotes(
-                message.text, message.emote_positions, content_width, fm, emote_height
+                message.text,
+                message.emote_positions,
+                content_width,
+                fm,
+                emote_height,
+                scale,
             )
         else:
             text_width = fm.horizontalAdvance(message.text)
@@ -674,6 +816,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         font = option.font
         font.setPointSize(self.settings.font_size)
         fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
         line_height = max(fm.height(), badge_size)
@@ -706,8 +849,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if not self.settings.show_mod_badges and is_mod:
                     continue
                 # Only advance x if pixmap exists (matches paint behavior)
-                badge_key = f"badge:{badge.id}"
-                pixmap = self._emote_cache.get(badge_key)
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
@@ -728,6 +871,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         font = option.font
         font.setPointSize(self.settings.font_size)
         fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
         emote_height = self._get_emote_height(fm)
@@ -761,8 +905,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if not self.settings.show_mod_badges and is_mod:
                     continue
                 # Only advance x if pixmap exists (matches paint behavior)
-                badge_key = f"badge:{badge.id}"
-                pixmap = self._emote_cache.get(badge_key)
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
@@ -782,10 +926,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
         current_y = y
         available_width = rect.width()
         right_edge = rect.x() + available_width
+        last_emote_rect: QRect | None = None
 
         for start, end, emote in message.emote_positions:
             # Advance past text before emote (with wrapping)
             if start > last_end:
+                prev_y = current_y
                 segment = text[last_end:start]
                 current_x, current_y = self._advance_wrapping_text(
                     segment,
@@ -796,28 +942,39 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     line_height,
                     fm,
                 )
+                if current_y != prev_y:
+                    last_emote_rect = None
 
             # Emote rect (with wrapping)
-            emote_key = f"emote:{emote.provider}:{emote.id}"
-            pixmap = self._emote_cache.get(emote_key)
+            image_ref = self._get_image_ref_for_scale(emote, scale)
+            pixmap = self._get_loaded_pixmap(image_ref)
             if pixmap and not pixmap.isNull():
-                smooth = Qt.TransformationMode.SmoothTransformation
-                scaled = pixmap.scaledToHeight(emote_height, smooth)
-                emote_w = scaled.width()
+                emote_w = self._scaled_width(pixmap, emote_height)
             else:
                 emote_text = text[start:end] if end <= len(text) else emote.name
                 emote_w = fm.horizontalAdvance(emote_text)
 
             # Wrap emote if needed
+            if emote.zero_width and last_emote_rect is not None:
+                overlay_x = int(
+                    last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2
+                )
+                emote_rect = QRect(int(overlay_x), int(last_emote_rect.y()), int(emote_w), emote_height)
+                if emote_rect.contains(pos):
+                    return emote
+                last_end = end
+                continue
             if current_x + emote_w > right_edge and current_x > start_x:
                 current_x = start_x
                 current_y += line_height
+                last_emote_rect = None
 
             emote_y_pos = current_y + (line_height - emote_height) // 2
             emote_rect = QRect(int(current_x), int(emote_y_pos), int(emote_w), emote_height)
             if emote_rect.contains(pos):
                 return emote
             current_x += emote_w
+            last_emote_rect = emote_rect
             last_end = end
 
         return None
@@ -838,6 +995,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         font = option.font
         font.setPointSize(self.settings.font_size)
         fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
         line_height = max(fm.height(), badge_size)
@@ -870,8 +1028,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if not self.settings.show_mod_badges and is_mod:
                     continue
                 # Only advance x if pixmap exists (matches paint behavior)
-                badge_key = f"badge:{badge.id}"
-                pixmap = self._emote_cache.get(badge_key)
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
@@ -889,6 +1047,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         current_x = x
         current_y = y
         right_edge = rect.x() + rect.width()
+        has_base_emote = False
 
         if message.emote_positions:
             # Walk through text segments between emotes
@@ -896,6 +1055,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             for em_start, em_end, emote in message.emote_positions:
                 if em_start > last_end:
                     segment = text[last_end:em_start]
+                    prev_y = current_y
                     result = self._check_url_words_at_pos(
                         segment,
                         current_x,
@@ -919,22 +1079,26 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         line_height,
                         fm,
                     )
+                    if current_y != prev_y:
+                        has_base_emote = False
                 # Skip emote
                 emote_height = self._get_emote_height(fm)
-                emote_key = f"emote:{emote.provider}:{emote.id}"
-                pixmap = self._emote_cache.get(emote_key)
+                image_ref = self._get_image_ref_for_scale(emote, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
-                    scaled = pixmap.scaledToHeight(
-                        emote_height, Qt.TransformationMode.SmoothTransformation
-                    )
-                    emote_w = scaled.width()
+                    emote_w = self._scaled_width(pixmap, emote_height)
                 else:
                     emote_text = text[em_start:em_end] if em_end <= len(text) else emote.name
                     emote_w = fm.horizontalAdvance(emote_text)
+                if emote.zero_width and has_base_emote:
+                    last_end = em_end
+                    continue
                 if current_x + emote_w > right_edge and current_x > start_x:
                     current_x = start_x
                     current_y += line_height
+                    has_base_emote = False
                 current_x += emote_w
+                has_base_emote = True
                 last_end = em_end
 
             # Remaining text after last emote
@@ -1052,7 +1216,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
     def _get_badge_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
         """Find which badge (if any) is at the given position."""
-        if not self.settings.show_badges or not message.user.badges:
+        if not message.user.badges:
+            return None
+        if not (self.settings.show_badges or self.settings.show_mod_badges):
             return None
 
         padding_v = self.settings.line_spacing
@@ -1063,6 +1229,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         font = option.font
         font.setPointSize(self.settings.font_size)
         fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
         line_height = max(fm.height(), badge_size)
@@ -1089,7 +1256,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Check each badge
         badge_y = y + (line_height - badge_size) // 2
         for badge in message.user.badges:
-            if not self.settings.show_mod_badges and badge.name in MOD_BADGE_NAMES:
+            is_mod_badge = badge.name in MOD_BADGE_NAMES
+            if not self.settings.show_badges and not is_mod_badge:
+                continue
+            if not self.settings.show_mod_badges and is_mod_badge:
+                continue
+            image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+            pixmap = self._get_loaded_pixmap(image_ref)
+            if not pixmap or pixmap.isNull():
                 continue
             badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
             if badge_rect.contains(pos):
@@ -1127,35 +1301,44 @@ class ChatMessageDelegate(QStyledItemDelegate):
         content_width: int,
         fm: QFontMetrics,
         emote_height: int,
+        scale: float,
     ) -> int:
         """Compute how many lines text+emotes need with word wrapping."""
         lines = 1
         current_x = 0
         last_end = 0
+        has_base_emote = False
 
         for start, end, emote in emote_positions:
             # Text before emote
             if start > last_end:
                 segment = text[last_end:start]
+                prev_lines = lines
                 current_x, lines = self._advance_line_count(
                     segment, current_x, lines, content_width, fm
                 )
+                if lines != prev_lines:
+                    has_base_emote = False
 
             # Emote width
-            emote_key = f"emote:{emote.provider}:{emote.id}"
-            pixmap = self._emote_cache.get(emote_key)
+            image_ref = self._get_image_ref_for_scale(emote, scale)
+            pixmap = self._get_loaded_pixmap(image_ref)
             if pixmap and not pixmap.isNull():
-                smooth = Qt.TransformationMode.SmoothTransformation
-                scaled = pixmap.scaledToHeight(emote_height, smooth)
-                emote_w = scaled.width()
+                emote_w = self._scaled_width(pixmap, emote_height)
             else:
                 emote_text = text[start:end] if end <= len(text) else emote.name
                 emote_w = fm.horizontalAdvance(emote_text)
 
+            if emote.zero_width and has_base_emote:
+                last_end = end
+                continue
+
             if current_x + emote_w > content_width and current_x > 0:
                 lines += 1
                 current_x = 0
+                has_base_emote = False
             current_x += emote_w
+            has_base_emote = True
             last_end = end
 
         # Remaining text
