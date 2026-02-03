@@ -17,7 +17,7 @@ from .emotes.cache import EmoteCache, DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_
 from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
 from .emotes.matcher import find_third_party_emotes
-from .models import ChatEmote, ChatMessage, ChatUser
+from .models import ChatBadge, ChatEmote, ChatMessage, ChatUser
 
 logger = logging.getLogger(__name__)
 
