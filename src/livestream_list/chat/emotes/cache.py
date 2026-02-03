@@ -860,6 +860,8 @@ class EmoteCache(QObject):
         """Convert QImage frames to QPixmap in small batches to avoid UI stalls."""
         start_time = time.monotonic()
         backlog = len(self._frame_convert_queue) + (1 if self._frame_convert_current else 0)
+        if backlog > 10:
+            logger.debug(f"[LOCKUP-DEBUG] Frame conversion backlog: {backlog}")
         extra = min(FRAME_CONVERT_MAX_BUDGET_MS - FRAME_CONVERT_BASE_BUDGET_MS, backlog * 0.5)
         budget_ms = FRAME_CONVERT_BASE_BUDGET_MS + max(0.0, extra)
         budget_ms = min(budget_ms, FRAME_CONVERT_MAX_BUDGET_MS)

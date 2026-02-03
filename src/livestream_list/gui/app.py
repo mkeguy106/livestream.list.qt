@@ -4,6 +4,8 @@ import asyncio
 import logging
 import sys
 import threading
+import time
+import traceback
 import weakref
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -18,6 +20,42 @@ from ..notifications.notifier import Notifier
 from .theme import ThemeManager, get_app_stylesheet
 
 logger = logging.getLogger(__name__)
+
+
+class MainThreadWatchdog(QObject):
+    """Watchdog that detects when the main thread is blocked.
+
+    Logs a warning with stack trace when the main thread doesn't respond
+    for more than the threshold time.
+    """
+
+    def __init__(self, parent: QObject | None = None, threshold_ms: int = 500):
+        super().__init__(parent)
+        self._threshold_s = threshold_ms / 1000.0
+        self._last_tick = time.monotonic()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(100)  # Check every 100ms
+        self._main_thread_id = threading.get_ident()
+        logger.info(f"MainThreadWatchdog started (threshold={threshold_ms}ms)")
+
+    def _tick(self) -> None:
+        now = time.monotonic()
+        delta = now - self._last_tick
+        if delta > self._threshold_s:
+            # Main thread was blocked - log with stack trace
+            logger.warning(
+                f"MAIN THREAD BLOCKED for {delta:.2f}s! Stack traces of all threads:"
+            )
+            for thread_id, frame in sys._current_frames().items():
+                thread_name = "MAIN" if thread_id == self._main_thread_id else f"Thread-{thread_id}"
+                stack = "".join(traceback.format_stack(frame))
+                logger.warning(f"\n--- {thread_name} ---\n{stack}")
+        self._last_tick = now
+
+    def stop(self) -> None:
+        """Stop the watchdog."""
+        self._timer.stop()
 
 
 class AsyncWorker(QThread):
@@ -149,6 +187,9 @@ class Application(QApplication):
         # Track active workers to prevent garbage collection
         self._active_workers = []
 
+        # Main thread watchdog for debugging lockups
+        self._watchdog: MainThreadWatchdog | None = None
+
     @property
     def main_window(self):
         """Get the main window (may be None if window was destroyed)."""
@@ -166,6 +207,9 @@ class Application(QApplication):
 
     def initialize(self):
         """Initialize application components."""
+        # Start watchdog to detect main thread lockups (debug tool)
+        self._watchdog = MainThreadWatchdog(parent=self, threshold_ms=500)
+
         # Load settings
         self.settings = Settings.load()
 

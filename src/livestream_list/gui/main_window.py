@@ -126,9 +126,9 @@ class StreamRow(QWidget):
         self.checkbox.setVisible(False)
         layout.addWidget(self.checkbox)
 
-        # Live indicator
+        # Live indicator (emoji)
         self.live_indicator = QLabel()
-        self.live_indicator.setFixedWidth(16)
+        self.live_indicator.setFixedWidth(20)
         layout.addWidget(self.live_indicator)
 
         # Platform icon
@@ -237,7 +237,7 @@ class StreamRow(QWidget):
 
         channel = livestream.channel
 
-        # Live indicator
+        # Live indicator (emoji)
         if livestream.live:
             self.live_indicator.setText("🟢")
             self.live_indicator.setToolTip("Live")
@@ -391,12 +391,21 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.app = app
         self._stream_rows: dict[str, StreamRow] = {}
+        self._stream_keys_order: list[str] = []  # Track order for fast path check
         self._selection_mode = False
         self._initial_check_complete = False
         self._name_filter = ""
         self._platform_filter: StreamPlatform | None = None
         self._chat_launcher = ChatLauncher(app.settings.chat)
         self._force_quit = False  # When True, closeEvent quits instead of minimizing
+
+        # Debounce mechanism for refresh_stream_list to prevent rapid successive calls
+        self._refresh_pending = False
+        self._refresh_in_progress = False
+        self._refresh_debounce_timer = QTimer(self)
+        self._refresh_debounce_timer.setSingleShot(True)
+        self._refresh_debounce_timer.setInterval(100)  # 100ms debounce
+        self._refresh_debounce_timer.timeout.connect(self._do_refresh_stream_list)
 
         self._setup_ui()
         self._setup_shortcuts()
@@ -695,8 +704,37 @@ class MainWindow(QMainWindow):
         self.loading_detail.setText(detail)
 
     def refresh_stream_list(self):
-        """Refresh the stream list display."""
-        self._update_view()
+        """Refresh the stream list display (rate-limited to prevent rapid successive calls)."""
+        if self._refresh_in_progress:
+            # A refresh is already running, queue another one for when it's done
+            self._refresh_pending = True
+            return
+        if self._refresh_debounce_timer.isActive():
+            # Recently refreshed, schedule another after cooldown
+            self._refresh_pending = True
+            return
+        # Do immediate update
+        self._refresh_in_progress = True
+        try:
+            self._update_view()
+        finally:
+            self._refresh_in_progress = False
+            # Start cooldown timer to prevent rapid successive refreshes
+            self._refresh_debounce_timer.start()
+
+    def _do_refresh_stream_list(self):
+        """Actually perform the refresh (called after debounce delay)."""
+        if not self._refresh_pending:
+            return
+        self._refresh_pending = False
+        self._refresh_in_progress = True
+        try:
+            self._update_view()
+        finally:
+            self._refresh_in_progress = False
+            # If another refresh was requested while we were running, schedule it
+            if self._refresh_pending:
+                self._refresh_debounce_timer.start()
 
     def _update_view(self):
         """Update the view based on current state."""
@@ -823,33 +861,63 @@ class MainWindow(QMainWindow):
         return filtered
 
     def _populate_list(self, livestreams: list[Livestream]):
-        """Populate the list widget with stream rows."""
-        self.stream_list.clear()
-        self._stream_rows.clear()
+        """Populate the list widget with stream rows.
 
+        Uses incremental updates when possible to avoid rebuilding 343+ widgets.
+        """
         streamlink = self.app.streamlink
+        new_keys = [ls.channel.unique_key for ls in livestreams]
 
-        for ls in livestreams:
-            key = ls.channel.unique_key
-            is_playing = streamlink.is_playing(key) if streamlink else False
+        # Check if we can do incremental update (same streams in same order)
+        if new_keys == self._stream_keys_order:
+            # Fast path: just update existing rows in-place (order unchanged)
+            live_count = sum(1 for ls in livestreams if ls.live)
+            logger.info(f"Fast path update: {len(livestreams)} streams, {live_count} live")
+            for ls in livestreams:
+                key = ls.channel.unique_key
+                row = self._stream_rows.get(key)
+                if row:
+                    is_playing = streamlink.is_playing(key) if streamlink else False
+                    row.update(ls, is_playing)
+            # Force QListWidget to repaint all visible items
+            self.stream_list.viewport().update()
+            return
 
-            row = StreamRow(ls, is_playing, self.app.settings)
-            row.play_clicked.connect(self._on_play_stream)
-            row.stop_clicked.connect(self._on_stop_stream)
-            row.favorite_clicked.connect(self._on_toggle_favorite)
-            row.chat_clicked.connect(self._on_open_chat)
-            row.browser_clicked.connect(self._on_open_browser)
-            row.checkbox.stateChanged.connect(self._update_selection_count)
+        # Slow path: rebuild the list (different streams or first time)
+        live_count = sum(1 for ls in livestreams if ls.live)
+        logger.info(f"Slow path rebuild: {len(livestreams)} streams, {live_count} live")
 
-            if self._selection_mode:
-                row.set_selection_mode(True)
+        # Disable updates during rebuild to prevent intermediate repaints
+        self.stream_list.setUpdatesEnabled(False)
+        try:
+            self.stream_list.clear()
+            self._stream_rows.clear()
+            self._stream_keys_order = []
 
-            item = QListWidgetItem()
-            item.setSizeHint(row.sizeHint())
-            self.stream_list.addItem(item)
-            self.stream_list.setItemWidget(item, row)
+            for ls in livestreams:
+                key = ls.channel.unique_key
+                is_playing = streamlink.is_playing(key) if streamlink else False
 
-            self._stream_rows[key] = row
+                row = StreamRow(ls, is_playing, self.app.settings)
+                row.play_clicked.connect(self._on_play_stream)
+                row.stop_clicked.connect(self._on_stop_stream)
+                row.favorite_clicked.connect(self._on_toggle_favorite)
+                row.chat_clicked.connect(self._on_open_chat)
+                row.browser_clicked.connect(self._on_open_browser)
+                row.checkbox.stateChanged.connect(self._update_selection_count)
+
+                if self._selection_mode:
+                    row.set_selection_mode(True)
+
+                item = QListWidgetItem()
+                item.setSizeHint(row.sizeHint())
+                self.stream_list.addItem(item)
+                self.stream_list.setItemWidget(item, row)
+
+                self._stream_rows[key] = row
+                self._stream_keys_order.append(key)
+        finally:
+            self.stream_list.setUpdatesEnabled(True)
 
     def _update_live_count(self):
         """Update the live count label."""

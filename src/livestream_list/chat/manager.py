@@ -8,15 +8,15 @@ import uuid
 from collections import deque
 from datetime import datetime, timezone
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from ..core.models import Livestream, StreamPlatform
 from ..core.settings import Settings
 from .connections.base import BaseChatConnection
-from .emotes.cache import EmoteCache, DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW
+from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW, EmoteCache
 from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
-from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
 from .emotes.matcher import find_third_party_emotes
+from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
 from .models import ChatBadge, ChatEmote, ChatMessage, ChatUser
 
 logger = logging.getLogger(__name__)
@@ -420,7 +420,6 @@ class SocialsFetchWorker(QThread):
     async def _fetch_youtube_socials(self) -> dict[str, str]:
         """Fetch socials from YouTube channel about page."""
         import json
-        import re
         from urllib.parse import unquote
 
         import aiohttp
@@ -974,22 +973,29 @@ class ChatManager(QObject):
     def open_chat(self, livestream: Livestream) -> None:
         """Open a chat connection for a livestream."""
         channel_key = livestream.channel.unique_key
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) starting...")
         if channel_key in self._connections:
             self.chat_opened.emit(channel_key, livestream)
+            logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) already connected")
             return
 
         self._livestreams[channel_key] = livestream
         self._record_recent_channel(channel_key)
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) updating prefetch targets...")
         self._update_prefetch_targets()
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) starting connection...")
         self._start_connection(channel_key, livestream)
 
         # Start emote fetching for this channel
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) fetching emotes...")
         self._fetch_emotes_for_channel(channel_key, livestream)
 
         # Start socials fetching for all platforms
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) fetching socials...")
         self._fetch_socials_for_channel(channel_key, livestream)
 
         self.chat_opened.emit(channel_key, livestream)
+        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) complete")
 
     def _start_connection(
         self,
@@ -1047,7 +1053,11 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                worker.wait(3000)
+                logger.debug(f"[LOCKUP-DEBUG] Waiting for Twitch worker {key}...")
+                if not worker.wait(500):
+                    logger.warning(f"[LOCKUP-DEBUG] Twitch worker {key} still running after 500ms!")
+                else:
+                    logger.debug(f"[LOCKUP-DEBUG] Twitch worker {key} stopped")
             self._disconnect_connection_signals(key)
 
             # Restart with new token
@@ -1078,7 +1088,11 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                worker.wait(3000)
+                logger.debug(f"[LOCKUP-DEBUG] Waiting for Kick worker {key}...")
+                if not worker.wait(500):
+                    logger.warning(f"[LOCKUP-DEBUG] Kick worker {key} still running after 500ms!")
+                else:
+                    logger.debug(f"[LOCKUP-DEBUG] Kick worker {key} stopped")
             self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
@@ -1107,7 +1121,11 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                worker.wait(3000)
+                logger.debug(f"[LOCKUP-DEBUG] Waiting for YouTube worker {key}...")
+                if not worker.wait(500):
+                    logger.warning(f"[LOCKUP-DEBUG] YouTube worker {key} still running!")
+                else:
+                    logger.debug(f"[LOCKUP-DEBUG] YouTube worker {key} stopped")
             self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
@@ -1117,10 +1135,15 @@ class ChatManager(QObject):
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
+        logger.debug(f"[LOCKUP-DEBUG] close_chat({channel_key}) starting...")
         worker = self._workers.pop(channel_key, None)
         if worker:
             worker.stop()
-            worker.wait(3000)
+            logger.debug(f"[LOCKUP-DEBUG] Waiting for chat worker {channel_key}...")
+            if not worker.wait(500):
+                logger.warning(f"[LOCKUP-DEBUG] Chat worker {channel_key} still running!")
+            else:
+                logger.debug(f"[LOCKUP-DEBUG] Chat worker {channel_key} stopped")
 
         # Disconnect signals to break reference cycles before removing connection
         self._disconnect_connection_signals(channel_key)
@@ -1130,10 +1153,13 @@ class ChatManager(QObject):
         # Clean up emote fetch worker
         fetch_worker = self._emote_fetch_workers.pop(channel_key, None)
         if fetch_worker and fetch_worker.isRunning():
-            fetch_worker.wait(2000)
+            logger.debug(f"[LOCKUP-DEBUG] Waiting for emote fetch worker {channel_key}...")
+            if not fetch_worker.wait(500):
+                logger.warning(f"[LOCKUP-DEBUG] Emote fetch worker {channel_key} still running!")
 
         self.chat_closed.emit(channel_key)
         self._update_prefetch_targets()
+        logger.debug(f"[LOCKUP-DEBUG] close_chat({channel_key}) complete")
 
     def on_refresh_complete(self, livestreams: list[Livestream] | None = None) -> None:
         """Handle refresh complete to update prefetch targets."""
@@ -1554,17 +1580,13 @@ class ChatManager(QObject):
         self.socials_fetched.emit(channel_key, socials)
 
     def _on_emotes_fetched(self, channel_key: str, emotes: list) -> None:
-        """Handle fetched emote list - add to map and queue image downloads."""
-        download_priority = (
-            DOWNLOAD_PRIORITY_LOW if channel_key in self._prefetch_inflight else DOWNLOAD_PRIORITY_HIGH
-        )
+        """Handle fetched emote list - add to map (images load on-demand when rendered)."""
         channel_map = self._channel_emote_maps.setdefault(channel_key, {})
         for emote in emotes:
             if not isinstance(emote, ChatEmote):
                 continue
-            image_set = self._bind_emote_image_set(emote)
-            if image_set:
-                image_set.prefetch(scale=2.0, priority=download_priority)
+            # Bind image_set for on-demand loading when emote is rendered
+            self._bind_emote_image_set(emote)
             channel_map[emote.name] = emote
 
         # Debug: log short emote names and emotes containing "om"
@@ -1612,11 +1634,10 @@ class ChatManager(QObject):
 
             self._user_emotes = {e.name: e for e in new_list}
 
+            # Bind image sets for on-demand loading (no prefetch)
             for emote in new_list:
                 if emote.id in added:
-                    image_set = self._bind_emote_image_set(emote)
-                    if image_set:
-                        image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
+                    self._bind_emote_image_set(emote)
 
             # Refresh emote maps for all Twitch channels
             for channel_key, livestream in self._livestreams.items():
@@ -1735,7 +1756,8 @@ class ChatManager(QObject):
         if self._user_emote_worker and self._user_emote_worker.isRunning():
             return
         now = time.monotonic()
-        if not force and self._user_emotes and (now - self._user_emotes_fetched_at < USER_EMOTE_TTL):
+        time_since_fetch = now - self._user_emotes_fetched_at
+        if not force and self._user_emotes and time_since_fetch < USER_EMOTE_TTL:
             return
         self._user_emote_worker = UserEmoteFetchWorker(
             oauth_token=self.settings.twitch.access_token,

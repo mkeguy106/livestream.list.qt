@@ -2,16 +2,16 @@
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, Signal, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
     QPushButton,
-    QStatusBar,
     QSizePolicy,
     QStackedWidget,
+    QStatusBar,
     QVBoxLayout,
     QWidget,
 )
@@ -392,6 +392,13 @@ class ChatWindow(QMainWindow):
         self._metrics_label: QLabel | None = None
         self._backfill_versions: dict[str, int] = {}
 
+        # Debounce emote cache updates to prevent excessive repaints
+        self._emote_repaint_pending = False
+        self._emote_repaint_timer = QTimer(self)
+        self._emote_repaint_timer.setSingleShot(True)
+        self._emote_repaint_timer.setInterval(100)  # 100ms debounce
+        self._emote_repaint_timer.timeout.connect(self._do_emote_repaint)
+
         self._setup_ui()
         self._connect_signals()
 
@@ -686,7 +693,16 @@ class ChatWindow(QMainWindow):
             widget.apply_moderation(event)
 
     def _on_emote_cache_updated(self) -> None:
-        """Handle emote/badge image loaded - update cache refs and repaint."""
+        """Handle emote/badge image loaded - debounce repaint requests."""
+        self._emote_repaint_pending = True
+        if not self._emote_repaint_timer.isActive():
+            self._emote_repaint_timer.start()
+
+    def _do_emote_repaint(self) -> None:
+        """Actually perform the repaint (called after debounce delay)."""
+        if not self._emote_repaint_pending:
+            return
+        self._emote_repaint_pending = False
         for widget in self._widgets.values():
             widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
             widget.repaint_messages()
