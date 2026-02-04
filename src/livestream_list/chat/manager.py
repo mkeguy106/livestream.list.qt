@@ -973,29 +973,22 @@ class ChatManager(QObject):
     def open_chat(self, livestream: Livestream) -> None:
         """Open a chat connection for a livestream."""
         channel_key = livestream.channel.unique_key
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) starting...")
         if channel_key in self._connections:
             self.chat_opened.emit(channel_key, livestream)
-            logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) already connected")
             return
 
         self._livestreams[channel_key] = livestream
         self._record_recent_channel(channel_key)
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) updating prefetch targets...")
         self._update_prefetch_targets()
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) starting connection...")
         self._start_connection(channel_key, livestream)
 
         # Start emote fetching for this channel
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) fetching emotes...")
         self._fetch_emotes_for_channel(channel_key, livestream)
 
         # Start socials fetching for all platforms
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) fetching socials...")
         self._fetch_socials_for_channel(channel_key, livestream)
 
         self.chat_opened.emit(channel_key, livestream)
-        logger.debug(f"[LOCKUP-DEBUG] open_chat({channel_key}) complete")
 
     def _start_connection(
         self,
@@ -1053,11 +1046,7 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                logger.debug(f"[LOCKUP-DEBUG] Waiting for Twitch worker {key}...")
-                if not worker.wait(500):
-                    logger.warning(f"[LOCKUP-DEBUG] Twitch worker {key} still running after 500ms!")
-                else:
-                    logger.debug(f"[LOCKUP-DEBUG] Twitch worker {key} stopped")
+                worker.wait(500)
             self._disconnect_connection_signals(key)
 
             # Restart with new token
@@ -1088,11 +1077,7 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                logger.debug(f"[LOCKUP-DEBUG] Waiting for Kick worker {key}...")
-                if not worker.wait(500):
-                    logger.warning(f"[LOCKUP-DEBUG] Kick worker {key} still running after 500ms!")
-                else:
-                    logger.debug(f"[LOCKUP-DEBUG] Kick worker {key} stopped")
+                worker.wait(500)
             self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
@@ -1121,11 +1106,7 @@ class ChatManager(QObject):
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
-                logger.debug(f"[LOCKUP-DEBUG] Waiting for YouTube worker {key}...")
-                if not worker.wait(500):
-                    logger.warning(f"[LOCKUP-DEBUG] YouTube worker {key} still running!")
-                else:
-                    logger.debug(f"[LOCKUP-DEBUG] YouTube worker {key} stopped")
+                worker.wait(500)
             self._disconnect_connection_signals(key)
 
             livestream = self._livestreams[key]
@@ -1135,15 +1116,10 @@ class ChatManager(QObject):
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
-        logger.debug(f"[LOCKUP-DEBUG] close_chat({channel_key}) starting...")
         worker = self._workers.pop(channel_key, None)
         if worker:
             worker.stop()
-            logger.debug(f"[LOCKUP-DEBUG] Waiting for chat worker {channel_key}...")
-            if not worker.wait(500):
-                logger.warning(f"[LOCKUP-DEBUG] Chat worker {channel_key} still running!")
-            else:
-                logger.debug(f"[LOCKUP-DEBUG] Chat worker {channel_key} stopped")
+            worker.wait(500)
 
         # Disconnect signals to break reference cycles before removing connection
         self._disconnect_connection_signals(channel_key)
@@ -1153,13 +1129,10 @@ class ChatManager(QObject):
         # Clean up emote fetch worker
         fetch_worker = self._emote_fetch_workers.pop(channel_key, None)
         if fetch_worker and fetch_worker.isRunning():
-            logger.debug(f"[LOCKUP-DEBUG] Waiting for emote fetch worker {channel_key}...")
-            if not fetch_worker.wait(500):
-                logger.warning(f"[LOCKUP-DEBUG] Emote fetch worker {channel_key} still running!")
+            fetch_worker.wait(500)
 
         self.chat_closed.emit(channel_key)
         self._update_prefetch_targets()
-        logger.debug(f"[LOCKUP-DEBUG] close_chat({channel_key}) complete")
 
     def on_refresh_complete(self, livestreams: list[Livestream] | None = None) -> None:
         """Handle refresh complete to update prefetch targets."""

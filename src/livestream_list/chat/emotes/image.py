@@ -19,7 +19,7 @@ class GifTimer(QObject):
 
     tick = Signal(int)  # frame index
 
-    def __init__(self, interval_ms: int = 50, parent: QObject | None = None):
+    def __init__(self, interval_ms: int = 100, parent: QObject | None = None):
         super().__init__(parent)
         self._timer = QTimer(self)
         self._interval_ms = interval_ms

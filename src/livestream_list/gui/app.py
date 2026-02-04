@@ -51,6 +51,12 @@ class MainThreadWatchdog(QObject):
                 thread_name = "MAIN" if thread_id == self._main_thread_id else f"Thread-{thread_id}"
                 stack = "".join(traceback.format_stack(frame))
                 logger.warning(f"\n--- {thread_name} ---\n{stack}")
+        # Log heartbeat every 10 seconds
+        if not hasattr(self, "_last_heartbeat"):
+            self._last_heartbeat = now
+        if now - self._last_heartbeat >= 10.0:
+            logger.warning(f"[WATCHDOG-HEARTBEAT] tick at {now:.1f}")
+            self._last_heartbeat = now
         self._last_tick = now
 
     def stop(self) -> None:

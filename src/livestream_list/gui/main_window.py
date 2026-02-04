@@ -6,9 +6,10 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -17,8 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
+    QListView,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.chat import ChatLauncher
-from ..core.models import Channel, Livestream, SortMode, StreamPlatform, UIStyle
+from ..core.models import Channel, Livestream, SortMode, StreamPlatform
 from ..core.settings import ThemeMode
 from .dialogs import (
     AboutDialog,
@@ -40,348 +40,13 @@ from .dialogs import (
     ExportDialog,
     PreferencesDialog,
 )
+from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
 from .theme import ThemeManager, get_app_stylesheet, get_theme
 
 if TYPE_CHECKING:
     from .app import Application
 
 logger = logging.getLogger(__name__)
-
-# Platform colors
-PLATFORM_COLORS = {
-    StreamPlatform.TWITCH: "#9146FF",
-    StreamPlatform.KICK: "#53FC18",
-    StreamPlatform.YOUTUBE: "#FF0000",
-}
-
-# UI style configurations
-UI_STYLES = {
-    UIStyle.DEFAULT: {
-        "name": "Default",
-        "margin_v": 4,
-        "margin_h": 12,
-        "spacing": 10,
-        "icon_size": 16,
-    },
-    UIStyle.COMPACT_1: {
-        "name": "Compact 1",
-        "margin_v": 4,
-        "margin_h": 12,
-        "spacing": 8,
-        "icon_size": 14,
-    },
-    UIStyle.COMPACT_2: {
-        "name": "Compact 2",
-        "margin_v": 2,
-        "margin_h": 6,
-        "spacing": 4,
-        "icon_size": 12,
-    },
-    UIStyle.COMPACT_3: {
-        "name": "Compact 3",
-        "margin_v": 1,
-        "margin_h": 4,
-        "spacing": 2,
-        "icon_size": 10,
-    },
-}
-
-
-class StreamRow(QWidget):
-    """Widget representing a single stream in the list."""
-
-    play_clicked = Signal(object)  # Livestream
-    stop_clicked = Signal(str)  # channel_key
-    favorite_clicked = Signal(str)  # channel_key
-    chat_clicked = Signal(str, str, str)  # channel_id, platform, video_id
-    browser_clicked = Signal(str, str)  # channel_id, platform
-
-    def __init__(self, livestream: Livestream, is_playing: bool, settings, parent=None):
-        super().__init__(parent)
-        self.livestream = livestream
-        self._is_playing = is_playing
-        self._settings = settings
-        self._setup_ui()
-        self.update(livestream, is_playing)
-
-    def _setup_ui(self):
-        """Set up the row UI."""
-        style = UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
-        theme = get_theme()
-
-        # Font scaling
-        default_font_size = QApplication.font().pointSize()
-        font_size = self._settings.font_size if self._settings.font_size > 0 else default_font_size
-        self._font_size = font_size
-        scale = font_size / default_font_size if default_font_size > 0 else 1.0
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(
-            style["margin_h"], style["margin_v"], style["margin_h"], style["margin_v"]
-        )
-        layout.setSpacing(style["spacing"])
-
-        # Selection checkbox (hidden by default)
-        self.checkbox = QCheckBox()
-        self.checkbox.setVisible(False)
-        layout.addWidget(self.checkbox)
-
-        # Live indicator (emoji)
-        self.live_indicator = QLabel()
-        self.live_indicator.setFixedWidth(20)
-        layout.addWidget(self.live_indicator)
-
-        # Platform icon
-        self.platform_label = QLabel()
-        self.platform_label.setFixedWidth(20)
-        if self._settings.channel_icons.show_platform:
-            layout.addWidget(self.platform_label)
-
-        # Channel name and info
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Name row
-        name_row = QHBoxLayout()
-        name_row.setSpacing(style["spacing"])
-
-        self.name_label = QLabel()
-        self.name_label.setStyleSheet(f"font-weight: bold; font-size: {font_size}pt;")
-        self.name_label.setMinimumWidth(80)  # Ensure channel name stays visible
-        name_row.addWidget(self.name_label)
-
-        self.duration_label = QLabel()
-        self.duration_label.setStyleSheet(
-            f"color: {theme.text_muted}; font-size: {font_size}pt;"
-        )
-        name_row.addWidget(self.duration_label)
-
-        self.playing_label = QLabel()
-        self.playing_label.setStyleSheet(
-            f"color: {theme.status_live}; font-weight: bold; font-size: {font_size}pt;"
-        )
-        self.playing_label.setVisible(False)
-        name_row.addWidget(self.playing_label)
-
-        name_row.addStretch()
-
-        self.viewers_label = QLabel()
-        self.viewers_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {font_size}pt;")
-        name_row.addWidget(self.viewers_label)
-
-        info_layout.addLayout(name_row)
-
-        # Title row (only in default style)
-        if self._settings.ui_style == UIStyle.DEFAULT:
-            from PySide6.QtWidgets import QSizePolicy
-
-            title_size = max(8, int(font_size * 0.85))
-            self.title_label = QLabel()
-            self.title_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {title_size}pt;")
-            self.title_label.setWordWrap(False)
-            # Allow title to shrink and hide when window is small
-            self.title_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-            self.title_label.setMinimumWidth(0)
-            info_layout.addWidget(self.title_label)
-        else:
-            self.title_label = None
-
-        layout.addLayout(info_layout, 1)
-
-        # Buttons
-        icon_size = int(style["icon_size"] * scale)
-
-        # Browser button
-        if self._settings.channel_icons.show_browser:
-            self.browser_btn = QPushButton("B")
-            self.browser_btn.setFixedSize(icon_size + 8, icon_size + 8)
-            self.browser_btn.setToolTip("Open in browser")
-            self.browser_btn.clicked.connect(self._on_browser_clicked)
-            layout.addWidget(self.browser_btn)
-        else:
-            self.browser_btn = None
-
-        # Chat button
-        if self._settings.channel_icons.show_chat:
-            self.chat_btn = QPushButton("C")
-            self.chat_btn.setFixedSize(icon_size + 8, icon_size + 8)
-            self.chat_btn.setToolTip("Open chat")
-            self.chat_btn.clicked.connect(self._on_chat_clicked)
-            layout.addWidget(self.chat_btn)
-        else:
-            self.chat_btn = None
-
-        # Favorite button
-        if self._settings.channel_icons.show_favorite:
-            self.favorite_btn = QPushButton()
-            self.favorite_btn.setFixedSize(icon_size + 8, icon_size + 8)
-            self.favorite_btn.clicked.connect(self._on_favorite_clicked)
-            layout.addWidget(self.favorite_btn)
-        else:
-            self.favorite_btn = None
-
-        # Play/Stop button
-        if self._settings.channel_icons.show_play:
-            self.play_btn = QPushButton()
-            self.play_btn.setFixedSize(icon_size + 12, icon_size + 8)
-            self.play_btn.clicked.connect(self._on_play_clicked)
-            layout.addWidget(self.play_btn)
-        else:
-            self.play_btn = None
-
-    def update(self, livestream: Livestream, is_playing: bool):
-        """Update the row with new data."""
-        self.livestream = livestream
-        self._is_playing = is_playing
-
-        channel = livestream.channel
-
-        # Live indicator (emoji)
-        if livestream.live:
-            self.live_indicator.setText("🟢")
-            self.live_indicator.setToolTip("Live")
-        else:
-            self.live_indicator.setText("⚫")
-            self.live_indicator.setToolTip("Offline")
-
-        # Platform icon
-        platform_icons = {"twitch": "T", "youtube": "Y", "kick": "K"}
-        platform_name = channel.platform.value
-        self.platform_label.setText(platform_icons.get(platform_name, "?"))
-        fs = self._font_size
-        if self._settings.platform_colors:
-            color = PLATFORM_COLORS.get(channel.platform, "#888888")
-            self.platform_label.setStyleSheet(
-                f"color: {color}; font-weight: bold; font-size: {fs}pt;"
-            )
-        else:
-            self.platform_label.setStyleSheet(f"font-weight: bold; font-size: {fs}pt;")
-
-        # Channel name
-        self.name_label.setText(channel.display_name or channel.channel_id)
-        if self._settings.platform_colors:
-            color = PLATFORM_COLORS.get(channel.platform, "#888888")
-            self.name_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: {fs}pt;")
-        else:
-            self.name_label.setStyleSheet(f"font-weight: bold; font-size: {fs}pt;")
-
-        # Duration / Last seen
-        if self._settings.channel_info.show_live_duration:
-            if livestream.live and livestream.start_time:
-                self.duration_label.setText(livestream.live_duration_str)
-                self.duration_label.setVisible(True)
-            elif not livestream.live and livestream.last_live_time:
-                self.duration_label.setText(livestream.last_seen_str)
-                self.duration_label.setVisible(True)
-            else:
-                self.duration_label.setVisible(False)
-        else:
-            self.duration_label.setVisible(False)
-
-        # Playing indicator
-        self.playing_label.setText("▶ Playing")
-        self.playing_label.setVisible(is_playing)
-
-        # Viewers
-        if self._settings.channel_info.show_viewers and livestream.live:
-            self.viewers_label.setText(livestream.viewers_str)
-            self.viewers_label.setVisible(True)
-        else:
-            self.viewers_label.setVisible(False)
-
-        # Title
-        if self.title_label:
-            if livestream.live:
-                parts = []
-                if livestream.game:
-                    parts.append(livestream.game)
-                if livestream.title:
-                    parts.append(livestream.title)
-                self.title_label.setText(" - ".join(parts) if parts else "")
-                self.title_label.setVisible(bool(parts))
-            else:
-                self.title_label.setVisible(False)
-
-        # Favorite button
-        if self.favorite_btn:
-            if channel.favorite:
-                self.favorite_btn.setText("★")
-                self.favorite_btn.setToolTip("Remove from favorites")
-            else:
-                self.favorite_btn.setText("☆")
-                self.favorite_btn.setToolTip("Add to favorites")
-
-        # Play/Stop button
-        if self.play_btn:
-            theme = get_theme()
-            if is_playing:
-                self.play_btn.setText("■")
-                self.play_btn.setToolTip("Stop playback")
-                self.play_btn.setStyleSheet(f"color: {theme.status_error};")
-            else:
-                self.play_btn.setText("▶")
-                self.play_btn.setToolTip("Play stream")
-                self.play_btn.setStyleSheet("")
-
-    def apply_theme(self) -> None:
-        """Apply current theme colors without rebuilding the widget.
-
-        This is much faster than destroying and recreating the row
-        since it only updates the stylesheet colors.
-        """
-        theme = get_theme()
-        fs = self._font_size
-
-        # Update duration/last seen label
-        self.duration_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {fs}pt;")
-
-        # Update playing indicator
-        self.playing_label.setStyleSheet(
-            f"color: {theme.status_live}; font-weight: bold; font-size: {fs}pt;"
-        )
-
-        # Update viewers label
-        self.viewers_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {fs}pt;")
-
-        # Update title label if present
-        if self.title_label:
-            title_size = max(8, int(fs * 0.85))
-            self.title_label.setStyleSheet(f"color: {theme.text_muted}; font-size: {title_size}pt;")
-
-        # Update play button color if playing
-        if self.play_btn and self._is_playing:
-            self.play_btn.setStyleSheet(f"color: {theme.status_error};")
-
-    def set_selection_mode(self, enabled: bool):
-        """Show/hide selection checkbox."""
-        self.checkbox.setVisible(enabled)
-
-    def is_selected(self) -> bool:
-        """Return whether this row is selected."""
-        return self.checkbox.isChecked()
-
-    def set_selected(self, selected: bool):
-        """Set selection state."""
-        self.checkbox.setChecked(selected)
-
-    def _on_play_clicked(self):
-        if self._is_playing:
-            self.stop_clicked.emit(self.livestream.channel.unique_key)
-        else:
-            self.play_clicked.emit(self.livestream)
-
-    def _on_favorite_clicked(self):
-        self.favorite_clicked.emit(self.livestream.channel.unique_key)
-
-    def _on_chat_clicked(self):
-        ch = self.livestream.channel
-        video_id = getattr(self.livestream, "video_id", None) or ""
-        self.chat_clicked.emit(ch.channel_id, ch.platform.value, video_id)
-
-    def _on_browser_clicked(self):
-        ch = self.livestream.channel
-        self.browser_clicked.emit(ch.channel_id, ch.platform.value)
 
 
 class MainWindow(QMainWindow):
@@ -390,9 +55,9 @@ class MainWindow(QMainWindow):
     def __init__(self, app: "Application"):
         super().__init__()
         self.app = app
-        self._stream_rows: dict[str, StreamRow] = {}
+        self._stream_model: StreamListModel | None = None
+        self._stream_delegate: StreamRowDelegate | None = None
         self._stream_keys_order: list[str] = []  # Track order for fast path check
-        self._selection_mode = False
         self._initial_check_complete = False
         self._name_filter = ""
         self._platform_filter: StreamPlatform | None = None
@@ -481,15 +146,41 @@ class MainWindow(QMainWindow):
         all_offline_layout.addWidget(self.all_offline_label)
         self.stack.addWidget(all_offline_page)  # Index 2
 
-        # Stream list page
+        # Stream list page (virtualized QListView)
         list_page = QWidget()
         list_layout = QVBoxLayout(list_page)
         list_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.stream_list = QListWidget()
+        # Create model and delegate
+        self._stream_model = StreamListModel(parent=self)
+        self._stream_delegate = StreamRowDelegate(self.app.settings, parent=self)
+
+        # Connect delegate signals
+        self._stream_delegate.play_clicked.connect(self._on_play_stream)
+        self._stream_delegate.stop_clicked.connect(self._on_stop_stream)
+        self._stream_delegate.favorite_clicked.connect(self._on_toggle_favorite)
+        self._stream_delegate.chat_clicked.connect(self._on_open_chat)
+        self._stream_delegate.browser_clicked.connect(self._on_open_browser)
+
+        # Create virtualized list view
+        self.stream_list = QListView()
+        self.stream_list.setModel(self._stream_model)
+        self.stream_list.setItemDelegate(self._stream_delegate)
+        self.stream_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.stream_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.stream_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.stream_list.setUniformItemSizes(False)
         self.stream_list.setSpacing(0)
-        self.stream_list.itemDoubleClicked.connect(self._on_item_double_clicked)
+
+        # Connect signals
+        self.stream_list.doubleClicked.connect(self._on_item_double_clicked)
         self.stream_list.viewport().installEventFilter(self)
+
+        # Clear button rects on scroll to prevent stale click detection
+        self.stream_list.verticalScrollBar().valueChanged.connect(
+            lambda: self._stream_delegate.clear_button_rects()
+        )
+
         list_layout.addWidget(self.stream_list)
 
         self.stack.addWidget(list_page)  # Index 3
@@ -687,6 +378,9 @@ class MainWindow(QMainWindow):
         self.hide_offline_cb.setChecked(self.app.settings.hide_offline)
         self.favorites_cb.setChecked(self.app.settings.favorites_only)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
+        # Invalidate delegate cache in case layout settings changed
+        if self._stream_delegate:
+            self._stream_delegate.invalidate_size_cache()
         # Apply theme
         self._apply_theme()
 
@@ -738,6 +432,9 @@ class MainWindow(QMainWindow):
 
     def _update_view(self):
         """Update the view based on current state."""
+        import time
+
+        t0 = time.perf_counter()
         monitor = self.app.monitor
         if not monitor:
             self.stack.setCurrentIndex(0)  # Loading
@@ -749,7 +446,11 @@ class MainWindow(QMainWindow):
             return
 
         # Get filtered and sorted livestreams
+        t1 = time.perf_counter()
         livestreams = self._get_filtered_sorted_livestreams()
+        t2 = time.perf_counter()
+        if t2 - t1 > 0.05:
+            logger.warning(f"_get_filtered_sorted_livestreams took {(t2-t1)*1000:.1f}ms")
 
         if not livestreams:
             # Check why empty
@@ -776,8 +477,17 @@ class MainWindow(QMainWindow):
 
         # Show list
         self.stack.setCurrentIndex(3)
+        t3 = time.perf_counter()
         self._populate_list(livestreams)
+        t4 = time.perf_counter()
         self._update_live_count()
+        t5 = time.perf_counter()
+        total = t5 - t0
+        if total > 0.1:
+            logger.warning(
+                f"_update_view took {total*1000:.1f}ms "
+                f"(filter/sort: {(t2-t1)*1000:.1f}ms, populate: {(t4-t3)*1000:.1f}ms)"
+            )
 
     def _get_filtered_sorted_livestreams(self) -> list[Livestream]:
         """Get filtered and sorted list of livestreams."""
@@ -821,9 +531,12 @@ class MainWindow(QMainWindow):
         sort_mode = self.sort_combo.currentData()
         streamlink = self.app.streamlink
 
+        # Pre-compute playing keys once (avoid calling is_playing 343*log(343) times during sort)
+        playing_keys = set(streamlink.get_playing_streams()) if streamlink else set()
+
         def sort_key(ls: Livestream):
             live = 0 if ls.live else 1
-            is_playing = 0 if streamlink and streamlink.is_playing(ls.channel.unique_key) else 1
+            is_playing = 0 if ls.channel.unique_key in playing_keys else 1
 
             if sort_mode == SortMode.NAME:
                 name = (ls.channel.display_name or ls.channel.channel_id).lower()
@@ -861,61 +574,46 @@ class MainWindow(QMainWindow):
         return filtered
 
     def _populate_list(self, livestreams: list[Livestream]):
-        """Populate the list widget with stream rows.
+        """Populate the virtualized list view with stream data.
 
-        Uses incremental updates when possible to avoid rebuilding 343+ widgets.
+        Uses in-place updates when possible (same streams in same order).
+        Otherwise does a full model reset which is still fast since no widgets
+        are created - only visible rows are painted by the delegate.
         """
         streamlink = self.app.streamlink
         new_keys = [ls.channel.unique_key for ls in livestreams]
 
+        # Update playing keys (get all playing keys in one call rather than checking each)
+        if streamlink:
+            all_playing = set(streamlink.get_playing_streams())
+            playing_keys = all_playing & set(new_keys)
+        else:
+            playing_keys = set()
+        self._stream_model.update_playing_keys(playing_keys)
+
         # Check if we can do incremental update (same streams in same order)
         if new_keys == self._stream_keys_order:
-            # Fast path: just update existing rows in-place (order unchanged)
+            # Fast path: just update stream data in-place (order unchanged)
             live_count = sum(1 for ls in livestreams if ls.live)
             logger.info(f"Fast path update: {len(livestreams)} streams, {live_count} live")
-            for ls in livestreams:
-                key = ls.channel.unique_key
-                row = self._stream_rows.get(key)
-                if row:
-                    is_playing = streamlink.is_playing(key) if streamlink else False
-                    row.update(ls, is_playing)
-            # Force QListWidget to repaint all visible items
-            self.stream_list.viewport().update()
-            return
+            result = self._stream_model.update_streams_in_place(livestreams)
+            if result:
+                # Force repaint of visible items
+                self.stream_list.viewport().update()
+                return
 
-        # Slow path: rebuild the list (different streams or first time)
+        # Slow path: full model reset (different streams, different order, or first time)
         live_count = sum(1 for ls in livestreams if ls.live)
         logger.info(f"Slow path rebuild: {len(livestreams)} streams, {live_count} live")
 
-        # Disable updates during rebuild to prevent intermediate repaints
+        # Disable updates during model reset to prevent intermediate repaints
         self.stream_list.setUpdatesEnabled(False)
         try:
-            self.stream_list.clear()
-            self._stream_rows.clear()
-            self._stream_keys_order = []
+            self._stream_model.set_streams(livestreams)
+            self._stream_keys_order = new_keys
 
-            for ls in livestreams:
-                key = ls.channel.unique_key
-                is_playing = streamlink.is_playing(key) if streamlink else False
-
-                row = StreamRow(ls, is_playing, self.app.settings)
-                row.play_clicked.connect(self._on_play_stream)
-                row.stop_clicked.connect(self._on_stop_stream)
-                row.favorite_clicked.connect(self._on_toggle_favorite)
-                row.chat_clicked.connect(self._on_open_chat)
-                row.browser_clicked.connect(self._on_open_browser)
-                row.checkbox.stateChanged.connect(self._update_selection_count)
-
-                if self._selection_mode:
-                    row.set_selection_mode(True)
-
-                item = QListWidgetItem()
-                item.setSizeHint(row.sizeHint())
-                self.stream_list.addItem(item)
-                self.stream_list.setItemWidget(item, row)
-
-                self._stream_rows[key] = row
-                self._stream_keys_order.append(key)
+            # Clear cached button rects since rows have changed
+            self._stream_delegate.clear_button_rects()
         finally:
             self.stream_list.setUpdatesEnabled(True)
 
@@ -1090,21 +788,21 @@ class MainWindow(QMainWindow):
                 self.loading_detail.setStyleSheet(f"color: {theme.text_muted};")
             if hasattr(self, "all_offline_label"):
                 self.all_offline_label.setStyleSheet(f"color: {theme.text_muted};")
-            # Update existing StreamRows in-place instead of rebuilding
-            # This is much faster than refresh_stream_list() which destroys/recreates all rows
-            for row in self._stream_rows.values():
-                row.apply_theme()
+            # Update delegate theme and repaint
+            if self._stream_delegate:
+                self._stream_delegate.apply_theme()
+            self.stream_list.viewport().update()
             # Notify chat window if open
             if hasattr(self.app, "_chat_window") and self.app._chat_window:
                 self.app._chat_window.apply_theme()
         finally:
             self.setUpdatesEnabled(True)
 
-    def _on_item_double_clicked(self, item: QListWidgetItem):
+    def _on_item_double_clicked(self, index):
         """Handle double-click on list item."""
-        row = self.stream_list.itemWidget(item)
-        if isinstance(row, StreamRow) and row.livestream:
-            self._on_play_stream(row.livestream)
+        livestream = index.data(StreamRole)
+        if livestream:
+            self._on_play_stream(livestream)
 
     def _on_play_stream(self, livestream: Livestream):
         """Handle playing a stream."""
@@ -1201,45 +899,40 @@ class MainWindow(QMainWindow):
 
     def _toggle_selection_mode(self):
         """Toggle selection mode."""
-        self._selection_mode = not self._selection_mode
-        self.select_btn.setChecked(self._selection_mode)
-        self.selection_bar.setVisible(self._selection_mode)
-
-        for row in self._stream_rows.values():
-            row.set_selection_mode(self._selection_mode)
-
-        self._update_selection_count()
+        if self._stream_model:
+            is_selection = self._stream_model.is_selection_mode()
+            self._stream_model.set_selection_mode(not is_selection)
+            self.select_btn.setChecked(not is_selection)
+            self.selection_bar.setVisible(not is_selection)
+            self._update_selection_count()
 
     def _exit_selection_mode(self):
         """Exit selection mode."""
-        self._selection_mode = False
+        if self._stream_model:
+            self._stream_model.set_selection_mode(False)
         self.select_btn.setChecked(False)
         self.selection_bar.setVisible(False)
 
-        for row in self._stream_rows.values():
-            row.set_selection_mode(False)
-            row.set_selected(False)
-
     def _select_all(self):
         """Select all visible rows."""
-        for row in self._stream_rows.values():
-            row.set_selected(True)
+        if self._stream_model:
+            self._stream_model.select_all()
         self._update_selection_count()
 
     def _deselect_all(self):
         """Deselect all rows."""
-        for row in self._stream_rows.values():
-            row.set_selected(False)
+        if self._stream_model:
+            self._stream_model.deselect_all()
         self._update_selection_count()
 
     def _update_selection_count(self):
         """Update the selection count label."""
-        count = sum(1 for row in self._stream_rows.values() if row.is_selected())
+        count = self._stream_model.get_selection_count() if self._stream_model else 0
         self.selection_count_label.setText(f"{count} selected")
 
     def _delete_selected(self):
         """Delete selected channels."""
-        selected_keys = [key for key, row in self._stream_rows.items() if row.is_selected()]
+        selected_keys = self._stream_model.get_selected_keys() if self._stream_model else []
         if not selected_keys:
             return
 
@@ -1450,7 +1143,11 @@ class MainWindow(QMainWindow):
                 new_size = max(6, min(30, current + delta))
                 self.app.settings.font_size = new_size
                 self.app.save_settings()
-                self.refresh_stream_list()
+                # Invalidate delegate size cache and force relayout
+                if self._stream_delegate:
+                    self._stream_delegate.invalidate_size_cache()
+                if self._stream_model:
+                    self._stream_model.layoutChanged.emit()
                 return True
         return super().eventFilter(obj, event)
 

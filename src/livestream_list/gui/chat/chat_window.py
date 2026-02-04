@@ -351,6 +351,16 @@ class FlowTabWidget(QWidget):
         """Return number of tabs."""
         return self._stack.count()
 
+    def currentIndex(self) -> int:  # noqa: N802
+        """Return the current tab index."""
+        return self._current_index
+
+    def currentWidget(self) -> QWidget | None:  # noqa: N802
+        """Return the currently active widget."""
+        if 0 <= self._current_index < self._stack.count():
+            return self._stack.widget(self._current_index)
+        return None
+
     def setCurrentIndex(self, index: int) -> None:  # noqa: N802
         """Set the active tab."""
         if 0 <= index < self._stack.count():
@@ -419,6 +429,7 @@ class ChatWindow(QMainWindow):
         # Flow tab widget (wraps tabs to multiple rows)
         self._tab_widget = FlowTabWidget()
         self._tab_widget.tabCloseRequested.connect(self._on_tab_close)
+        self._tab_widget.currentChanged.connect(self._on_tab_changed)
 
         self.setCentralWidget(self._tab_widget)
 
@@ -756,20 +767,33 @@ class ChatWindow(QMainWindow):
         self.chat_manager.send_message(channel_key, text)
 
     def _on_font_size_changed(self, new_size: int) -> None:
-        """Persist font size change and relayout all widgets."""
+        """Persist font size change and relayout active widget."""
         self.settings.chat.builtin.font_size = new_size
         self.settings.save()
-        # Relayout all other widgets to match
-        for widget in self._widgets.values():
-            widget._model.layoutChanged.emit()
+        # Only relayout active widget - others will update when activated
+        current_widget = self._tab_widget.currentWidget()
+        if isinstance(current_widget, ChatWidget):
+            current_widget._delegate.invalidate_size_cache()
+            current_widget._model.layoutChanged.emit()
 
     def _on_settings_changed(self) -> None:
-        """Persist chat setting toggles and relayout all widgets."""
+        """Persist chat setting toggles and relayout active widget."""
         self.settings.save()
         self.chat_manager.on_emote_settings_changed()
         self.chat_manager._update_prefetch_targets()
-        for widget in self._widgets.values():
-            widget._model.layoutChanged.emit()
+        # Only relayout the active widget to avoid lockups
+        # Other widgets will be relayouted when they become active
+        current_widget = self._tab_widget.currentWidget()
+        if isinstance(current_widget, ChatWidget):
+            current_widget._model.layoutChanged.emit()
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Handle tab change - refresh emote map for newly active tab."""
+        widget = self._tab_widget.widget(index)
+        if isinstance(widget, ChatWidget):
+            # Update emote map and repaint when tab becomes active
+            widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
+            widget.repaint_messages()
 
     def _on_tab_close(self, index: int) -> None:
         """Handle tab close button clicked."""

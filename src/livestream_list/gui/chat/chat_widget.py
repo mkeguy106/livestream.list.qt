@@ -2,8 +2,8 @@
 
 import logging
 import re
-import webbrowser
 import time
+import webbrowser
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
@@ -21,8 +21,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...chat.emotes.cache import EmoteCache
+from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
 from ...core.models import Livestream
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
@@ -623,6 +623,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def on_gif_tick(self, elapsed_ms: int) -> None:
         """Advance animation frame from shared timer."""
         if not self.settings.animate_emotes:
+            return
+        # Only update if this widget is actually visible (active tab)
+        if not self.isVisible():
             return
         self._rehydrate_visible_animated_emotes()
         self._animation_time_ms = elapsed_ms
@@ -1360,7 +1363,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         self._search_current: int = -1
 
         # Message list using the same delegate
-        self._model = ChatMessageModel(max_messages=5000, parent=self)
+        self._model = ChatMessageModel(max_messages=settings.max_messages, parent=self)
         self._delegate = ChatMessageDelegate(settings, parent=self)
         if image_store:
             self._delegate.set_image_store(image_store)

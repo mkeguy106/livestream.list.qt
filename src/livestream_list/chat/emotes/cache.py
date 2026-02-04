@@ -8,7 +8,7 @@ import time
 from collections import OrderedDict, deque
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, Signal, QTimer
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QImage, QImageReader, QPixmap
 
 from ...core.settings import get_data_dir
@@ -25,8 +25,8 @@ DOWNLOAD_PRIORITY_HIGH = 0
 DOWNLOAD_PRIORITY_LOW = 1
 MAX_EMOTE_DOWNLOAD_RETRIES = 2
 FRAME_CONVERT_BASE_BUDGET_MS = 4.0
-FRAME_CONVERT_MAX_BUDGET_MS = 10.0
-FRAME_CONVERT_INTERVAL_MS = 4
+FRAME_CONVERT_MAX_BUDGET_MS = 8.0
+FRAME_CONVERT_INTERVAL_MS = 16  # ~60fps, was 4ms which was too aggressive
 FRAME_CONVERT_SLOW_BATCH_MS = 12.0
 FRAME_CONVERT_LOG_THROTTLE_S = 5.0
 
@@ -190,13 +190,19 @@ def _extract_frame_images(data: bytes) -> tuple[list[QImage], list[int]] | None:
 
 
 class EmoteFrameWorker(QThread):
-    """Worker thread for decoding animated emote frames from disk."""
+    """Worker thread for loading animated emote bytes from disk.
 
-    frames_ready = Signal(str, object, object)  # key, list[QImage], list[int]
+    NOTE: Frame extraction (QImageReader) must happen on the main thread to avoid
+    freezing the UI. This worker only reads raw bytes and emits them for main
+    thread decoding.
+    """
+
+    bytes_ready = Signal(str, bytes)  # key, raw_data
+    frames_ready = Signal(str, object, object)  # key, list[QImage], list[int] (legacy)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._queue: "queue.Queue[tuple[str, Path] | None]" = queue.Queue()
+        self._queue: queue.Queue[tuple[str, Path] | None] = queue.Queue()
         self._pending: set[str] = set()
         self._should_stop = False
 
@@ -218,25 +224,31 @@ class EmoteFrameWorker(QThread):
             key, path = item
             try:
                 data = path.read_bytes()
-                result = _extract_frame_images(data)
-                if result:
-                    frames, delays = result
-                    self.frames_ready.emit(key, frames, delays)
+                if data:
+                    # Emit raw bytes - frame extraction happens on main thread
+                    self.bytes_ready.emit(key, data)
             except Exception as e:
-                logger.debug(f"Failed to decode animated frames for {key}: {e}")
+                logger.debug(f"Failed to read animated frames for {key}: {e}")
             finally:
                 self._pending.discard(key)
 
 
 class EmoteDiskLoaderWorker(QThread):
-    """Worker thread for decoding emote images from disk (non-blocking)."""
+    """Worker thread for loading emote bytes from disk.
 
-    image_ready = Signal(str, object, object, bool)  # key, QImage, raw_data, is_animated
+    NOTE: Image decoding (QImageReader) must happen on the main thread to avoid
+    freezing the UI. This worker only reads raw bytes and emits them for main
+    thread decoding.
+    """
+
+    # Emit raw bytes for main thread to decode
+    bytes_ready = Signal(str, bytes)  # key, raw_data
+    image_ready = Signal(str, object, object, bool)  # key, QImage, raw_data, is_animated (legacy)
     image_failed = Signal(str, str)  # key, reason
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._queue: "queue.Queue[tuple[str, Path] | None]" = queue.Queue()
+        self._queue: queue.Queue[tuple[str, Path] | None] = queue.Queue()
         self._pending: set[str] = set()
         self._should_stop = False
 
@@ -261,17 +273,10 @@ class EmoteDiskLoaderWorker(QThread):
                 if not data:
                     self.image_failed.emit(key, "empty")
                     continue
-                is_animated = _is_animated(data)
-                image = _decode_first_frame_image(data)
-                if image is None or image.isNull():
-                    # Fallback attempt for tricky formats
-                    image = QImage.fromData(data)
-                if image is None or image.isNull():
-                    self.image_failed.emit(key, "decode")
-                    continue
-                self.image_ready.emit(key, image, data, is_animated)
+                # Emit raw bytes - decoding happens on main thread to avoid freeze
+                self.bytes_ready.emit(key, data)
             except Exception as e:
-                logger.debug(f"Failed to decode emote from disk for {key}: {e}")
+                logger.debug(f"Failed to read emote from disk for {key}: {e}")
                 self.image_failed.emit(key, "exception")
             finally:
                 self._pending.discard(key)
@@ -285,7 +290,7 @@ class _DiskCacheWorker(threading.Thread):
         self._cache_dir = cache_dir
         self._get_limit_bytes = get_limit_bytes
         self._logger = logger_obj
-        self._queue: "queue.Queue[tuple[str, Path | None, bytes | None]]" = queue.Queue()
+        self._queue: queue.Queue[tuple[str, Path | None, bytes | None]] = queue.Queue()
         self._stop_event = threading.Event()
         self._pending_writes = 0
         self._last_enforce = 0.0
@@ -435,6 +440,18 @@ class EmoteCache(QObject):
         self._frame_convert_last_log = 0.0
         self._disk_loader: EmoteDiskLoaderWorker | None = None
 
+        # Queue for decoding downloaded emotes on main thread (avoids freeze)
+        self._decode_queue: deque[tuple[str, bytes]] = deque()
+        self._decode_timer = QTimer(self)
+        self._decode_timer.setInterval(8)  # Fast processing (8ms interval)
+        self._decode_timer.timeout.connect(self._process_decode_queue)
+
+        # Queue for extracting animation frames on main thread
+        self._frame_extract_queue: deque[tuple[str, bytes]] = deque()
+        self._frame_extract_timer = QTimer(self)
+        self._frame_extract_timer.setInterval(8)  # Fast processing (8ms interval)
+        self._frame_extract_timer.timeout.connect(self._process_frame_extract_queue)
+
     @property
     def pixmap_dict(self) -> dict[str, QPixmap]:
         """Get the memory cache dict (for delegate access)."""
@@ -533,7 +550,7 @@ class EmoteCache(QObject):
             return
         if not self._frame_worker:
             self._frame_worker = EmoteFrameWorker(parent=self)
-            self._frame_worker.frames_ready.connect(self._on_frames_ready)
+            self._frame_worker.bytes_ready.connect(self._on_frame_bytes_ready)
             self._frame_worker.start()
         self._frame_worker.enqueue(key, raw_path)
 
@@ -649,8 +666,7 @@ class EmoteCache(QObject):
 
         # Create new loader
         self._loader = EmoteLoaderWorker(parent=self)
-        self._loader.emote_ready.connect(self._on_emote_downloaded)
-        self._loader.animated_emote_ready.connect(self._on_animated_emote_downloaded)
+        self._loader.bytes_ready.connect(self._on_download_bytes_ready)
         self._loader.emote_failed.connect(self._on_emote_failed)
         self._loader.finished.connect(self._on_loader_finished)
 
@@ -660,10 +676,65 @@ class EmoteCache(QObject):
 
         self._loader.start()
 
+    def _on_download_bytes_ready(self, key: str, data: bytes) -> None:
+        """Handle downloaded emote bytes - queue for main thread decoding."""
+        if not data:
+            self._handle_download_failure(key, "empty")
+            return
+        self._decode_queue.append((key, data))
+        if not self._decode_timer.isActive():
+            self._decode_timer.start()
+
+    def _process_decode_queue(self) -> None:
+        """Decode downloaded emotes in batches to avoid blocking the UI."""
+        start_time = time.monotonic()
+        # Higher budget for decoding - can process multiple emotes per batch
+        budget_ms = 30.0  # Allow up to 30ms per batch
+
+        while self._decode_queue:
+            key, data = self._decode_queue.popleft()
+
+            # Detect if animated
+            is_animated = _is_animated(data)
+
+            # Decode first frame
+            image = _decode_first_frame_image(data)
+            if image is None or image.isNull():
+                image = QImage.fromData(data)
+            if image is None or image.isNull():
+                self._handle_download_failure(key, "decode")
+                continue
+
+            pixmap = QPixmap.fromImage(image)
+            if pixmap.isNull():
+                self._handle_download_failure(key, "decode")
+                continue
+
+            png_bytes = _encode_png_bytes(image)
+
+            if is_animated:
+                self._no_animation.discard(key)
+                self.put(key, pixmap, raw_data=data, png_bytes=png_bytes)
+            else:
+                last_url = self._last_download_url.get(key)
+                if last_url and self._is_fallback_url(key, last_url):
+                    self._no_animation.add(key)
+                self.put(key, pixmap, png_bytes=png_bytes)
+
+            self._clear_download_attempts(key)
+
+            # Check time budget
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            if elapsed_ms >= budget_ms:
+                break
+
+        if not self._decode_queue:
+            self._decode_timer.stop()
+
     def _on_emote_downloaded(
         self, key: str, raw_data: bytes, image, png_bytes: bytes | None
     ) -> None:
-        """Handle a downloaded emote/badge image - create QPixmap on main thread."""
+        """Handle a downloaded emote/badge image - create QPixmap on main thread (legacy)."""
         if not raw_data:
             self._handle_download_failure(key, "empty")
             return
@@ -686,7 +757,7 @@ class EmoteCache(QObject):
     def _on_animated_emote_downloaded(
         self, key: str, raw_data: bytes, image, png_bytes: bytes | None
     ) -> None:
-        """Handle a downloaded animated emote - store raw data, decode frames lazily."""
+        """Handle a downloaded animated emote - store raw data (legacy)."""
         if not raw_data:
             self._handle_download_failure(key, "empty")
             return
@@ -845,8 +916,40 @@ class EmoteCache(QObject):
         while len(self._memory) > MAX_MEMORY_ENTRIES:
             self._memory.popitem(last=False)
 
+    def _on_frame_bytes_ready(self, key: str, data: bytes) -> None:
+        """Handle raw bytes for animation - queue for batched extraction."""
+        if not data:
+            return
+        # Queue for batched processing to avoid blocking UI
+        self._frame_extract_queue.append((key, data))
+        if not self._frame_extract_timer.isActive():
+            self._frame_extract_timer.start()
+
+    def _process_frame_extract_queue(self) -> None:
+        """Extract animation frames in batches to avoid blocking the UI."""
+        start_time = time.monotonic()
+        # Higher budget for frame extraction - extracting all GIF frames is slow
+        budget_ms = 50.0  # Allow up to 50ms per batch
+
+        while self._frame_extract_queue:
+            key, data = self._frame_extract_queue.popleft()
+
+            # Extract frames on main thread (QImageReader is not thread-safe)
+            result = _extract_frame_images(data)
+            if result:
+                frames, delays = result
+                self._on_frames_ready(key, frames, delays)
+
+            # Check time budget
+            elapsed_ms = (time.monotonic() - start_time) * 1000
+            if elapsed_ms >= budget_ms:
+                break
+
+        if not self._frame_extract_queue:
+            self._frame_extract_timer.stop()
+
     def _on_frames_ready(self, key: str, frames, delays) -> None:
-        """Handle decoded animation frames from the worker."""
+        """Handle decoded animation frames - queue for conversion."""
         if not frames:
             return
         if key in self._frame_convert_pending:
@@ -860,8 +963,6 @@ class EmoteCache(QObject):
         """Convert QImage frames to QPixmap in small batches to avoid UI stalls."""
         start_time = time.monotonic()
         backlog = len(self._frame_convert_queue) + (1 if self._frame_convert_current else 0)
-        if backlog > 10:
-            logger.debug(f"[LOCKUP-DEBUG] Frame conversion backlog: {backlog}")
         extra = min(FRAME_CONVERT_MAX_BUDGET_MS - FRAME_CONVERT_BASE_BUDGET_MS, backlog * 0.5)
         budget_ms = FRAME_CONVERT_BASE_BUDGET_MS + max(0.0, extra)
         budget_ms = min(budget_ms, FRAME_CONVERT_MAX_BUDGET_MS)
@@ -935,25 +1036,20 @@ class EmoteCache(QObject):
         self._pending_decode.add(key)
         if not self._disk_loader:
             self._disk_loader = EmoteDiskLoaderWorker(parent=self)
-            self._disk_loader.image_ready.connect(self._on_disk_emote_ready)
+            self._disk_loader.bytes_ready.connect(self._on_disk_bytes_ready)
             self._disk_loader.image_failed.connect(self._on_disk_emote_failed)
             self._disk_loader.start()
         self._disk_loader.enqueue(key, path)
 
-    def _on_disk_emote_ready(self, key: str, image, raw_data: bytes, is_animated: bool) -> None:
-        """Handle decoded emote from disk."""
+    def _on_disk_bytes_ready(self, key: str, data: bytes) -> None:
+        """Handle raw bytes from disk - queue for batched decoding."""
         self._pending_decode.discard(key)
-        pixmap = QPixmap.fromImage(image) if image and not image.isNull() else QPixmap()
-        if pixmap.isNull():
+        if not data:
             return
-        self._put_memory(key, pixmap)
-        # If this is animated and we only had PNG, keep raw bytes for animation
-        if is_animated and raw_data:
-            raw_filename = _cache_key_to_raw_filename(key)
-            raw_path = self._cache_dir / raw_filename
-            if not raw_path.exists():
-                self._put_disk_raw(key, raw_data)
-        self.emote_loaded.emit(key)
+        # Queue for batched processing to avoid blocking UI
+        self._decode_queue.append((key, data))
+        if not self._decode_timer.isActive():
+            self._decode_timer.start()
 
     def _on_disk_emote_failed(self, key: str, reason: str) -> None:
         self._pending_decode.discard(key)
@@ -1015,21 +1111,22 @@ class EmoteCache(QObject):
 
 
 class EmoteLoaderWorker(QThread):
-    """Worker thread for downloading and decoding emote images.
+    """Worker thread for downloading emote images.
 
     Processes a queue of (key, url) pairs, downloads images via aiohttp,
-    and emits raw bytes via signals. QPixmap creation happens on the main
-    thread to comply with Qt threading requirements.
+    and emits raw bytes via signals. All image decoding (QImageReader) must
+    happen on the main thread to avoid UI freezes.
     """
 
-    # Both signals send raw bytes - QPixmap must be created on GUI thread
-    emote_ready = Signal(str, bytes, object, object)  # key, raw_data, QImage, png_bytes
-    animated_emote_ready = Signal(str, bytes, object, object)  # key, raw_data, first-frame QImage, png_bytes
+    # Emit raw bytes only - ALL decoding happens on main thread
+    bytes_ready = Signal(str, bytes)  # key, raw_data
+    emote_ready = Signal(str, bytes, object, object)  # legacy: key, raw_data, QImage, png_bytes
+    animated_emote_ready = Signal(str, bytes, object, object)  # legacy
     emote_failed = Signal(str, str, int, str)  # key, url, status, reason
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
-        self._queue: "queue.PriorityQueue[tuple[int, int, str, str]]" = queue.PriorityQueue()
+        self._queue: queue.PriorityQueue[tuple[int, int, str, str]] = queue.PriorityQueue()
         self._seq = 0
         self._should_stop = False
 
@@ -1072,26 +1169,8 @@ class EmoteLoaderWorker(QThread):
                         if not data:
                             self.emote_failed.emit(key, url, resp.status, "empty")
                             continue
-                        # Detect animated image without creating QPixmaps
-                        # (QPixmap must be created on the GUI thread)
-                        if _is_animated(data):
-                            first_frame = _decode_first_frame_image(data)
-                            if first_frame is None or first_frame.isNull():
-                                first_frame = QImage.fromData(data)
-                            if first_frame is None or first_frame.isNull():
-                                self.emote_failed.emit(key, url, resp.status, "decode")
-                                continue
-                            png_bytes = _encode_png_bytes(first_frame)
-                            self.animated_emote_ready.emit(key, data, first_frame, png_bytes)
-                        else:
-                            image = _decode_first_frame_image(data)
-                            if image is None or image.isNull():
-                                image = QImage.fromData(data)
-                            if image is None or image.isNull():
-                                self.emote_failed.emit(key, url, resp.status, "decode")
-                                continue
-                            png_bytes = _encode_png_bytes(image)
-                            self.emote_ready.emit(key, data, image, png_bytes)
+                        # Emit raw bytes only - decoding happens on main thread
+                        self.bytes_ready.emit(key, data)
                 except Exception as e:
                     logger.debug(f"Failed to download emote {key}: {e}")
                     self.emote_failed.emit(key, url, 0, "exception")

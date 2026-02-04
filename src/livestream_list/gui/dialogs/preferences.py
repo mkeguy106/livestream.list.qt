@@ -444,6 +444,14 @@ class PreferencesDialog(QDialog):
         self.chat_spacing_spin.valueChanged.connect(self._on_chat_changed)
         builtin_layout.addRow("Line spacing:", self.chat_spacing_spin)
 
+        self.scrollback_spin = QSpinBox()
+        self.scrollback_spin.setRange(100, 50000)
+        self.scrollback_spin.setSingleStep(100)
+        self.scrollback_spin.setSuffix(" messages")
+        self.scrollback_spin.setValue(self.app.settings.chat.builtin.max_messages)
+        self.scrollback_spin.valueChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow("Scrollback buffer:", self.scrollback_spin)
+
         # Emote provider checkboxes
         emote_providers = self.app.settings.chat.builtin.emote_providers
         self.emote_7tv_cb = QCheckBox("7TV")
@@ -1052,6 +1060,7 @@ class PreferencesDialog(QDialog):
         # Built-in chat settings
         self.app.settings.chat.builtin.font_size = self.chat_font_spin.value()
         self.app.settings.chat.builtin.line_spacing = self.chat_spacing_spin.value()
+        self.app.settings.chat.builtin.max_messages = self.scrollback_spin.value()
         self.app.settings.chat.builtin.show_timestamps = self.chat_timestamps_cb.isChecked()
         self.app.settings.chat.builtin.show_badges = self.chat_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
@@ -1331,6 +1340,7 @@ class PreferencesDialog(QDialog):
             self.new_window_cb.setChecked(chat_defaults.new_window)
             self.chat_font_spin.setValue(builtin.font_size)
             self.chat_spacing_spin.setValue(builtin.line_spacing)
+            self.scrollback_spin.setValue(builtin.max_messages)
             self.emote_7tv_cb.setChecked("7tv" in builtin.emote_providers)
             self.emote_bttv_cb.setChecked("bttv" in builtin.emote_providers)
             self.emote_ffz_cb.setChecked("ffz" in builtin.emote_providers)
