@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from ...chat.emotes.cache import EmoteCache
 from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
-from ...core.models import Livestream
+from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
 from .emote_completer import EmoteCompleter
@@ -194,13 +194,17 @@ class ChatWidget(QWidget, ChatSearchMixin):
     settings_clicked = Signal()
     font_size_changed = Signal(int)  # new font size
     settings_changed = Signal()  # any chat setting toggled
+    whisper_requested = Signal(str, str)  # partner_display_name, partner_user_id
 
     def __init__(
         self,
         channel_key: str,
-        livestream: Livestream,
+        livestream: Livestream | None,
         settings: BuiltinChatSettings,
         authenticated: bool = False,
+        is_dm: bool = False,
+        dm_partner_name: str = "",
+        dm_partner_id: str = "",
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -208,6 +212,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self.livestream = livestream
         self.settings = settings
         self._authenticated = authenticated
+        self._is_dm = is_dm
+        self._dm_partner_name = dm_partner_name
+        self._dm_partner_id = dm_partner_id
         self._auto_scroll = True
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
@@ -240,9 +247,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Apply banner styling and update title
         self._update_banner_style()
-        self._update_stream_title()
-        if not self.settings.show_stream_title:
+        if self._is_dm:
             self._title_banner.hide()
+            self._socials_banner.hide()
+        else:
+            self._update_stream_title()
+            if not self.settings.show_stream_title:
+                self._title_banner.hide()
 
         # Search bar (hidden by default)
         # Object names are used for consolidated stylesheet in apply_theme()
@@ -319,7 +330,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._list_view.sizePolicy().verticalPolicy(),
         )
         layout.addWidget(self._connecting_label)
-        self._list_view.hide()
+        if self._is_dm:
+            # DM tabs don't connect — show list immediately
+            self._connecting_label.hide()
+        else:
+            self._list_view.hide()
 
         # Hype chat pinned banner (hidden by default)
         self._hype_banner = QWidget()
@@ -371,7 +386,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._input.returnPressed.connect(self._on_send)
         input_layout.addWidget(self._input)
 
-        self._send_button = QPushButton("Chat")
+        self._send_button = QPushButton("Whisper" if self._is_dm else "Chat")
         self._send_button.setObjectName("chat_send_btn")
         self._send_button.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_button)
@@ -444,7 +459,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Emote autocomplete
         self._emote_completer = EmoteCompleter(self._input, parent=self)
-        self._emote_completer.set_platform(self.livestream.channel.platform.value)
+        if self.livestream:
+            self._emote_completer.set_platform(self.livestream.channel.platform.value)
+        elif self._is_dm:
+            self._emote_completer.set_platform("twitch")
         self._input.add_completer(self._emote_completer)
 
         # Mention autocomplete
@@ -539,21 +557,26 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._input.setEnabled(state)
         self._send_button.setEnabled(state)
         if state:
-            self._input.setPlaceholderText("Send a message...")
+            if self._is_dm:
+                self._input.setPlaceholderText(f"Whisper to {self._dm_partner_name}...")
+            else:
+                self._input.setPlaceholderText("Send a message...")
             self._auth_banner.hide()
         else:
-            platform_name = self.livestream.channel.platform.value.title()
+            if self._is_dm:
+                platform_name = "Twitch"
+            else:
+                platform_name = self.livestream.channel.platform.value.title()
             self._input.setPlaceholderText(f"Log in to {platform_name} to chat")
             self._auth_banner.setText(f"Not logged in \u2014 {platform_name} chat is read-only")
             self._auth_banner.show()
 
     def show_error(self, message: str) -> None:
         """Show an error message in the appropriate banner."""
-        from ...core.models import StreamPlatform
-
         # For YouTube restriction errors, show the banner with "Open in Browser" button
         if (
-            self.livestream.channel.platform == StreamPlatform.YOUTUBE
+            self.livestream
+            and self.livestream.channel.platform == StreamPlatform.YOUTUBE
             and "Cannot send:" in message
             and "Use browser" in message
         ):
@@ -569,9 +592,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _open_chat_in_browser(self) -> None:
         """Open the YouTube chat popout in the default browser."""
-        from ...core.models import StreamPlatform
-
-        if self.livestream.channel.platform != StreamPlatform.YOUTUBE:
+        if not self.livestream or self.livestream.channel.platform != StreamPlatform.YOUTUBE:
             return
 
         # Get the video ID from the livestream
@@ -765,6 +786,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 for action in user_menu.actions():
                     menu.addAction(action)
 
+                # "Send Whisper" option for Twitch users (not our own messages)
+                if message.user.platform == StreamPlatform.TWITCH and message.user.id != "self":
+                    menu.addSeparator()
+                    whisper_action = menu.addAction(f"Send Whisper to {message.user.display_name}")
+                    whisper_action.triggered.connect(
+                        lambda checked=False, u=message.user: self.whisper_requested.emit(
+                            u.display_name, u.id
+                        )
+                    )
+
         if not menu.isEmpty():
             menu.exec(self._list_view.viewport().mapToGlobal(pos))
 
@@ -876,20 +907,20 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Format socials as clickable links with icons/emojis
         social_icons = {
-            "discord": "\U0001F4AC",  # Speech bubble
-            "instagram": "\U0001F4F7",  # Camera
-            "twitter": "\U0001F426",  # Bird
-            "x": "\U0001F426",  # Bird (X/Twitter)
-            "tiktok": "\U0001F3B5",  # Musical note
-            "youtube": "\U0001F3AC",  # Clapper
-            "facebook": "\U0001F465",  # People
-            "patreon": "\U0001F49B",  # Yellow heart
-            "merch": "\U0001F455",  # T-shirt
+            "discord": "\U0001f4ac",  # Speech bubble
+            "instagram": "\U0001f4f7",  # Camera
+            "twitter": "\U0001f426",  # Bird
+            "x": "\U0001f426",  # Bird (X/Twitter)
+            "tiktok": "\U0001f3b5",  # Musical note
+            "youtube": "\U0001f3ac",  # Clapper
+            "facebook": "\U0001f465",  # People
+            "patreon": "\U0001f49b",  # Yellow heart
+            "merch": "\U0001f455",  # T-shirt
         }
 
         links = []
         for platform, url in socials.items():
-            icon = social_icons.get(platform.lower(), "\U0001F517")  # Link emoji default
+            icon = social_icons.get(platform.lower(), "\U0001f517")  # Link emoji default
             label = platform.capitalize()
             links.append(f'{icon} <a href="{url}">{label}</a>')
 

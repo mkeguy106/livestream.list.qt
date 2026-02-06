@@ -256,9 +256,15 @@ class AddChannelDialog(QDialog):
     def _update_twitch_status(self):
         """Update Twitch login status display."""
         if self.app.settings.twitch.access_token:
-            self.twitch_status_label.setText(
-                "<p style='color: #4CAF50;'><b>Logged in to Twitch</b></p>"
-            )
+            login = self.app.settings.twitch.login_name
+            if login:
+                self.twitch_status_label.setText(
+                    f"<p style='color: #4CAF50;'><b>Logged in to Twitch as {login}</b></p>"
+                )
+            else:
+                self.twitch_status_label.setText(
+                    "<p style='color: #4CAF50;'><b>Logged in to Twitch</b></p>"
+                )
             self.twitch_login_btn.hide()
             self.twitch_import_btn.show()
             self.twitch_logout_btn.show()
@@ -321,5 +327,6 @@ class AddChannelDialog(QDialog):
         """Handle Twitch logout."""
         self.app.settings.twitch.access_token = None
         self.app.settings.twitch.user_id = None
+        self.app.settings.twitch.login_name = ""
         self.app.save_settings()
         self._update_twitch_status()

@@ -63,6 +63,8 @@ class ChatMessage:
     hype_chat_level: str = ""
     reply_parent_display_name: str = ""  # Display name of replied-to user
     reply_parent_text: str = ""  # Text of replied-to message
+    is_whisper: bool = False  # Twitch whisper / DM
+    whisper_target: str | None = None  # Display name of whisper recipient (for sent whispers)
 
 
 @dataclass

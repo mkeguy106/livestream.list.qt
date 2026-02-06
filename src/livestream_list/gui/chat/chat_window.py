@@ -5,8 +5,11 @@ import logging
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QCompleter,
+    QDialog,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QSizePolicy,
@@ -46,6 +49,78 @@ def _create_dot_icon(color: QColor, size: int = 12) -> QIcon:
     painter.drawEllipse(1, 1, size - 2, size - 2)
     painter.end()
     return QIcon(pixmap)
+
+
+class _NewWhisperDialog(QDialog):
+    """Dialog for starting a new whisper conversation."""
+
+    def __init__(self, known_usernames: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("New Whisper")
+        self.setMinimumWidth(300)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        label = QLabel("Twitch username:")
+        layout.addWidget(label)
+
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("Enter a Twitch username...")
+        if known_usernames:
+            completer = QCompleter(known_usernames, self)
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            self._input.setCompleter(completer)
+        layout.addWidget(self._input)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        ok_btn = QPushButton("Open DM")
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+        theme = get_theme()
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme.window_bg};
+                color: {theme.text_primary};
+            }}
+            QLabel {{
+                color: {theme.text_primary};
+                font-size: 13px;
+            }}
+            QLineEdit {{
+                background-color: {theme.chat_input_bg};
+                border: 1px solid {theme.border};
+                border-radius: 4px;
+                padding: 6px 8px;
+                color: {theme.text_primary};
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border-color: {theme.accent};
+            }}
+            QPushButton {{
+                background-color: {theme.accent};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 16px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {theme.accent_hover};
+            }}
+        """)
+
+    def get_username(self) -> str:
+        return self._input.text()
 
 
 class _TabButton(QWidget):
@@ -515,6 +590,13 @@ class ChatWindow(QMainWindow):
         # Chat menu
         chat_menu = menu_bar.addMenu("Chat")
 
+        # New whisper action
+        whisper_action = chat_menu.addAction("New Whisper...")
+        whisper_action.setShortcut("Ctrl+W")
+        whisper_action.triggered.connect(self._show_new_whisper_dialog)
+
+        chat_menu.addSeparator()
+
         # Settings action
         settings_action = chat_menu.addAction("Settings...")
         settings_action.setShortcut("Ctrl+,")
@@ -639,6 +721,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
         self.chat_manager.chat_error.connect(self._on_chat_error)
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
+        self.chat_manager.whisper_received.connect(self._on_whisper_received)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -695,6 +778,7 @@ class ChatWindow(QMainWindow):
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
         widget.font_size_changed.connect(self._on_font_size_changed)
         widget.settings_changed.connect(self._on_settings_changed)
+        widget.whisper_requested.connect(self._on_whisper_request_from_chat)
 
         # Set shared image store and emote map on the widget
         widget.set_image_store(self.chat_manager.emote_cache)
@@ -752,9 +836,7 @@ class ChatWindow(QMainWindow):
             if idx >= 0 and idx != self._tab_widget.currentIndex():
                 from ...chat.models import ChatMessage as ChatMsg
 
-                has_mention = any(
-                    isinstance(m, ChatMsg) and m.is_mention for m in messages
-                )
+                has_mention = any(isinstance(m, ChatMsg) and m.is_mention for m in messages)
                 if has_mention:
                     self._tab_widget.tabBar().start_flash(idx)
 
@@ -863,7 +945,18 @@ class ChatWindow(QMainWindow):
         """Handle tab close button clicked."""
         widget = self._tab_widget.widget(index)
         if isinstance(widget, ChatWidget):
-            self.close_chat(widget.channel_key)
+            if widget._is_dm:
+                # DM tabs have no connection — just remove the widget
+                channel_key = widget.channel_key
+                self._widgets.pop(channel_key, None)
+                self._tab_widget.removeTab(index)
+                widget.deleteLater()
+                if self._tab_widget.count() == 0 and not self._popout_windows:
+                    self.save_window_state()
+                    self.hide()
+                    self.window_hidden.emit()
+            else:
+                self.close_chat(widget.channel_key)
 
     def _on_tab_context_menu(self, index: int, global_pos) -> None:
         """Show context menu on tab bar right-click."""
@@ -881,6 +974,10 @@ class ChatWindow(QMainWindow):
     def _on_auth_state_changed(self, _authenticated: bool) -> None:
         """Update all widgets when auth state changes (platform-aware)."""
         for widget in self._widgets.values():
+            if widget._is_dm:
+                # DM tabs are always Twitch
+                widget.set_authenticated(bool(self.settings.twitch.access_token))
+                continue
             platform = widget.livestream.channel.platform
             if platform == StreamPlatform.KICK:
                 auth = bool(self.settings.kick.access_token)
@@ -901,6 +998,213 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.set_socials(socials)
+
+    def _on_whisper_received(self, platform: str, message) -> None:
+        """Handle an incoming or sent whisper — create/focus a DM tab."""
+        from ...chat.models import ChatMessage as ChatMsg
+
+        if not isinstance(message, ChatMsg) or not message.is_whisper:
+            return
+
+        # Determine the DM partner
+        if message.whisper_target:
+            # Sent by us — partner is the target
+            partner_name = message.whisper_target
+            partner_id = ""  # We don't always have the ID for sent messages
+        else:
+            # Received — partner is the sender
+            partner_name = message.user.display_name
+            partner_id = message.user.id
+
+        dm_key = f"twitch:__dm__{partner_name.lower()}"
+
+        # Create DM tab if it doesn't exist (history is loaded from disk)
+        tab_just_created = dm_key not in self._widgets
+        if tab_just_created:
+            self._create_dm_tab(dm_key, partner_name, partner_id)
+
+        # Add the message — but skip if the tab was just created, since
+        # _create_dm_tab already loaded history which includes this message.
+        widget = self._widgets.get(dm_key)
+        if widget and not tab_just_created:
+            widget.add_messages([message])
+
+            # Flash tab if not current
+            idx = self._tab_widget.indexOf(widget)
+            if idx >= 0 and idx != self._tab_widget.currentIndex():
+                self._tab_widget.tabBar().start_flash(idx)
+
+        # Show window
+        self.show()
+        self.raise_()
+
+    def _create_dm_tab(self, dm_key: str, partner_name: str, partner_id: str) -> None:
+        """Create a new DM/whisper tab."""
+        # Create a minimal ChatWidget for DMs
+        # We use a fake Livestream-like setup — DM tabs don't have a real livestream
+        widget = ChatWidget(
+            channel_key=dm_key,
+            livestream=None,
+            settings=self.settings.chat.builtin,
+            authenticated=bool(self.settings.twitch.access_token),
+            is_dm=True,
+            dm_partner_name=partner_name,
+            dm_partner_id=partner_id,
+            parent=self._tab_widget,
+        )
+        widget.message_sent.connect(self._on_dm_message_sent)
+        widget.whisper_requested.connect(self._on_whisper_request_from_chat)
+
+        # Set shared image store and emote map
+        widget.set_image_store(self.chat_manager.emote_cache)
+        widget.set_gif_timer(self.chat_manager.gif_timer)
+        widget.apply_theme()
+
+        # Load whisper history from local storage
+        from ...chat.whisper_store import load_whispers
+
+        history = load_whispers(partner_name)
+        if history:
+            widget.add_messages(history)
+
+        self._widgets[dm_key] = widget
+
+        # Add tab with a distinct DM icon (purple dot + "DM:" prefix)
+        dm_color = QColor("#9146ff")  # Twitch purple
+        icon = _create_dot_icon(dm_color)
+        idx = self._tab_widget.addTab(widget, icon, f"DM: {partner_name}")
+        self._tab_widget.setCurrentIndex(idx)
+
+    def open_dm_tab(self, partner_name: str, partner_id: str) -> None:
+        """Open or focus a DM tab for a user (called from context menu)."""
+        dm_key = f"twitch:__dm__{partner_name.lower()}"
+
+        if dm_key in self._widgets:
+            widget = self._widgets[dm_key]
+            idx = self._tab_widget.indexOf(widget)
+            if idx >= 0:
+                self._tab_widget.setCurrentIndex(idx)
+        else:
+            self._create_dm_tab(dm_key, partner_name, partner_id)
+
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_dm_message_sent(self, channel_key: str, text: str) -> None:
+        """Handle a message sent from a DM tab — send as whisper."""
+        widget = self._widgets.get(channel_key)
+        if not widget or not widget._is_dm:
+            return
+
+        to_user_id = widget._dm_partner_id
+        to_display_name = widget._dm_partner_name
+
+        if not to_user_id:
+            # Try to resolve the user ID from the username
+            self._resolve_and_send_whisper(widget, to_display_name, text)
+            return
+
+        self.chat_manager.send_whisper(to_user_id, to_display_name, text)
+
+    def _resolve_and_send_whisper(self, widget: ChatWidget, username: str, text: str) -> None:
+        """Resolve a Twitch username to ID, then send the whisper."""
+        from PySide6.QtCore import QThread
+
+        class _ResolveWorker(QThread):
+            from PySide6.QtCore import Signal as _Signal
+
+            resolved = _Signal(str)  # user_id or ""
+            error = _Signal(str)
+
+            def __init__(self, login, token, client_id, parent=None):
+                super().__init__(parent)
+                self._login = login
+                self._token = token
+                self._client_id = client_id
+
+            def run(self):
+                import asyncio
+
+                import aiohttp
+
+                async def resolve():
+                    headers = {
+                        "Authorization": f"Bearer {self._token}",
+                        "Client-Id": self._client_id,
+                    }
+                    async with aiohttp.ClientSession(headers=headers) as session:
+                        async with session.get(
+                            "https://api.twitch.tv/helix/users",
+                            params={"login": self._login.lower()},
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                users = data.get("data", [])
+                                if users:
+                                    return users[0].get("id", "")
+                    return ""
+
+                loop = asyncio.new_event_loop()
+                try:
+                    uid = loop.run_until_complete(resolve())
+                    self.resolved.emit(uid)
+                except Exception as e:
+                    self.error.emit(str(e))
+                finally:
+                    loop.close()
+
+        token = self.settings.twitch.access_token
+        client_id = self.settings.twitch.client_id or "gnvljs5w28wkpz60vfug0z5rp5d66h"
+
+        worker = _ResolveWorker(username, token, client_id, parent=self)
+
+        def on_resolved(user_id):
+            if user_id:
+                widget._dm_partner_id = user_id
+                self.chat_manager.send_whisper(user_id, username, text)
+            else:
+                widget.show_error(f"Could not find Twitch user '{username}'")
+
+        def on_error(err):
+            widget.show_error(f"Failed to resolve user: {err}")
+
+        worker.resolved.connect(on_resolved)
+        worker.error.connect(on_error)
+        worker.start()
+
+    def _on_whisper_request_from_chat(self, partner_name: str, partner_id: str) -> None:
+        """Handle whisper request from a chat widget context menu."""
+        self.open_dm_tab(partner_name, partner_id)
+
+    def _show_new_whisper_dialog(self) -> None:
+        """Show a dialog to start a new whisper conversation."""
+        if not self.settings.twitch.access_token:
+            return
+
+        # Collect known usernames from all chat widgets for autocomplete
+        known_users: dict[str, str] = {}  # display_name -> user_id
+        for widget in self._widgets.values():
+            if widget._is_dm:
+                continue
+            for msg in widget._model._messages:
+                if msg.platform == StreamPlatform.TWITCH and msg.user.id != "self":
+                    known_users[msg.user.display_name] = msg.user.id
+
+        dialog = _NewWhisperDialog(sorted(known_users.keys()), parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            username = dialog.get_username().strip()
+            if not username:
+                return
+            # Look up user ID from known users (case-insensitive)
+            user_id = ""
+            for name, uid in known_users.items():
+                if name.lower() == username.lower():
+                    user_id = uid
+                    username = name  # Use proper casing
+                    break
+            self.open_dm_tab(username, user_id)
 
     def _on_popout_requested(self, channel_key: str) -> None:
         """Pop out a chat widget into its own window."""

@@ -107,6 +107,7 @@ class KickAuthFlow:
             # Exchange code for tokens
             success = await self._exchange_code(code, code_verifier, server.redirect_uri)
             if success:
+                await self._fetch_login_name()
                 logger.info("Kick OAuth login successful")
             return success
 
@@ -139,6 +140,28 @@ class KickAuthFlow:
                 self._settings.access_token = token_data.get("access_token", "")
                 self._settings.refresh_token = token_data.get("refresh_token", "")
                 return bool(self._settings.access_token)
+
+    async def _fetch_login_name(self) -> None:
+        """Fetch the authenticated user's username from Kick API."""
+        if not self._settings.access_token:
+            return
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://api.kick.com/public/v1/users",
+                    headers={"Authorization": f"Bearer {self._settings.access_token}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        users = data.get("data", [])
+                        if users:
+                            name = users[0].get("name", "")
+                            if name:
+                                self._settings.login_name = name
+                                logger.info(f"Kick authenticated as: {name}")
+        except Exception as e:
+            logger.warning(f"Failed to fetch Kick username: {e}")
 
     async def refresh_token(self) -> bool:
         """Refresh the access token using the refresh token."""

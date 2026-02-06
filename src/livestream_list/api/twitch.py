@@ -24,7 +24,7 @@ DEFAULT_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
 GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
 # OAuth settings
-OAUTH_SCOPES = "user:read:follows chat:read chat:edit user:read:emotes"
+OAUTH_SCOPES = "user:read:follows chat:read chat:edit user:read:emotes user:manage:whispers"
 
 
 class TwitchApiClient(BaseApiClient):
@@ -39,6 +39,7 @@ class TwitchApiClient(BaseApiClient):
         self.settings = settings
         self._user_cache: dict[str, dict[str, Any]] = {}
         self._current_user_id: str | None = None
+        self._display_name_resolved: bool = False
 
     @property
     def platform(self) -> StreamPlatform:
@@ -86,10 +87,38 @@ class TwitchApiClient(BaseApiClient):
                 if resp.status == 200:
                     data = await resp.json()
                     self._current_user_id = data.get("user_id")
+                    login = data.get("login", "")
+                    if login:
+                        current = self.settings.login_name
+                        if (
+                            not self._display_name_resolved
+                            or not current
+                            or current.lower() != login.lower()
+                        ):
+                            display = await self._fetch_display_name(self._current_user_id)
+                            self.settings.login_name = display or login
+                            self._display_name_resolved = True
                     return True
                 return False
         except aiohttp.ClientError:
             return False
+
+    async def _fetch_display_name(self, user_id: str) -> str | None:
+        """Fetch the properly-cased display_name for a user from /helix/users."""
+        try:
+            async with self.session.get(
+                f"{self.BASE_URL}/users",
+                headers=self._get_headers(),
+                params={"id": user_id},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    users = data.get("data", [])
+                    if users:
+                        return users[0].get("display_name")
+        except aiohttp.ClientError:
+            pass
+        return None
 
     async def authorize(self) -> bool:
         """
@@ -491,9 +520,7 @@ class TwitchApiClient(BaseApiClient):
         all_logins = [c.channel_id for c in channels]
 
         # Create all batch requests
-        batches = [
-            all_logins[i : i + batch_size] for i in range(0, len(all_logins), batch_size)
-        ]
+        batches = [all_logins[i : i + batch_size] for i in range(0, len(all_logins), batch_size)]
 
         # Execute all batches in parallel
         batch_results_list = await asyncio.gather(

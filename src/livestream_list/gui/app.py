@@ -44,9 +44,7 @@ class MainThreadWatchdog(QObject):
         delta = now - self._last_tick
         if delta > self._threshold_s:
             # Main thread was blocked - log with stack trace
-            logger.warning(
-                f"MAIN THREAD BLOCKED for {delta:.2f}s! Stack traces of all threads:"
-            )
+            logger.warning(f"MAIN THREAD BLOCKED for {delta:.2f}s! Stack traces of all threads:")
             for thread_id, frame in sys._current_frames().items():
                 thread_name = "MAIN" if thread_id == self._main_thread_id else f"Thread-{thread_id}"
                 stack = "".join(traceback.format_stack(frame))
@@ -246,6 +244,7 @@ class Application(QApplication):
         # Initialize chat manager
         self.chat_manager = ChatManager(self.settings, monitor=self.monitor, parent=self)
         self.refresh_complete.connect(self.chat_manager.on_refresh_complete)
+        self.chat_manager.whisper_received.connect(self._on_whisper_received)
 
         # Set up monitor callbacks
         self.monitor.on_stream_online(self._on_stream_online)
@@ -451,11 +450,8 @@ class Application(QApplication):
         if worker in self._active_workers:
             self._active_workers.remove(worker)
 
-    def open_builtin_chat(self, livestream):
-        """Open the built-in chat window for a livestream."""
-        if not self.chat_manager:
-            return
-
+    def _ensure_chat_window(self):
+        """Ensure the ChatWindow exists (lazy-init)."""
         if not self._chat_window:
             from .chat.chat_window import ChatWindow
 
@@ -464,8 +460,40 @@ class Application(QApplication):
                 self._chat_window.chat_settings_requested.connect(
                     self.main_window._show_chat_preferences
                 )
+        return self._chat_window
 
+    def open_builtin_chat(self, livestream):
+        """Open the built-in chat window for a livestream."""
+        if not self.chat_manager:
+            return
+        self._ensure_chat_window()
         self._chat_window.open_chat(livestream)
+
+    def _on_whisper_received(self, platform: str, message) -> None:
+        """Handle whisper at app level — show banner in main window."""
+        if not self.chat_manager:
+            return
+
+        from ..chat.models import ChatMessage as ChatMsg
+
+        # Only show banner for incoming whispers (not our own sent messages)
+        is_incoming = (
+            isinstance(message, ChatMsg) and message.is_whisper and not message.whisper_target
+        )
+        if is_incoming and self.main_window:
+            sender = message.user.display_name
+            sender_id = message.user.id
+            self.main_window.show_whisper_banner(sender, sender_id)
+
+    def open_new_whisper_dialog(self) -> None:
+        """Open the New Whisper dialog, ensuring chat window exists."""
+        if not self.chat_manager:
+            return
+        self._ensure_chat_window()
+        self._chat_window._show_new_whisper_dialog()
+        self._chat_window.show()
+        self._chat_window.raise_()
+        self._chat_window.activateWindow()
 
     def save_settings(self):
         """Save current settings."""

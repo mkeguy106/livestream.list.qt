@@ -545,7 +545,9 @@ class PreferencesDialog(QDialog):
         self.alt_row_even_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
         even_color_row.addWidget(self.alt_row_even_swatch)
         self.alt_row_even_edit = QLineEdit()
-        self.alt_row_even_edit.setText(self.app.settings.chat.builtin.dark_colors.alt_row_color_even)
+        self.alt_row_even_edit.setText(
+            self.app.settings.chat.builtin.dark_colors.alt_row_color_even
+        )
         self.alt_row_even_edit.setMaximumWidth(100)
         self.alt_row_even_edit.editingFinished.connect(self._on_chat_changed)
         self.alt_row_even_edit.textChanged.connect(
@@ -616,7 +618,9 @@ class PreferencesDialog(QDialog):
         self.tab_active_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
         active_row.addWidget(self.tab_active_swatch)
         self.tab_active_color_edit = QLineEdit()
-        self.tab_active_color_edit.setText(self.app.settings.chat.builtin.dark_colors.tab_active_color)
+        self.tab_active_color_edit.setText(
+            self.app.settings.chat.builtin.dark_colors.tab_active_color
+        )
         self.tab_active_color_edit.setMaximumWidth(100)
         self.tab_active_color_edit.editingFinished.connect(self._on_chat_changed)
         self.tab_active_color_edit.textChanged.connect(
@@ -643,7 +647,9 @@ class PreferencesDialog(QDialog):
         self.tab_inactive_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
         inactive_row.addWidget(self.tab_inactive_swatch)
         self.tab_inactive_color_edit = QLineEdit()
-        self.tab_inactive_color_edit.setText(self.app.settings.chat.builtin.dark_colors.tab_inactive_color)
+        self.tab_inactive_color_edit.setText(
+            self.app.settings.chat.builtin.dark_colors.tab_inactive_color
+        )
         self.tab_inactive_color_edit.setMaximumWidth(100)
         self.tab_inactive_color_edit.editingFinished.connect(self._on_chat_changed)
         self.tab_inactive_color_edit.textChanged.connect(
@@ -670,7 +676,9 @@ class PreferencesDialog(QDialog):
         self.mention_color_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
         mention_row.addWidget(self.mention_color_swatch)
         self.mention_color_edit = QLineEdit()
-        self.mention_color_edit.setText(self.app.settings.chat.builtin.dark_colors.mention_highlight_color)
+        self.mention_color_edit.setText(
+            self.app.settings.chat.builtin.dark_colors.mention_highlight_color
+        )
         self.mention_color_edit.setMaximumWidth(100)
         self.mention_color_edit.editingFinished.connect(self._on_chat_changed)
         self.mention_color_edit.textChanged.connect(
@@ -927,7 +935,11 @@ class PreferencesDialog(QDialog):
     def _update_twitch_status(self):
         """Update Twitch login status display."""
         if self.app.settings.twitch.access_token:
-            self.twitch_status.setText("Status: Logged in")
+            login = self.app.settings.twitch.login_name
+            if login:
+                self.twitch_status.setText(f"Status: Logged in as {login}")
+            else:
+                self.twitch_status.setText("Status: Logged in")
             self.twitch_status.setStyleSheet("color: green;")
         else:
             self.twitch_status.setText("Status: Not logged in")
@@ -945,7 +957,11 @@ class PreferencesDialog(QDialog):
         self.kick_login_btn.setVisible(not kick_logged_in)
         self.kick_logout_btn.setVisible(kick_logged_in)
         if kick_logged_in:
-            self.kick_status.setText("Status: Logged in")
+            login = self.app.settings.kick.login_name
+            if login:
+                self.kick_status.setText(f"Status: Logged in as {login}")
+            else:
+                self.kick_status.setText("Status: Logged in")
             self.kick_status.setStyleSheet("color: green;")
         else:
             self.kick_status.setText("Status: Not logged in")
@@ -1100,18 +1116,15 @@ class PreferencesDialog(QDialog):
         colors.alt_row_color_even = self.alt_row_even_edit.text().strip() or "#00000000"
         colors.alt_row_color_odd = self.alt_row_odd_edit.text().strip() or "#0fffffff"
         colors.tab_active_color = self.tab_active_color_edit.text().strip() or "#6441a5"
-        colors.tab_inactive_color = (
-            self.tab_inactive_color_edit.text().strip()
-            or ("#16213e" if is_dark else "#e0e0e8")
+        colors.tab_inactive_color = self.tab_inactive_color_edit.text().strip() or (
+            "#16213e" if is_dark else "#e0e0e8"
         )
-        colors.mention_highlight_color = (
-            self.mention_color_edit.text().strip() or "#33ff8800"
+        colors.mention_highlight_color = self.mention_color_edit.text().strip() or "#33ff8800"
+        colors.banner_bg_color = self.banner_bg_edit.text().strip() or (
+            "#16213e" if is_dark else "#e8e8f0"
         )
-        colors.banner_bg_color = (
-            self.banner_bg_edit.text().strip() or ("#16213e" if is_dark else "#e8e8f0")
-        )
-        colors.banner_text_color = (
-            self.banner_text_edit.text().strip() or ("#cccccc" if is_dark else "#333333")
+        colors.banner_text_color = self.banner_text_edit.text().strip() or (
+            "#cccccc" if is_dark else "#333333"
         )
         providers = []
         if self.emote_7tv_cb.isChecked():
@@ -1409,6 +1422,7 @@ class PreferencesDialog(QDialog):
         """Handle Twitch logout."""
         self.app.settings.twitch.access_token = None
         self.app.settings.twitch.user_id = None
+        self.app.settings.twitch.login_name = ""
         self.app.save_settings()
         self._update_twitch_status()
         self._update_account_buttons()
@@ -1452,6 +1466,7 @@ class PreferencesDialog(QDialog):
         """Handle Kick logout."""
         self.app.settings.kick.access_token = ""
         self.app.settings.kick.refresh_token = ""
+        self.app.settings.kick.login_name = ""
         self.app.save_settings()
         self._update_account_buttons()
         self.app.chat_manager.reconnect_kick()

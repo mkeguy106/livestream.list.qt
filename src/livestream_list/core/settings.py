@@ -23,6 +23,7 @@ class ThemeMode(str, _Enum):
     DARK = "dark"
     HIGH_CONTRAST = "high_contrast"
 
+
 APP_NAME = "livestream-list-qt"
 APP_AUTHOR = "livestream-list-qt"
 
@@ -78,6 +79,7 @@ class TwitchSettings:
     client_secret: str = ""
     access_token: str = ""
     refresh_token: str = ""
+    login_name: str = ""  # Twitch username of the logged-in account
 
 
 @dataclass
@@ -97,6 +99,7 @@ class KickSettings:
     client_secret: str = ""
     access_token: str = ""
     refresh_token: str = ""
+    login_name: str = ""  # Kick username of the logged-in account
 
 
 @dataclass
@@ -439,6 +442,7 @@ class Settings:
                 client_secret=t.get("client_secret", ""),
                 access_token=t.get("access_token", ""),
                 refresh_token=t.get("refresh_token", ""),
+                login_name=t.get("login_name", ""),
             )
 
         # YouTube
@@ -458,6 +462,7 @@ class Settings:
                 client_secret=k.get("client_secret", ""),
                 access_token=k.get("access_token", ""),
                 refresh_token=k.get("refresh_token", ""),
+                login_name=k.get("login_name", ""),
             )
 
         # Streamlink
@@ -561,9 +566,7 @@ class Settings:
                     mention_highlight_color=dark_data.get(
                         "mention_highlight_color", dark_defaults.mention_highlight_color
                     ),
-                    banner_bg_color=dark_data.get(
-                        "banner_bg_color", dark_defaults.banner_bg_color
-                    ),
+                    banner_bg_color=dark_data.get("banner_bg_color", dark_defaults.banner_bg_color),
                     banner_text_color=dark_data.get(
                         "banner_text_color", dark_defaults.banner_text_color
                     ),
@@ -585,9 +588,7 @@ class Settings:
                 mention_highlight_color=light_data.get(
                     "mention_highlight_color", light_defaults.mention_highlight_color
                 ),
-                banner_bg_color=light_data.get(
-                    "banner_bg_color", light_defaults.banner_bg_color
-                ),
+                banner_bg_color=light_data.get("banner_bg_color", light_defaults.banner_bg_color),
                 banner_text_color=light_data.get(
                     "banner_text_color", light_defaults.banner_text_color
                 ),
@@ -688,6 +689,7 @@ class Settings:
             "twitch": {
                 "client_id": self.twitch.client_id,
                 "client_secret": self.twitch.client_secret,
+                "login_name": self.twitch.login_name,
                 **(
                     {
                         "access_token": self.twitch.access_token,
@@ -705,6 +707,7 @@ class Settings:
             "kick": {
                 "client_id": self.kick.client_id,
                 "client_secret": self.kick.client_secret,
+                "login_name": self.kick.login_name,
                 **(
                     {
                         "access_token": self.kick.access_token,

@@ -6,8 +6,8 @@ import threading
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QPainter, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -51,6 +51,125 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _WhisperBanner(QWidget):
+    """Banner shown when a whisper is received — click to open chat.
+
+    Flashes between two colors for 60 seconds, then stays solid.
+    """
+
+    open_clicked = Signal(str, str)  # sender_name, sender_id
+
+    _COLOR_A = "#5b21b6"  # Muted purple
+    _COLOR_B = "#7c3aed"  # Lighter purple
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._sender_name = ""
+        self._sender_id = ""
+        self._flash_on = False
+
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setInterval(500)  # Toggle every 500ms = 1 flash/sec
+        self._flash_timer.timeout.connect(self._toggle_flash)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 32, 6)  # Right padding for close btn
+        layout.setSpacing(8)
+
+        self._label = QLabel()
+        self._label.setStyleSheet(
+            "color: #ffffff; background: transparent; font-weight: bold;"
+        )
+        layout.addWidget(self._label, 1)
+
+        self._open_btn = QPushButton("Open Chat")
+        self._open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._open_btn.clicked.connect(self._on_open)
+        self._open_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(255, 255, 255, 0.2);
+                color: #ffffff;
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: rgba(255, 255, 255, 0.4);
+            }
+        """)
+        layout.addWidget(self._open_btn)
+
+        # Close button as overlay (not in layout)
+        self._close_btn = QPushButton("\u00d7", self)
+        self._close_btn.setFixedSize(20, 20)
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.clicked.connect(self._dismiss)
+        self._close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(0, 0, 0, 0.2);
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 0;
+            }
+            QPushButton:hover {
+                background-color: rgba(0, 0, 0, 0.4);
+            }
+        """)
+        self._close_btn.raise_()
+
+        self._set_bg(self._COLOR_A)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Enable stylesheet backgrounds on custom QWidget subclass."""
+        from PySide6.QtWidgets import QStyle, QStyleOption
+
+        opt = QStyleOption()
+        opt.initFrom(self)
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PrimitiveElement.PE_Widget, opt, painter, self)
+
+    def _set_bg(self, bg_color: str) -> None:
+        """Update only the banner background color."""
+        self.setStyleSheet(f"_WhisperBanner {{ background-color: {bg_color}; }}")
+
+    def set_whisper(self, sender_name: str, sender_id: str) -> None:
+        """Update the banner with the latest whisper sender and start flashing."""
+        self._sender_name = sender_name
+        self._sender_id = sender_id
+        self._label.setText(f"Whisper from {sender_name}")
+        self._flash_on = False
+        self._set_bg(self._COLOR_A)
+        self._flash_timer.start()
+        QTimer.singleShot(60000, self._stop_flash)
+        self.show()
+
+    def _toggle_flash(self) -> None:
+        self._flash_on = not self._flash_on
+        self._set_bg(self._COLOR_B if self._flash_on else self._COLOR_A)
+
+    def _stop_flash(self) -> None:
+        self._flash_timer.stop()
+        self._set_bg(self._COLOR_A)
+
+    def _on_open(self):
+        self._flash_timer.stop()
+        self.open_clicked.emit(self._sender_name, self._sender_id)
+        self.hide()
+
+    def _dismiss(self):
+        self._flash_timer.stop()
+        self.hide()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        cs = self._close_btn.width()
+        self._close_btn.move(self.width() - cs - 6, (self.height() - cs) // 2)
+
+
 class MainWindow(QMainWindow):
     """Main application window."""
 
@@ -88,6 +207,7 @@ class MainWindow(QMainWindow):
         # Restore window position if saved (validate against current screens)
         if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
             from PySide6.QtGui import QGuiApplication
+
             target_pos = (self.app.settings.window.x, self.app.settings.window.y)
             for screen in QGuiApplication.screens():
                 geom = screen.availableGeometry()
@@ -107,6 +227,12 @@ class MainWindow(QMainWindow):
 
         # Toolbar (includes all buttons, filters, and sort)
         self._create_toolbar()
+
+        # Whisper notification banner (hidden by default)
+        self._whisper_banner = _WhisperBanner(parent=central)
+        self._whisper_banner.open_clicked.connect(self._on_whisper_banner_clicked)
+        self._whisper_banner.hide()
+        layout.addWidget(self._whisper_banner)
 
         # Stacked widget for different views
         self.stack = QStackedWidget()
@@ -232,8 +358,6 @@ class MainWindow(QMainWindow):
         self.live_count_label.setContentsMargins(0, 0, 6, 0)
         self.status_bar.addPermanentWidget(self.live_count_label)
 
-
-
     def _create_menu_bar(self):
         """Create the menu bar."""
         menubar = self.menuBar()
@@ -258,6 +382,18 @@ class MainWindow(QMainWindow):
         quit_action = file_menu.addAction("&Quit")
         quit_action.setShortcut("Ctrl+Q")
         quit_action.triggered.connect(self._quit_app)
+
+        # Chat menu
+        chat_menu = menubar.addMenu("&Chat")
+
+        whisper_action = chat_menu.addAction("New &Whisper...")
+        whisper_action.setShortcut("Ctrl+W")
+        whisper_action.triggered.connect(self._on_new_whisper)
+
+        chat_menu.addSeparator()
+
+        chat_settings_action = chat_menu.addAction("&Settings...")
+        chat_settings_action.triggered.connect(self._show_chat_preferences)
 
         # Edit menu
         edit_menu = menubar.addMenu("&Edit")
@@ -1010,6 +1146,22 @@ class MainWindow(QMainWindow):
             self.app.monitor.trash_channels(selected_keys)
             self._exit_selection_mode()
             self.refresh_stream_list()
+
+    def show_whisper_banner(self, sender_name: str, sender_id: str) -> None:
+        """Show the whisper notification banner."""
+        self._whisper_banner.set_whisper(sender_name, sender_id)
+
+    def _on_whisper_banner_clicked(self, sender_name: str, sender_id: str) -> None:
+        """Open the DM tab for the whisper sender."""
+        self.app._ensure_chat_window()
+        self.app._chat_window.open_dm_tab(sender_name, sender_id)
+        self.app._chat_window.show()
+        self.app._chat_window.raise_()
+        self.app._chat_window.activateWindow()
+
+    def _on_new_whisper(self):
+        """Open the New Whisper dialog via the app."""
+        self.app.open_new_whisper_dialog()
 
     def _show_about(self):
         """Show about dialog."""

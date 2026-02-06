@@ -238,6 +238,7 @@ class TwitchChatConnection(BaseChatConnection):
                         scopes = data.get("scopes", [])
                         if login:
                             self._can_send = "chat:edit" in scopes
+                            self._validated_login = login
                             logger.info(
                                 f"Twitch token validated: {login} "
                                 f"(scopes: {scopes}, can_send: {self._can_send})"
@@ -551,6 +552,74 @@ class TwitchChatConnection(BaseChatConnection):
         )
 
         self._message_batch.append(message)
+
+    async def send_whisper(self, to_user_id: str, message: str) -> bool:
+        """Send a whisper via Twitch Helix API.
+
+        Requires user:manage:whispers scope.
+        Rate limit: 3/sec, 100 unique recipients/day.
+        """
+        if not self._oauth_token or not self._nick:
+            self._emit_error("Cannot send whisper: not authenticated")
+            return False
+
+        # We need our own user ID — resolve it from the validated token
+        from_user_id = await self._get_own_user_id()
+        if not from_user_id:
+            self._emit_error("Cannot send whisper: unable to resolve own user ID")
+            return False
+
+        if from_user_id == to_user_id:
+            self._emit_error(
+                f"Cannot whisper yourself (both IDs are {from_user_id}). "
+                "Check which Twitch account you're logged in as."
+            )
+            return False
+
+        logger.info(f"Sending whisper: from_user_id={from_user_id} to_user_id={to_user_id}")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    "https://api.twitch.tv/helix/whispers",
+                    params={
+                        "from_user_id": from_user_id,
+                        "to_user_id": to_user_id,
+                    },
+                    json={"message": message},
+                    headers={
+                        "Authorization": f"Bearer {self._oauth_token}",
+                        "Client-Id": "gnvljs5w28wkpz60vfug0z5rp5d66h",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 204:
+                        return True
+                    body = await resp.text()
+                    self._emit_error(f"Whisper failed (HTTP {resp.status}): {body}")
+                    return False
+        except Exception as e:
+            self._emit_error(f"Whisper send error: {e}")
+            return False
+
+    async def _get_own_user_id(self) -> str | None:
+        """Get our own numeric user ID from the OAuth token."""
+        if not self._oauth_token:
+            return None
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://id.twitch.tv/oauth2/validate",
+                    headers={"Authorization": f"OAuth {self._oauth_token}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data.get("user_id")
+        except Exception as e:
+            logger.warning(f"Failed to get own user ID: {e}")
+        return None
 
     def _flush_batch(self) -> None:
         """Emit batched messages and reset."""

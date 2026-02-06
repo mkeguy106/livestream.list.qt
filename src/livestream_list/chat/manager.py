@@ -191,9 +191,7 @@ class EmoteFetchWorker(QThread):
                 client_id=self.client_id,
             )
             try:
-                channel_emotes = await twitch_provider.get_channel_emotes(
-                    self.platform, channel_id
-                )
+                channel_emotes = await twitch_provider.get_channel_emotes(self.platform, channel_id)
                 all_emotes.extend(channel_emotes)
                 logger.debug(f"Fetched {len(channel_emotes)} channel emotes from twitch")
             except Exception as e:
@@ -328,9 +326,7 @@ class SocialsFetchWorker(QThread):
 
     socials_fetched = Signal(str, dict)  # channel_key, {platform: url}
 
-    def __init__(
-        self, channel_key: str, channel_id: str, platform: StreamPlatform, parent=None
-    ):
+    def __init__(self, channel_key: str, channel_id: str, platform: StreamPlatform, parent=None):
         super().__init__(parent)
         self.channel_key = channel_key
         self.channel_id = channel_id
@@ -448,9 +444,7 @@ class SocialsFetchWorker(QThread):
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     logger.debug(f"YouTube about page status: {resp.status}")
                     if resp.status != 200:
                         return socials
@@ -459,9 +453,7 @@ class SocialsFetchWorker(QThread):
                     logger.debug(f"YouTube HTML length: {len(html)}")
 
                     # Extract ytInitialData JSON
-                    match = re.search(
-                        r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL
-                    )
+                    match = re.search(r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL)
                     if not match:
                         logger.warning("Could not find ytInitialData in YouTube page")
                         return socials
@@ -499,11 +491,10 @@ class SocialsFetchWorker(QThread):
                                     logger.debug("Found channelAboutFullMetadataRenderer")
                                     links = about.get("primaryLinks", [])
                                     for link in links:
-                                        title = (
-                                            link.get("title", {}).get("simpleText", "")
-                                            or link.get("title", {}).get("runs", [{}])[0].get(
-                                                "text", ""
-                                            )
+                                        title = link.get("title", {}).get(
+                                            "simpleText", ""
+                                        ) or link.get("title", {}).get("runs", [{}])[0].get(
+                                            "text", ""
                                         )
                                         nav = link.get("navigationEndpoint", {})
                                         url_ep = nav.get("urlEndpoint", {})
@@ -548,9 +539,7 @@ class SocialsFetchWorker(QThread):
                                 actual_url = ""
                                 runs = link_data.get("commandRuns", [])
                                 for run in runs:
-                                    innertube = (
-                                        run.get("onTap", {}).get("innertubeCommand", {})
-                                    )
+                                    innertube = run.get("onTap", {}).get("innertubeCommand", {})
                                     web_cmd = innertube.get("commandMetadata", {}).get(
                                         "webCommandMetadata", {}
                                     )
@@ -582,9 +571,7 @@ class SocialsFetchWorker(QThread):
                                 if not final_url:
                                     continue
 
-                                logger.debug(
-                                    f"YouTube link: {title} -> {final_url}"
-                                )
+                                logger.debug(f"YouTube link: {title} -> {final_url}")
 
                                 # Detect social from URL or title
                                 name = self._detect_social_from_url(final_url)
@@ -636,9 +623,7 @@ class SocialsFetchWorker(QThread):
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                     if resp.status != 200:
                         return socials
 
@@ -835,6 +820,227 @@ class UserEmoteFetchWorker(QThread):
             return []
 
 
+EVENTSUB_WS_URL = "wss://eventsub.wss.twitch.tv/ws"
+
+
+class WhisperEventSubWorker(QThread):
+    """Worker thread that connects to Twitch EventSub WebSocket for whisper delivery.
+
+    Subscribes to user.whisper.message and emits incoming whispers as ChatMessage.
+    """
+
+    whisper_received = Signal(object)  # ChatMessage
+    authenticated_as = Signal(str)  # login name of the authenticated user
+
+    def __init__(self, oauth_token: str, client_id: str, parent=None):
+        super().__init__(parent)
+        self.oauth_token = oauth_token
+        self.client_id = client_id
+        self._should_stop = False
+
+    def stop(self):
+        self._should_stop = True
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run_eventsub())
+        except Exception as e:
+            if not self._should_stop:
+                logger.error(f"WhisperEventSub error: {e}")
+        finally:
+            loop.close()
+
+    async def _run_eventsub(self):
+        import aiohttp
+
+        # Resolve our own user ID first
+        user_id = await self._get_user_id()
+        if not user_id:
+            logger.warning("WhisperEventSub: could not resolve user ID, aborting")
+            return
+
+        async with aiohttp.ClientSession() as session:
+            while not self._should_stop:
+                try:
+                    await self._connect_and_listen(session, user_id)
+                except Exception as e:
+                    if self._should_stop:
+                        return
+                    logger.warning(f"WhisperEventSub connection error: {e}, reconnecting in 5s")
+                    await asyncio.sleep(5)
+
+    async def _connect_and_listen(self, session, user_id: str):
+        import aiohttp
+
+        async with session.ws_connect(
+            EVENTSUB_WS_URL, timeout=aiohttp.ClientTimeout(total=30)
+        ) as ws:
+            # Wait for welcome message (must arrive within 10s)
+            welcome = await asyncio.wait_for(ws.receive_json(), timeout=15)
+            if welcome.get("metadata", {}).get("message_type") != "session_welcome":
+                logger.warning(f"WhisperEventSub: unexpected first message: {welcome}")
+                return
+
+            session_id = welcome["payload"]["session"]["id"]
+            keepalive_timeout = welcome["payload"]["session"].get("keepalive_timeout_seconds", 30)
+            logger.info(f"WhisperEventSub connected, session={session_id}")
+
+            # Subscribe to user.whisper.message
+            ok = await self._subscribe(session, session_id, user_id)
+            if not ok:
+                return
+
+            # Listen for events
+            while not self._should_stop:
+                try:
+                    msg = await asyncio.wait_for(ws.receive(), timeout=keepalive_timeout + 10)
+                except asyncio.TimeoutError:
+                    logger.warning("WhisperEventSub: keepalive timeout, reconnecting")
+                    return
+
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    import json
+
+                    data = json.loads(msg.data)
+                    msg_type = data.get("metadata", {}).get("message_type", "")
+
+                    if msg_type == "notification":
+                        self._handle_notification(data)
+                    elif msg_type == "session_keepalive":
+                        pass  # Expected, connection is healthy
+                    elif msg_type == "session_reconnect":
+                        # Server wants us to reconnect to a new URL
+                        logger.info("WhisperEventSub: reconnect requested")
+                        return
+                    elif msg_type == "revocation":
+                        reason = (
+                            data.get("payload", {}).get("subscription", {}).get("status", "unknown")
+                        )
+                        logger.warning(f"WhisperEventSub: subscription revoked: {reason}")
+                        return
+
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    return
+
+    async def _subscribe(self, session, session_id: str, user_id: str) -> bool:
+        """Subscribe to user.whisper.message via Helix API."""
+        import aiohttp
+
+        headers = {
+            "Authorization": f"Bearer {self.oauth_token}",
+            "Client-Id": self.client_id,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "type": "user.whisper.message",
+            "version": "1",
+            "condition": {"user_id": user_id},
+            "transport": {"method": "websocket", "session_id": session_id},
+        }
+        async with session.post(
+            "https://api.twitch.tv/helix/eventsub/subscriptions",
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status in (200, 202):
+                logger.info("WhisperEventSub: subscribed to user.whisper.message")
+                return True
+            body = await resp.text()
+            logger.error(f"WhisperEventSub: subscribe failed (HTTP {resp.status}): {body}")
+            return False
+
+    def _handle_notification(self, data: dict) -> None:
+        """Parse an EventSub whisper notification into a ChatMessage."""
+        logger.info(f"WhisperEventSub: received notification: {data.get('metadata', {})}")
+        event = data.get("payload", {}).get("event", {})
+        whisper = event.get("whisper", {})
+
+        from_user_id = event.get("from_user_id", "")
+        from_user_name = event.get("from_user_name", "")
+        from_user_login = event.get("from_user_login", "")
+        text = whisper.get("text", "")
+        whisper_id = event.get("whisper_id", str(uuid.uuid4()))
+        logger.info(
+            f"WhisperEventSub: whisper from {from_user_name} ({from_user_id}): {text[:50]!r}"
+        )
+
+        user = ChatUser(
+            id=from_user_id,
+            name=from_user_login,
+            display_name=from_user_name or from_user_login,
+            platform=StreamPlatform.TWITCH,
+        )
+
+        message = ChatMessage(
+            id=whisper_id,
+            user=user,
+            text=text,
+            timestamp=datetime.now(timezone.utc),
+            platform=StreamPlatform.TWITCH,
+            is_whisper=True,
+        )
+
+        self.whisper_received.emit(message)
+
+    async def _get_user_id(self) -> str | None:
+        import aiohttp
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://id.twitch.tv/oauth2/validate",
+                    headers={"Authorization": f"OAuth {self.oauth_token}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        user_id = data.get("user_id")
+                        login = data.get("login", "?")
+                        logger.info(
+                            f"WhisperEventSub: authenticated as {login} (user_id={user_id})"
+                        )
+                        # Fetch properly-cased display_name from /helix/users
+                        display_name = login
+                        if user_id:
+                            display_name = await self._fetch_display_name(
+                                session, user_id
+                            ) or login
+                        if display_name and display_name != "?":
+                            self.authenticated_as.emit(display_name)
+                        return user_id
+        except Exception as e:
+            logger.warning(f"WhisperEventSub: failed to get user ID: {e}")
+        return None
+
+    async def _fetch_display_name(self, session, user_id: str) -> str | None:
+        """Fetch properly-cased display_name from /helix/users."""
+        import aiohttp
+
+        try:
+            async with session.get(
+                f"https://api.twitch.tv/helix/users?id={user_id}",
+                headers={
+                    "Authorization": f"Bearer {self.oauth_token}",
+                    "Client-Id": self.client_id,
+                },
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    users = data.get("data", [])
+                    if users:
+                        return users[0].get("display_name")
+        except aiohttp.ClientError:
+            pass
+        return None
+
+
 class ChatManager(QObject):
     """Manages chat connections and coordinates with the UI.
 
@@ -863,6 +1069,8 @@ class ChatManager(QObject):
     chat_error = Signal(str, str)
     # Emitted when channel socials are fetched (channel_key, {platform: url})
     socials_fetched = Signal(str, dict)
+    # Emitted when a whisper/DM is received (platform_str, ChatMessage)
+    whisper_received = Signal(str, object)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -925,9 +1133,13 @@ class ChatManager(QObject):
         self._message_flush_timer.setInterval(MESSAGE_FLUSH_INTERVAL_MS)
         self._message_flush_timer.timeout.connect(self._flush_pending_messages)
 
+        # Whisper EventSub worker (receives Twitch whispers via EventSub WebSocket)
+        self._whisper_worker: WhisperEventSubWorker | None = None
+
         # Kick off global/user emote fetch in background
         self._ensure_global_emotes()
         self._ensure_user_emotes()
+        self._ensure_whisper_listener()
 
     @property
     def emote_cache(self) -> EmoteCache:
@@ -1054,6 +1266,9 @@ class ChatManager(QObject):
             self._start_connection(key, livestream)
 
         self._ensure_user_emotes(force=True)
+        # Restart whisper listener with new token
+        self._stop_whisper_listener()
+        self._ensure_whisper_listener()
         self.auth_state_changed.emit(bool(self.settings.twitch.access_token))
 
     def reconnect_kick(self) -> None:
@@ -1290,12 +1505,187 @@ class ChatManager(QObject):
                 # Route through _on_messages_received for emote matching
                 self._on_messages_received(channel_key, [local_msg])
 
+    def _on_twitch_login_detected(self, login_name: str) -> None:
+        """Store the Twitch login name when detected from token validation."""
+        if login_name and login_name != self.settings.twitch.login_name:
+            self.settings.twitch.login_name = login_name
+            logger.info(f"Twitch login name stored: {login_name}")
+
+    def _on_eventsub_whisper(self, message: ChatMessage) -> None:
+        """Handle incoming whisper from EventSub worker — forward to UI."""
+        logger.info(
+            f"Whisper received from {message.user.display_name} "
+            f"(id={message.user.id}): {message.text[:50]}"
+        )
+        # Persist to local storage
+        from .whisper_store import save_whisper
+
+        save_whisper(message.user.display_name, message)
+        # Find any active Twitch channel_key for emote/badge processing
+        twitch_key = ""
+        for key, ls in self._livestreams.items():
+            if ls.channel.platform == StreamPlatform.TWITCH:
+                twitch_key = key
+                break
+        if twitch_key:
+            self._process_messages(twitch_key, [message])
+        self.whisper_received.emit("twitch", message)
+
+    def send_whisper(self, to_user_id: str, to_display_name: str, text: str) -> None:
+        """Send a Twitch whisper.
+
+        Uses an active Twitch connection if available, otherwise sends
+        directly via a background thread using the stored token.
+        """
+        logger.info(f"send_whisper: to={to_display_name} (id={to_user_id}), text={text[:50]!r}")
+
+        # Try to use an active Twitch connection (has event loop already)
+        connection = None
+        worker = None
+        for key, conn in self._connections.items():
+            livestream = self._livestreams.get(key)
+            if livestream and livestream.channel.platform == StreamPlatform.TWITCH:
+                connection = conn
+                worker = self._workers.get(key)
+                break
+
+        if connection and worker and worker._loop:
+            asyncio.run_coroutine_threadsafe(
+                connection.send_whisper(to_user_id, text), worker._loop
+            )
+        elif self.settings.twitch.access_token:
+            # No active chat connection — send directly via background thread
+            self._send_whisper_standalone(to_user_id, text)
+        else:
+            logger.warning("Cannot send whisper: not logged in to Twitch")
+            return
+
+        # Local echo for sent whisper
+        display_name = self.settings.twitch.login_name or "You"
+        if connection:
+            display_name = getattr(connection, "_display_name", "") or getattr(
+                connection, "_nick", display_name
+            )
+        local_msg = ChatMessage(
+            id=str(uuid.uuid4()),
+            user=ChatUser(
+                id="self",
+                name=display_name.lower(),
+                display_name=display_name,
+                platform=StreamPlatform.TWITCH,
+            ),
+            text=text,
+            timestamp=datetime.now(timezone.utc),
+            platform=StreamPlatform.TWITCH,
+            is_whisper=True,
+            whisper_target=to_display_name,
+        )
+        # Persist to local storage
+        from .whisper_store import save_whisper
+
+        save_whisper(to_display_name, local_msg)
+        self.whisper_received.emit("twitch", local_msg)
+
+    def _send_whisper_standalone(self, to_user_id: str, text: str) -> None:
+        """Send a whisper via Helix API in a background thread (no active connection needed)."""
+        token = self.settings.twitch.access_token
+        client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
+
+        class _WhisperSendWorker(QThread):
+            error = Signal(str)
+
+            def __init__(self, token, client_id, to_user_id, text, parent=None):
+                super().__init__(parent)
+                self._token = token
+                self._client_id = client_id
+                self._to_user_id = to_user_id
+                self._text = text
+
+            def run(self):
+                import aiohttp
+
+                async def do_send():
+                    # Resolve own user ID
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(
+                            "https://id.twitch.tv/oauth2/validate",
+                            headers={"Authorization": f"OAuth {self._token}"},
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.status != 200:
+                                self.error.emit("Token validation failed")
+                                return
+                            data = await resp.json()
+                            from_user_id = data.get("user_id", "")
+
+                        if from_user_id == self._to_user_id:
+                            self.error.emit("Cannot whisper yourself")
+                            return
+
+                        logger.info(
+                            f"Standalone whisper: from={from_user_id} to={self._to_user_id}"
+                        )
+                        async with session.post(
+                            "https://api.twitch.tv/helix/whispers",
+                            params={
+                                "from_user_id": from_user_id,
+                                "to_user_id": self._to_user_id,
+                            },
+                            json={"message": self._text},
+                            headers={
+                                "Authorization": f"Bearer {self._token}",
+                                "Client-Id": self._client_id,
+                                "Content-Type": "application/json",
+                            },
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.status != 204:
+                                body = await resp.text()
+                                self.error.emit(f"Whisper failed (HTTP {resp.status}): {body}")
+
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(do_send())
+                except Exception as e:
+                    self.error.emit(str(e))
+                finally:
+                    loop.close()
+
+        worker = _WhisperSendWorker(token, client_id, to_user_id, text, parent=self)
+        worker.error.connect(lambda msg: logger.error(f"Standalone whisper error: {msg}"))
+        worker.start()
+
+    def _ensure_whisper_listener(self) -> None:
+        """Start the EventSub whisper listener if Twitch auth is available."""
+        if not self.settings.twitch.access_token:
+            return
+        if self._whisper_worker and self._whisper_worker.isRunning():
+            return
+        client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
+        self._whisper_worker = WhisperEventSubWorker(
+            oauth_token=self.settings.twitch.access_token,
+            client_id=client_id,
+            parent=self,
+        )
+        self._whisper_worker.whisper_received.connect(self._on_eventsub_whisper)
+        self._whisper_worker.authenticated_as.connect(self._on_twitch_login_detected)
+        self._whisper_worker.start()
+        logger.info("Started WhisperEventSub listener")
+
+    def _stop_whisper_listener(self) -> None:
+        """Stop the EventSub whisper listener."""
+        if self._whisper_worker:
+            self._whisper_worker.stop()
+            self._whisper_worker.wait(2000)
+            self._whisper_worker = None
+
     def disconnect_all(self) -> None:
         """Disconnect all active chat connections."""
         for key in list(self._workers.keys()):
             self.close_chat(key)
         self._prefetch_timer.stop()
         self._message_flush_timer.stop()
+        self._stop_whisper_listener()
 
         # Clean up global emote/badge state when all chats are closed
         # This prevents unbounded memory growth in long-running sessions
@@ -1571,8 +1961,7 @@ class ChatManager(QObject):
         resolved_map = self._rebuild_emote_map(channel_key)
         self._channel_emotes_fetched_at[channel_key] = time.monotonic()
         logger.info(
-            f"Loaded {len(emotes)} emotes for {channel_key}, "
-            f"emote map size: {len(resolved_map)}"
+            f"Loaded {len(emotes)} emotes for {channel_key}, emote map size: {len(resolved_map)}"
         )
         if short_emotes:
             logger.info(f"Short emotes (<=4 chars): {short_emotes}")
@@ -1603,8 +1992,7 @@ class ChatManager(QObject):
             added = new_ids - old_ids
             removed = old_ids - new_ids
             logger.info(
-                f"User emotes changed: +{len(added)} -{len(removed)} "
-                f"(total: {len(new_ids)})"
+                f"User emotes changed: +{len(added)} -{len(removed)} (total: {len(new_ids)})"
             )
 
             self._user_emotes = {e.name: e for e in new_list}
@@ -1679,8 +2067,10 @@ class ChatManager(QObject):
         if self._global_emote_worker and self._global_emote_worker.isRunning():
             return
         now = time.monotonic()
-        if not force and self._global_common_emotes and (
-            now - self._global_emotes_fetched_at < GLOBAL_EMOTE_TTL
+        if (
+            not force
+            and self._global_common_emotes
+            and (now - self._global_emotes_fetched_at < GLOBAL_EMOTE_TTL)
         ):
             return
         self._global_emote_worker = GlobalEmoteFetchWorker(
