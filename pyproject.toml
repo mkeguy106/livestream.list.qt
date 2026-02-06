@@ -36,6 +36,7 @@ dependencies = [
     "appdirs>=1.4.4",
     "yt-dlp>=2024.0.0",  # YouTube stream detection (Unlicense)
     "pytchat>=0.5.5",  # YouTube live chat
+    "pyspellchecker>=0.7.0",  # Spellcheck for chat input
 ]
 
 [project.optional-dependencies]

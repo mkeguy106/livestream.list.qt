@@ -6,7 +6,18 @@ import time
 import webbrowser
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QHelpEvent, QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QHelpEvent,
+    QKeyEvent,
+    QKeySequence,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QShortcut,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -15,6 +26,8 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListView,
     QPushButton,
+    QStyle,
+    QStyleOptionFrame,
     QStyleOptionViewItem,
     QToolTip,
     QVBoxLayout,
@@ -31,6 +44,7 @@ from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
 from .message_model import ChatMessageModel, MessageRole
 from .search_mixin import ChatSearchMixin
+from .spell_completer import SpellCompleter
 from .user_popup import UserContextMenu
 
 logger = logging.getLogger(__name__)
@@ -152,22 +166,59 @@ class DismissibleBanner(QWidget):
 
 
 class ChatInput(QLineEdit):
-    """Custom QLineEdit that routes key events to completers."""
+    """Custom QLineEdit that routes key events to completers.
+
+    Supports spellcheck with red wavy underlines drawn via paintEvent.
+    """
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._completers: list = []
+        self._spell_checker = None
+        self._spell_completer = None
+        self._misspelled_ranges: list[tuple[int, int]] = []
+        self._check_timer = QTimer(self)
+        self._check_timer.setSingleShot(True)
+        self._check_timer.setInterval(150)
+        self._check_timer.timeout.connect(self._run_check)
 
     def add_completer(self, completer) -> None:
         """Add a completer to the chain."""
         self._completers.append(completer)
+
+    def set_spell_checker(self, checker, completer=None) -> None:
+        """Set the spell checker and connect the debounced recheck."""
+        self._spell_checker = checker
+        self._spell_completer = completer
+        self.textChanged.connect(self._schedule_check)
+
+    def set_spellcheck_enabled(self, enabled: bool) -> None:
+        """Enable or disable spellcheck rendering."""
+        if not enabled:
+            self._misspelled_ranges.clear()
+            self.update()
+        else:
+            self._run_check()
+
+    def _schedule_check(self) -> None:
+        """Schedule a debounced spellcheck."""
+        if self._spell_checker:
+            self._check_timer.start()
+
+    def _run_check(self) -> None:
+        """Run spellcheck on the current text and cache results."""
+        if not self._spell_checker:
+            return
+        text = self.text()
+        results = self._spell_checker.check_text(text)
+        self._misspelled_ranges = [(s, e) for s, e, _w in results]
+        self.update()
 
     def event(self, event: QEvent) -> bool:  # noqa: N802
         """Intercept Tab key before Qt's focus navigation handles it."""
         if event.type() == QEvent.Type.KeyPress:
             key_event = event
             if key_event.key() == Qt.Key.Key_Tab:
-                # Check if any completer wants to handle Tab
                 for completer in self._completers:
                     if completer.handle_key_press(key_event.key()):
                         return True
@@ -175,10 +226,97 @@ class ChatInput(QLineEdit):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Route navigation keys to completers first."""
+        # Dismiss spell popup on Space (user moved on to next word)
+        if event.key() == Qt.Key.Key_Space and self._spell_completer:
+            self._spell_completer._dismiss()
         for completer in self._completers:
             if completer.handle_key_press(event.key()):
                 return
         super().keyPressEvent(event)
+
+    def _text_content_rect(self):
+        """Return the rect where text is actually rendered inside the QLineEdit."""
+        opt = QStyleOptionFrame()
+        self.initStyleOption(opt)
+        return self.style().subElementRect(QStyle.SubElement.SE_LineEditContents, opt, self)
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        """Draw the default text, then overlay wavy red underlines."""
+        super().paintEvent(event)
+
+        if not self._misspelled_ranges:
+            return
+
+        text = self.text()
+        if not text:
+            return
+
+        fm = self.fontMetrics()
+        cr = self._text_content_rect()
+
+        # Compute where position 0 of text renders, accounting for scroll.
+        # Use cursorRect center (not left edge) since the caret aligns with
+        # the center of the cursor bounding rect, not its left edge.
+        cur_pos = self.cursorPosition()
+        cur_visible_x = self.cursorRect().center().x()
+        cur_text_x = fm.horizontalAdvance(text[:cur_pos])
+        text_origin_x = cur_visible_x - cur_text_x
+
+        baseline_y = cr.y() + (cr.height() + fm.ascent() - fm.descent()) / 2 + 1
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        pen = QPen(QColor(255, 60, 60, 200))
+        pen.setWidthF(1.2)
+        painter.setPen(pen)
+
+        for start, end in self._misspelled_ranges:
+            x_start = text_origin_x + fm.horizontalAdvance(text[:start])
+            x_end = text_origin_x + fm.horizontalAdvance(text[:end])
+            if x_end < 0 or x_start > self.width():
+                continue
+            self._draw_wavy_line(painter, x_start, x_end, baseline_y)
+
+        painter.end()
+
+    @staticmethod
+    def _draw_wavy_line(painter: QPainter, x_start: float, x_end: float, y: float) -> None:
+        """Draw a wavy (squiggly) underline from x_start to x_end at y."""
+        wave_height = 2.0
+        wave_length = 4.0
+
+        path = QPainterPath()
+        path.moveTo(x_start, y)
+
+        x = x_start
+        going_up = True
+        while x < x_end:
+            next_x = min(x + wave_length / 2, x_end)
+            cy = y - wave_height if going_up else y + wave_height
+            path.quadTo((x + next_x) / 2, cy, next_x, y)
+            x = next_x
+            going_up = not going_up
+
+        painter.drawPath(path)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """On left-click, show spell suggestions or dismiss popup."""
+        if event.button() == Qt.MouseButton.LeftButton and self._spell_completer:
+            click_pos = self.cursorPositionAt(event.pos())
+            text = self.text()
+
+            # Check if click is on a misspelled word
+            for start, end in self._misspelled_ranges:
+                if start <= click_pos < end and end <= len(text):
+                    super().mousePressEvent(event)
+                    self._spell_completer.show_suggestions_at_word(start, end)
+                    return
+
+            # Click was NOT on a misspelled word — dismiss any open popup
+            self._spell_completer._dismiss()
+
+        super().mousePressEvent(event)
 
 
 class ChatWidget(QWidget, ChatSearchMixin):
@@ -469,6 +607,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._mention_completer = MentionCompleter(self._input, parent=self)
         self._input.add_completer(self._mention_completer)
 
+        # Spellcheck completer (lowest priority in chain)
+        self._spell_checker = None
+        self._spell_completer = None
+        if self.settings.spellcheck_enabled:
+            self._init_spellcheck()
+
         # Auth gating
         self.set_authenticated(self._authenticated)
 
@@ -491,6 +635,24 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Note: apply_theme() is called by the parent ChatWindow after widget creation
         # to avoid duplicate theme application during construction
 
+    def _init_spellcheck(self) -> None:
+        """Initialize spellcheck components (checker + completer)."""
+        try:
+            from ...chat.spellcheck import SpellChecker
+
+            self._spell_checker = SpellChecker()
+            self._spell_completer = SpellCompleter(self._input, self._spell_checker, parent=self)
+            self._input.add_completer(self._spell_completer)
+            self._input.set_spell_checker(self._spell_checker, self._spell_completer)
+        except ImportError:
+            logger.warning("pyspellchecker not installed, spellcheck disabled")
+
+    def set_spellcheck_enabled(self, enabled: bool) -> None:
+        """Enable or disable spellcheck at runtime."""
+        if enabled and not self._spell_checker:
+            self._init_spellcheck()
+        self._input.set_spellcheck_enabled(enabled)
+
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add messages to the chat.
 
@@ -503,9 +665,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if not filtered:
             return
 
-        # Track usernames for @mention autocomplete
+        # Track usernames for @mention autocomplete and spellcheck dictionary
         for msg in filtered:
             self._mention_completer.add_username(msg.user.display_name)
+            if self._spell_checker:
+                self._spell_checker.dictionary.add_username(msg.user.display_name)
 
         # Hide the "Waiting for messages" indicator on first message
         if self._connecting_label.isVisible():
@@ -613,6 +777,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the emote map for autocomplete."""
         self._emote_completer.set_emotes(emote_map)
+        if self._spell_checker:
+            self._spell_checker.dictionary.set_emote_names(set(emote_map.keys()))
 
     def _current_scale(self) -> float:
         """Return the current device scale factor for image selection."""
@@ -1096,6 +1262,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Update completers theme
         self._emote_completer.apply_theme()
         self._mention_completer.apply_theme()
+        if self._spell_completer:
+            self._spell_completer.apply_theme()
 
     def _show_settings_menu(self) -> None:
         """Show a popup menu with quick chat toggles."""
@@ -1148,6 +1316,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         anim_action.setEnabled(self.settings.show_emotes)
         anim_action.toggled.connect(self._toggle_animate_emotes)
 
+        # Spellcheck toggle
+        spell_action = menu.addAction("Spellcheck")
+        spell_action.setCheckable(True)
+        spell_action.setChecked(self.settings.spellcheck_enabled)
+        spell_action.toggled.connect(self._toggle_spellcheck)
+
         menu.addSeparator()
 
         more_action = menu.addAction("More Settings...")
@@ -1187,6 +1361,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Toggle emote animation (static first frame when off)."""
         self.settings.animate_emotes = checked
         self._model.layoutChanged.emit()
+        self.settings_changed.emit()
+
+    def _toggle_spellcheck(self, checked: bool) -> None:
+        """Toggle spellcheck on the input field."""
+        self.settings.spellcheck_enabled = checked
+        self.set_spellcheck_enabled(checked)
         self.settings_changed.emit()
 
     def eventFilter(self, obj, event):  # noqa: N802

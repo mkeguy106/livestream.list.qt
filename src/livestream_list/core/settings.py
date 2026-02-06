@@ -171,6 +171,7 @@ class BuiltinChatSettings:
     # Banner settings (stream title + socials)
     show_stream_title: bool = True
     show_socials_banner: bool = True
+    spellcheck_enabled: bool = True
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
     # Theme-specific color settings
     dark_colors: ChatColorSettings = field(default_factory=ChatColorSettings)
@@ -618,6 +619,7 @@ class Settings:
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
+                spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 window=chat_window,
                 dark_colors=dark_colors,
                 light_colors=light_colors,
@@ -769,6 +771,7 @@ class Settings:
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
                     "show_stream_title": self.chat.builtin.show_stream_title,
                     "show_socials_banner": self.chat.builtin.show_socials_banner,
+                    "spellcheck_enabled": self.chat.builtin.spellcheck_enabled,
                     "dark_colors": {
                         "alt_row_color_even": self.chat.builtin.dark_colors.alt_row_color_even,
                         "alt_row_color_odd": self.chat.builtin.dark_colors.alt_row_color_odd,

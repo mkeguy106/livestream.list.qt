@@ -530,6 +530,11 @@ class PreferencesDialog(QDialog):
         self.chat_metrics_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_metrics_cb)
 
+        self.chat_spellcheck_cb = QCheckBox("Enable spellcheck")
+        self.chat_spellcheck_cb.setChecked(self.app.settings.chat.builtin.spellcheck_enabled)
+        self.chat_spellcheck_cb.stateChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow(self.chat_spellcheck_cb)
+
         # Theme color selector - allows editing dark or light mode colors
         builtin_layout.addRow(QLabel("<b>Theme Colors</b>"))
         self.color_theme_combo = QComboBox()
@@ -1099,6 +1104,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.animate_emotes = self.chat_animate_emotes_cb.isChecked()
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
         self.app.settings.chat.builtin.show_metrics = self.chat_metrics_cb.isChecked()
+        self.app.settings.chat.builtin.spellcheck_enabled = self.chat_spellcheck_cb.isChecked()
         self.app.settings.chat.builtin.use_platform_name_colors = (
             self.chat_name_colors_cb.isChecked()
         )
@@ -1141,6 +1147,7 @@ class PreferencesDialog(QDialog):
             self.app._chat_window.update_animation_state()
             self.app._chat_window.update_banner_settings()
             self.app._chat_window.update_metrics_bar()
+            self.app._chat_window.update_spellcheck()
 
     def _on_color_theme_changed(self) -> None:
         """Reload color pickers when switching between dark/light mode editing."""

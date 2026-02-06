@@ -705,6 +705,12 @@ class ChatWindow(QMainWindow):
         for widget in self._widgets.values():
             widget.update_banner_settings()
 
+    def update_spellcheck(self) -> None:
+        """Update spellcheck enabled state on all widgets."""
+        enabled = self.settings.spellcheck_enabled
+        for widget in self._widgets.values():
+            widget.set_spellcheck_enabled(enabled)
+
     def update_metrics_bar(self) -> None:
         """Refresh status bar metrics/visibility."""
         self._update_metrics()
