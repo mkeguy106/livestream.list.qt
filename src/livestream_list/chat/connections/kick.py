@@ -12,8 +12,8 @@ import aiohttp
 
 from ...core.models import StreamPlatform
 from ...core.settings import KickSettings
-from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
 from ..emotes.image import ImageSet, ImageSpec
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,7 @@ class KickChatConnection(BaseChatConnection):
         super().__init__(parent)
         self._kick_settings = kick_settings
         self._auth_token = kick_settings.access_token if kick_settings else ""
+        self._nick = ""  # Set after fetching user info from Kick API
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._should_stop = False
@@ -108,6 +109,9 @@ class KickChatConnection(BaseChatConnection):
             self._set_connected(channel_id)
             self._reset_backoff()  # Reset backoff on successful connection
             self._last_flush = time.monotonic()
+
+            # Fetch our username for @mention detection
+            await self._fetch_our_nick()
 
             # Message loop
             await self._read_loop()
@@ -272,6 +276,34 @@ class KickChatConnection(BaseChatConnection):
             logger.debug(f"Failed to fetch chatroom_id for {channel_id}: {e}")
             return None
 
+    async def _fetch_our_nick(self) -> None:
+        """Fetch the authenticated user's username from Kick API for @mention detection."""
+        if not self._auth_token or not self._session:
+            return
+        try:
+            headers = {
+                "Authorization": f"Bearer {self._auth_token}",
+                "Accept": "application/json",
+            }
+            async with self._session.get(
+                "https://api.kick.com/public/v1/users",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Public API returns {"data": [{"user_id": ..., "name": ..., ...}]}
+                    users = data.get("data", [])
+                    if users:
+                        username = users[0].get("name", "")
+                        if username:
+                            self._nick = username
+                            logger.info(f"Kick authenticated as: {username}")
+                else:
+                    logger.debug(f"Kick user info fetch failed (status={resp.status})")
+        except Exception as e:
+            logger.debug(f"Failed to fetch Kick user info: {e}")
+
     async def _read_loop(self) -> None:
         """Main read loop for incoming Pusher messages."""
         async for msg in self._ws:
@@ -407,6 +439,16 @@ class KickChatConnection(BaseChatConnection):
         text_parts.append(raw_content[last_end:])
         text = "".join(text_parts)
 
+        # Parse reply context from metadata
+        reply_parent_display_name = ""
+        reply_parent_text = ""
+        metadata = data.get("metadata", {})
+        if metadata:
+            original_sender = metadata.get("original_sender", {})
+            if original_sender:
+                reply_parent_display_name = original_sender.get("username", "")
+            reply_parent_text = metadata.get("original_message", {}).get("content", "")
+
         message = ChatMessage(
             id=str(data.get("id", uuid.uuid4())),
             user=user,
@@ -414,6 +456,8 @@ class KickChatConnection(BaseChatConnection):
             timestamp=timestamp,
             platform=StreamPlatform.KICK,
             emote_positions=emote_positions,
+            reply_parent_display_name=reply_parent_display_name,
+            reply_parent_text=reply_parent_text,
         )
 
         self._message_batch.append(message)

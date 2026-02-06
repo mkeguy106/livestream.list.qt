@@ -10,8 +10,8 @@ from datetime import datetime, timezone
 
 from ...core.models import StreamPlatform
 from ...core.settings import YouTubeSettings
-from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser
 from ..emotes.image import ImageSet, ImageSpec
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,10 @@ class YouTubeChatConnection(BaseChatConnection):
             cookie_header = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
             headers = {
                 "Cookie": cookie_header,
-                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0",
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64; rv:134.0)"
+                    " Gecko/20100101 Firefox/134.0"
+                ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
             }

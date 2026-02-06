@@ -251,6 +251,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
             painter.fillRect(accent_rect, QColor(218, 165, 32))
         elif message.is_mention:
             painter.fillRect(option.rect, self._mention_highlight)
+            # Left accent bar for mentions
+            accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
+            painter.fillRect(accent_rect, QColor(255, 165, 0))
         elif self.settings.show_alternating_rows:
             if index.row() % 2 == 0:
                 color = self._alt_row_even
@@ -283,7 +286,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Timestamp (optional)
         if self.settings.show_timestamps:
-            ts_text = message.timestamp.strftime("%H:%M")
+            ts_text = message.timestamp.astimezone().strftime("%H:%M")
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
@@ -312,6 +315,24 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 painter.restore()
                 return
+
+        # Reply context (shown above the message on its own line)
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            painter.setFont(reply_font)
+            painter.setPen(highlight_color if is_selected else self._text_muted_color)
+            reply_text = message.reply_parent_text
+            if len(reply_text) > 50:
+                reply_text = reply_text[:50] + "\u2026"
+            reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
+            reply_fm = QFontMetrics(reply_font)
+            remaining = available_width - (x - rect.x())
+            painter.drawText(x, y, remaining, line_height, ALIGN_LEFT_VCENTER, reply_str)
+            y += reply_fm.height() + 2
+            x = rect.x()
+            painter.setFont(font)
 
         # Badges
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
@@ -748,6 +769,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 # Simulate word wrapping
                 lines = self._compute_wrapped_lines(message.text, content_width, fm)
 
+        # Reply context needs an extra line
+        extra_reply_height = 0
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            extra_reply_height = QFontMetrics(reply_font).height() + 2
+
         # System messages need extra lines for system_text
         extra_lines = 0
         if message.is_system and message.system_text:
@@ -760,7 +789,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 lines = 0  # Only system text, no user message line
 
         height = max(
-            line_height * (lines + extra_lines) + padding_v * 2,
+            line_height * (lines + extra_lines) + extra_reply_height + padding_v * 2,
             emote_height + padding_v * 2,
         )
         result = QSize(available_width, height)
@@ -840,6 +869,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 return QRect()
 
+        # Skip reply context line
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            y += QFontMetrics(reply_font).height() + 2
+            x = rect.x()
+
         # Skip badges - must match paint logic for consistent positioning
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             for badge in message.user.badges:
@@ -895,6 +932,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 x = rect.x()
             else:
                 return None
+
+        # Skip reply context line
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            y += QFontMetrics(reply_font).height() + 2
+            x = rect.x()
 
         # Skip badges - must match paint logic for consistent positioning
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
@@ -959,7 +1004,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 overlay_x = int(
                     last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2
                 )
-                emote_rect = QRect(int(overlay_x), int(last_emote_rect.y()), int(emote_w), emote_height)
+                emote_rect = QRect(
+                    int(overlay_x), int(last_emote_rect.y()),
+                    int(emote_w), emote_height,
+                )
                 if emote_rect.contains(pos):
                     return emote
                 last_end = end
@@ -1018,6 +1066,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 x = rect.x()
             else:
                 return None
+
+        # Skip reply context line
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            y += QFontMetrics(reply_font).height() + 2
+            x = rect.x()
 
         # Skip badges - must match paint logic for consistent positioning
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
@@ -1252,6 +1308,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 x = rect.x()
             else:
                 return None
+
+        # Skip reply context line
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            y += QFontMetrics(reply_font).height() + 2
+            x = rect.x()
 
         # Check each badge
         badge_y = y + (line_height - badge_size) // 2

@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 import aiohttp
 
 from ...core.models import StreamPlatform
-from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
 from ..emotes.image import ImageSet, ImageSpec
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -189,6 +189,8 @@ class TwitchChatConnection(BaseChatConnection):
         self._should_stop = False
         self._auth_failed = False
         self._can_send = False  # Set True only if token has chat:edit scope
+        self._user_badges: list[ChatBadge] = []  # Our badges from USERSTATE
+        self._user_color: str | None = None  # Our color from USERSTATE/GLOBALUSERSTATE
         self._message_batch: list[ChatMessage] = []
         self._last_flush: float = 0
 
@@ -349,12 +351,31 @@ class TwitchChatConnection(BaseChatConnection):
             self._handle_clearchat(parsed)
         elif command == "CLEARMSG":
             self._handle_clearmsg(parsed)
+        elif command == "USERSTATE":
+            # Sent on channel join and after sending a message - capture our badges/color
+            tags = parsed["tags"]
+            badges_tag = tags.get("badges", "")
+            if badges_tag:
+                self._user_badges = parse_badges(badges_tag)
+            color = tags.get("color", "")
+            if color:
+                self._user_color = color
+            display_name = tags.get("display-name", "")
+            if display_name:
+                self._display_name = display_name
         elif command == "GLOBALUSERSTATE":
             # Update our nick and display name from server response
-            display_name = parsed["tags"].get("display-name", "")
+            tags = parsed["tags"]
+            display_name = tags.get("display-name", "")
             if display_name:
                 self._nick = display_name.lower()
                 self._display_name = display_name  # Preserve case for local echo
+            color = tags.get("color", "")
+            if color:
+                self._user_color = color
+            badges_tag = tags.get("badges", "")
+            if badges_tag:
+                self._user_badges = parse_badges(badges_tag)
         elif command == "NOTICE":
             text = parsed.get("trailing", "")
             if "Login" in text and ("unsuccessful" in text or "failed" in text):
@@ -426,6 +447,10 @@ class TwitchChatConnection(BaseChatConnection):
             else:
                 hype_chat_amount = raw_amount
 
+        # Parse reply context
+        reply_parent_display_name = tags.get("reply-parent-display-name", "")
+        reply_parent_text = tags.get("reply-parent-msg-body", "")
+
         message = ChatMessage(
             id=tags.get("id", str(uuid.uuid4())),
             user=user,
@@ -439,6 +464,8 @@ class TwitchChatConnection(BaseChatConnection):
             hype_chat_amount=hype_chat_amount,
             hype_chat_currency=hype_chat_currency,
             hype_chat_level=hype_chat_level,
+            reply_parent_display_name=reply_parent_display_name,
+            reply_parent_text=reply_parent_text,
         )
 
         self._message_batch.append(message)

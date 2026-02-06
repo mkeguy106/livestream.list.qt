@@ -727,7 +727,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 continue
             prefix = ""
             if self.settings.show_timestamps:
-                prefix = f"[{message.timestamp.strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")
@@ -1518,7 +1518,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                 continue
             prefix = ""
             if self._settings.show_timestamps:
-                prefix = f"[{message.timestamp.strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")

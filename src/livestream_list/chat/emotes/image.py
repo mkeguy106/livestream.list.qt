@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtGui import QPixmap
@@ -134,7 +134,7 @@ class ImageSet:
             else:
                 self._specs = dict(images)  # type: ignore[assignment]
 
-    def bind(self, store: EmoteCache) -> "ImageSet":
+    def bind(self, store: EmoteCache) -> ImageSet:
         """Return a new ImageSet with ImageRefs bound to the given store."""
         if self._images:
             return self

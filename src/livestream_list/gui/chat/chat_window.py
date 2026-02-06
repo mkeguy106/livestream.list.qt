@@ -62,6 +62,9 @@ class _TabButton(QWidget):
         self._active_color = theme.chat_tab_active
         self._inactive_color = theme.chat_tab_inactive
         self._hover = False
+        self._flash_timer: QTimer | None = None
+        self._flash_on = False
+        self._flash_color = "#ff6600"  # Orange flash color for mentions
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 4, 4)
@@ -155,8 +158,44 @@ class _TabButton(QWidget):
                 }}
             """)
 
+    def start_flash(self, duration_ms: int = 60000) -> None:
+        """Start flashing the tab background for @mention notification."""
+        if self._flash_timer:
+            return  # Already flashing
+        self._flash_timer = QTimer(self)
+        self._flash_timer.setInterval(500)
+        self._flash_timer.timeout.connect(self._toggle_flash)
+        self._flash_on = False
+        self._flash_timer.start()
+        # Auto-stop after duration
+        QTimer.singleShot(duration_ms, self.stop_flash)
+
+    def stop_flash(self) -> None:
+        """Stop flashing and restore normal style."""
+        if self._flash_timer:
+            self._flash_timer.stop()
+            self._flash_timer.deleteLater()
+            self._flash_timer = None
+        self._flash_on = False
+        self._update_style()
+
+    def _toggle_flash(self) -> None:
+        """Toggle between flash color and normal color."""
+        self._flash_on = not self._flash_on
+        if self._flash_on:
+            self.setStyleSheet(f"""
+                _TabButton {{
+                    background-color: {self._flash_color};
+                    border: none;
+                    border-radius: 0px;
+                }}
+            """)
+            self._label.setStyleSheet("color: #fff; background: transparent;")
+        else:
+            self._update_style()
+
     def enterEvent(self, event) -> None:  # noqa: N802
-        if not self._active:
+        if not self._active and not self._flash_timer:
             theme = get_theme()
             self.setStyleSheet(f"""
                 _TabButton {{
@@ -240,6 +279,16 @@ class _FlowTabBar(QWidget):
         self._inactive_color = inactive_color
         for tab in self._tabs:
             tab.set_colors(active_color, inactive_color)
+
+    def start_flash(self, index: int) -> None:
+        """Start flashing a tab at the given index."""
+        if 0 <= index < len(self._tabs):
+            self._tabs[index].start_flash()
+
+    def stop_flash(self, index: int) -> None:
+        """Stop flashing a tab at the given index."""
+        if 0 <= index < len(self._tabs):
+            self._tabs[index].stop_flash()
 
     def count(self) -> int:
         return len(self._tabs)
@@ -697,6 +746,17 @@ class ChatWindow(QMainWindow):
         if widget:
             widget.add_messages(messages)
 
+            # Flash tab on @mention if it's not the current tab
+            idx = self._tab_widget.indexOf(widget)
+            if idx >= 0 and idx != self._tab_widget.currentIndex():
+                from ...chat.models import ChatMessage as ChatMsg
+
+                has_mention = any(
+                    isinstance(m, ChatMsg) and m.is_mention for m in messages
+                )
+                if has_mention:
+                    self._tab_widget.tabBar().start_flash(idx)
+
     def _on_moderation_received(self, channel_key: str, event: object) -> None:
         """Route moderation events to the correct chat widget."""
         widget = self._widgets.get(channel_key)
@@ -789,6 +849,9 @@ class ChatWindow(QMainWindow):
 
     def _on_tab_changed(self, index: int) -> None:
         """Handle tab change - refresh emote map for newly active tab."""
+        # Stop flashing on the newly focused tab
+        self._tab_widget.tabBar().stop_flash(index)
+
         widget = self._tab_widget.widget(index)
         if isinstance(widget, ChatWidget):
             # Update emote map and repaint when tab becomes active

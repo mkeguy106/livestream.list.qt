@@ -1271,6 +1271,8 @@ class ChatManager(QObject):
                     connection, "_nick", "You"
                 )
                 nick = getattr(connection, "_nick", "You")
+                user_badges = getattr(connection, "_user_badges", [])
+                user_color = getattr(connection, "_user_color", None)
                 local_msg = ChatMessage(
                     id=str(uuid.uuid4()),
                     user=ChatUser(
@@ -1278,8 +1280,8 @@ class ChatManager(QObject):
                         name=nick,
                         display_name=display_name,
                         platform=livestream.channel.platform,
-                        color=None,
-                        badges=[],
+                        color=user_color,
+                        badges=list(user_badges),
                     ),
                     text=text,
                     timestamp=datetime.now(timezone.utc),

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Iterable, TYPE_CHECKING
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..models import ChatEmote
@@ -47,22 +48,25 @@ def find_third_party_emotes(
         right_max = 0
         while left_max < len(segment) and segment[left_max] in trim_chars:
             left_max += 1
-        while right_max < len(segment) - left_max and segment[len(segment) - 1 - right_max] in trim_chars:
+        while (
+            right_max < len(segment) - left_max
+            and segment[len(segment) - 1 - right_max] in trim_chars
+        ):
             right_max += 1
         best: tuple[int, int, str] | None = None
         best_len = 0
-        for l in range(left_max + 1):
+        for lt in range(left_max + 1):
             for r in range(right_max + 1):
-                if l == 0 and r == 0:
+                if lt == 0 and r == 0:
                     continue
-                if l + r >= len(segment):
+                if lt + r >= len(segment):
                     continue
-                candidate = segment[l : len(segment) - r]
+                candidate = segment[lt : len(segment) - r]
                 if not candidate:
                     continue
                 if candidate in emote_map and len(candidate) > best_len:
                     best_len = len(candidate)
-                    best = (seg_start + l, seg_start + len(segment) - r, candidate)
+                    best = (seg_start + lt, seg_start + len(segment) - r, candidate)
         return best
 
     i = 0
