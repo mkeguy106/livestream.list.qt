@@ -49,9 +49,11 @@ class StreamlinkSettings:
     enabled: bool = True
     path: str = "streamlink"
     player: str = "mpv"
-    player_args: str = ""
+    player_args: str = (
+        "--profile=low-latency --cache=yes --demuxer-readahead-secs=1.0 --cache-pause=no"
+    )
     default_quality: StreamQuality = StreamQuality.SOURCE
-    additional_args: str = ""
+    additional_args: str = "--twitch-low-latency --kick-low-latency"
 
     # Per-platform launch method (streamlink or yt-dlp)
     twitch_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
