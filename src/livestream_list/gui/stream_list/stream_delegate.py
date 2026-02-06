@@ -35,14 +35,14 @@ PLATFORM_ICONS = {
 # UI style configurations
 UI_STYLES = {
     UIStyle.DEFAULT: {
-        "margin_v": 4,
+        "margin_v": 6,
         "margin_h": 12,
         "spacing": 10,
         "icon_size": 16,
         "show_title": True,
     },
     UIStyle.COMPACT_1: {
-        "margin_v": 4,
+        "margin_v": 5,
         "margin_h": 12,
         "spacing": 8,
         "icon_size": 14,
@@ -68,7 +68,7 @@ UI_STYLES = {
 CHECKBOX_WIDTH = 20
 LIVE_INDICATOR_WIDTH = 20
 PLATFORM_LABEL_WIDTH = 20
-BUTTON_PADDING = 8
+BUTTON_PADDING = 6
 
 
 class StreamRowDelegate(QStyledItemDelegate):
@@ -208,10 +208,10 @@ class StreamRowDelegate(QStyledItemDelegate):
         else:
             painter.fillRect(option.rect, self._widget_bg)
 
-        # Margins
-        margin_h = style["margin_h"]
-        margin_v = style["margin_v"]
-        spacing = style["spacing"]
+        # Margins (fixed minimum, only grow with scale)
+        margin_h = max(style["margin_h"], int(style["margin_h"] * scale))
+        margin_v = max(style["margin_v"], int(style["margin_v"] * scale))
+        spacing = max(style["spacing"], int(style["spacing"] * scale))
         icon_size = int(style["icon_size"] * scale)
 
         rect = option.rect.adjusted(margin_h, margin_v, -margin_h, -margin_v)
@@ -219,11 +219,11 @@ class StreamRowDelegate(QStyledItemDelegate):
         y = rect.y()
         row_height = rect.height()
 
-        # Set up font
+        # Set up font (use cached metrics)
         font = painter.font()
         font.setPointSize(font_size)
         painter.setFont(font)
-        fm = QFontMetrics(font)
+        fm, title_fm = self._get_font_metrics(font_size)
         line_height = fm.height()
 
         # Store button rects for this row
@@ -231,29 +231,34 @@ class StreamRowDelegate(QStyledItemDelegate):
         row = index.row()
 
         # === SELECTION CHECKBOX ===
+        # Scale layout constants with font
+        checkbox_width = int(CHECKBOX_WIDTH * scale)
+        live_ind_width = int(LIVE_INDICATOR_WIDTH * scale)
+        platform_width = int(PLATFORM_LABEL_WIDTH * scale)
+
         model = index.model()
         if model and hasattr(model, "is_selection_mode") and model.is_selection_mode():
-            cb_y = y + (row_height - CHECKBOX_WIDTH) // 2
-            checkbox_rect = QRect(x, cb_y, CHECKBOX_WIDTH, CHECKBOX_WIDTH)
+            cb_y = y + (row_height - checkbox_width) // 2
+            checkbox_rect = QRect(x, cb_y, checkbox_width, checkbox_width)
             button_rects["checkbox"] = checkbox_rect
             # Draw checkbox
             painter.setPen(self._text_muted)
             painter.drawRect(checkbox_rect.adjusted(2, 2, -2, -2))
             if is_selected_checkbox:
-                pen = QPen(QColor(220, 40, 40), 2.0)
+                pen = QPen(self._status_error, 2.0)
                 painter.setPen(pen)
                 inner = checkbox_rect.adjusted(4, 4, -4, -4)
                 painter.drawLine(QLineF(inner.topLeft(), inner.bottomRight()))
                 painter.drawLine(QLineF(inner.topRight(), inner.bottomLeft()))
-            x += CHECKBOX_WIDTH + spacing
+            x += checkbox_width + spacing
 
         # === LIVE INDICATOR (draw circle, not emoji - avoids font fallback overhead) ===
         align_lv = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         indicator_size = int(10 * scale)
-        indicator_cx = x + LIVE_INDICATOR_WIDTH // 2
+        indicator_cx = x + live_ind_width // 2
         indicator_cy = y + line_height // 2
         if livestream.live:
-            painter.setBrush(QColor("#00FF00"))
+            painter.setBrush(self._status_live)
             painter.setPen(Qt.PenStyle.NoPen)
         else:
             painter.setBrush(self._text_muted)
@@ -265,7 +270,7 @@ class StreamRowDelegate(QStyledItemDelegate):
             indicator_size,
         )
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        x += LIVE_INDICATOR_WIDTH
+        x += live_ind_width
 
         # === PLATFORM ICON ===
         if self._settings.channel_icons.show_platform:
@@ -280,10 +285,10 @@ class StreamRowDelegate(QStyledItemDelegate):
             painter.setFont(bold_font)
             painter.setPen(color)
             painter.drawText(
-                x, y, PLATFORM_LABEL_WIDTH, line_height, align_lv, platform_text
+                x, y, platform_width, line_height, align_lv, platform_text
             )
             painter.setFont(font)
-            x += PLATFORM_LABEL_WIDTH + spacing
+            x += platform_width + spacing
 
         # === Calculate button widths (right side) ===
         btn_height = icon_size + BUTTON_PADDING
@@ -319,7 +324,10 @@ class StreamRowDelegate(QStyledItemDelegate):
             name_color = self._selection_text if is_selected else self._text_primary
 
         painter.setPen(name_color)
-        name_width = min(QFontMetrics(bold_font).horizontalAdvance(name_text), text_area_width // 2)
+        bold_fm = QFontMetrics(bold_font)
+        max_name_width = text_area_width // 2
+        name_text = bold_fm.elidedText(name_text, Qt.TextElideMode.ElideRight, max_name_width)
+        name_width = bold_fm.horizontalAdvance(name_text)
         painter.drawText(x, y, name_width + 10, line_height,
                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name_text)
         x += name_width + 10 + spacing
@@ -416,9 +424,8 @@ class StreamRowDelegate(QStyledItemDelegate):
                 painter.setFont(title_font)
                 painter.setPen(self._selection_text if is_selected else self._text_muted)
 
-                # Elide title if too long
+                # Elide title if too long (reuse cached title metrics)
                 title_width = rect.right() - rect.x() - margin_h
-                title_fm = QFontMetrics(title_font)
                 elided = title_fm.elidedText(title_text, Qt.TextElideMode.ElideRight, title_width)
                 painter.drawText(
                     rect.x(), title_y, title_width, title_fm.height(), align_lv, elided
@@ -490,10 +497,12 @@ class StreamRowDelegate(QStyledItemDelegate):
         # Calculate height using cached font metrics
         style = self._get_style_config()
         font_size = self._get_font_size()
+        scale = self._get_scale()
         fm, title_fm = self._get_font_metrics(font_size)
 
-        # Base height: one line + margins
-        height = fm.height() + style["margin_v"] * 2
+        # Base height: one line + margins (fixed minimum, grow with scale)
+        margin_v = max(style["margin_v"], int(style["margin_v"] * scale))
+        height = fm.height() + margin_v * 2
 
         # Add title row height for DEFAULT style when live
         if style["show_title"] and livestream.live and (livestream.game or livestream.title):

@@ -19,11 +19,12 @@ from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
 from .message_model import MessageRole
 
-# Layout constants
+# Layout constants (base values, scaled by font size ratio at runtime)
 PADDING_H = 8
 BADGE_SPACING = 2
 USERNAME_SPACING = 4
 TIMESTAMP_PADDING = 6  # Small gap after timestamp text
+_BASE_FONT_SIZE = 10  # Reference font size for layout constants
 
 # Mod-related badge names
 MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
@@ -51,11 +52,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._animation_time_ms: int = 0
         # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
         self._size_cache: dict[tuple, QSize] = {}
-        self._size_cache_max = 500
+        self._size_cache_max = 2000
         self._scaled_cache: dict[tuple[str, int], QPixmap] = {}
-        self._scaled_cache_max = 800
+        self._scaled_cache_max = 1200
         self._scaled_animated_cache: dict[tuple[str, int], list[QPixmap]] = {}
-        self._scaled_animated_cache_max = 200
+        self._scaled_animated_cache_max = 400
         # Theme colors (updated via apply_theme)
         self._load_theme_colors()
 
@@ -72,6 +73,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._alt_row_even = QColor(colors.alt_row_color_even)
         self._alt_row_odd = QColor(colors.alt_row_color_odd)
         self._mention_highlight = QColor(colors.mention_highlight_color)
+        self._hype_chat_accent = QColor(218, 165, 32)
+        self._mention_accent = QColor(255, 165, 0)
 
     def apply_theme(self) -> None:
         """Apply theme colors (call when theme changes).
@@ -176,7 +179,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         scaled = pixmap.scaledToHeight(height, smooth)
         if len(self._scaled_cache) >= self._scaled_cache_max:
             keys = list(self._scaled_cache.keys())
-            for k in keys[: len(keys) // 2]:
+            for k in keys[: len(keys) // 4]:
                 del self._scaled_cache[k]
         self._scaled_cache[cache_key] = scaled
         return scaled
@@ -193,7 +196,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         scaled = [frame.scaledToHeight(height, smooth) for frame in frames]
         if len(self._scaled_animated_cache) >= self._scaled_animated_cache_max:
             keys = list(self._scaled_animated_cache.keys())
-            for k in keys[: len(keys) // 2]:
+            for k in keys[: len(keys) // 4]:
                 del self._scaled_animated_cache[k]
         self._scaled_animated_cache[cache_key] = scaled
         return scaled
@@ -245,15 +248,17 @@ class ChatMessageDelegate(QStyledItemDelegate):
             sys_bg.setAlpha(40)
             painter.fillRect(option.rect, sys_bg)
         elif message.is_hype_chat:
-            painter.fillRect(option.rect, QColor(200, 170, 50, 30))
+            hype_bg = QColor(self._hype_chat_accent)
+            hype_bg.setAlpha(30)
+            painter.fillRect(option.rect, hype_bg)
             # Left accent bar for hype chat
             accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
-            painter.fillRect(accent_rect, QColor(218, 165, 32))
+            painter.fillRect(accent_rect, self._hype_chat_accent)
         elif message.is_mention:
             painter.fillRect(option.rect, self._mention_highlight)
             # Left accent bar for mentions
             accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
-            painter.fillRect(accent_rect, QColor(255, 165, 0))
+            painter.fillRect(accent_rect, self._mention_accent)
         elif self.settings.show_alternating_rows:
             if index.row() % 2 == 0:
                 color = self._alt_row_even
@@ -794,11 +799,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         )
         result = QSize(available_width, height)
 
-        # Store in cache (with size limit to prevent unbounded growth)
+        # Store in cache (with size limit - evict oldest 25% when full)
         if len(self._size_cache) >= self._size_cache_max:
-            # Simple eviction: clear half the cache when full
             keys = list(self._size_cache.keys())
-            for k in keys[: len(keys) // 2]:
+            for k in keys[: len(keys) // 4]:
                 del self._size_cache[k]
         self._size_cache[cache_key] = result
 

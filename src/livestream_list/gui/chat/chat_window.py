@@ -20,16 +20,17 @@ from ...chat.manager import ChatManager
 from ...chat.models import ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
+from ..theme import PLATFORM_COLORS as THEME_PLATFORM_COLORS
 from ..theme import ThemeManager, get_theme
 from .chat_widget import ChatWidget
 
 logger = logging.getLogger(__name__)
 
-# Platform colors for tab icons
+# Platform colors for tab icons (from theme)
 PLATFORM_COLORS = {
-    StreamPlatform.TWITCH: QColor("#9146ff"),
-    StreamPlatform.YOUTUBE: QColor("#ff0000"),
-    StreamPlatform.KICK: QColor("#53fc18"),
+    StreamPlatform.TWITCH: QColor(THEME_PLATFORM_COLORS.get("twitch", "#9146ff")),
+    StreamPlatform.YOUTUBE: QColor(THEME_PLATFORM_COLORS.get("youtube", "#ff0000")),
+    StreamPlatform.KICK: QColor(THEME_PLATFORM_COLORS.get("kick", "#53fc18")),
 }
 
 

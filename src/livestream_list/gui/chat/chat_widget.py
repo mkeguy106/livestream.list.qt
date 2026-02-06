@@ -386,36 +386,41 @@ class ChatWidget(QWidget, ChatSearchMixin):
         layout.addLayout(input_layout)
 
         # Auth feedback banner (shown when not authenticated)
+        theme = get_theme()
+        banner_bg = theme.chat_banner_bg
+        banner_text = theme.chat_banner_text
+        banner_border = theme.border
+
         self._auth_banner = QLabel("Not logged in \u2014 chat is read-only")
         self._auth_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._auth_banner.setStyleSheet("""
-            QLabel {
-                background-color: #2a1a0a;
-                color: #f0a030;
-                border: 1px solid #503010;
+        self._auth_banner.setStyleSheet(f"""
+            QLabel {{
+                background-color: {banner_bg};
+                color: {banner_text};
+                border: 1px solid {banner_border};
                 border-radius: 3px;
                 padding: 4px 8px;
                 font-size: 11px;
-            }
+            }}
         """)
         self._auth_banner.hide()
         layout.addWidget(self._auth_banner)
 
         # Restriction banner with "Open in Browser" button (for restricted YouTube chats)
         self._restriction_banner = QWidget()
-        self._restriction_banner.setStyleSheet("""
-            QWidget {
-                background-color: #2a1a0a;
-                border: 1px solid #503010;
+        self._restriction_banner.setStyleSheet(f"""
+            QWidget {{
+                background-color: {banner_bg};
+                border: 1px solid {banner_border};
                 border-radius: 3px;
-            }
+            }}
         """)
         restriction_layout = QHBoxLayout(self._restriction_banner)
         restriction_layout.setContentsMargins(8, 4, 8, 4)
         restriction_layout.setSpacing(8)
         self._restriction_label = QLabel()
         self._restriction_label.setStyleSheet(
-            "color: #f0a030; font-size: 11px; background: transparent; border: none;"
+            f"color: {banner_text}; font-size: 11px; background: transparent; border: none;"
         )
         restriction_layout.addWidget(self._restriction_label, 1)
         self._open_browser_btn = QPushButton("Open in Browser")

@@ -7,6 +7,8 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
+from .theme import ThemeManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,8 +24,10 @@ def create_app_icon(size: int = 22) -> QIcon:
     scale = size / 22.0
 
     # Draw a simple monitor-like shape
-    # Monitor frame
-    monitor_color = QColor(100, 150, 200)  # Light blue
+    # Use theme-aware colors for tray icon visibility
+    is_dark = ThemeManager.is_dark_mode()
+    monitor_color = QColor(100, 150, 200) if is_dark else QColor(60, 100, 160)
+    screen_color = QColor(40, 60, 80) if is_dark else QColor(30, 45, 65)
     painter.setPen(monitor_color)
     painter.setBrush(monitor_color)
     painter.drawRoundedRect(
@@ -36,7 +40,6 @@ def create_app_icon(size: int = 22) -> QIcon:
     )
 
     # Screen (darker inside)
-    screen_color = QColor(40, 60, 80)
     painter.setBrush(screen_color)
     painter.drawRect(int(4 * scale), int(4 * scale), int(14 * scale), int(10 * scale))
 
@@ -135,12 +138,16 @@ class TrayIcon(QSystemTrayIcon):
 
     def _on_activated(self, reason: QSystemTrayIcon.ActivationReason):
         """Handle tray icon activation."""
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            # Left click - show window
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
             self._on_open()
-        elif reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            # Double click - show window
-            self._on_open()
+        elif reason == QSystemTrayIcon.ActivationReason.MiddleClick:
+            # Toggle notifications on middle-click
+            current = self._get_notifications_enabled()
+            self._set_notifications_enabled(not current)
+            self._notifications_action.setChecked(not current)
 
     def _on_notifications_toggled(self, checked: bool):
         """Handle notifications toggle."""

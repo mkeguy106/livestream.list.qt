@@ -85,9 +85,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Livestream List (Qt)")
         self.setMinimumWidth(460)
         self.resize(self.app.settings.window.width, self.app.settings.window.height)
-        # Restore window position if saved
+        # Restore window position if saved (validate against current screens)
         if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
-            self.move(self.app.settings.window.x, self.app.settings.window.y)
+            from PySide6.QtGui import QGuiApplication
+            target_pos = (self.app.settings.window.x, self.app.settings.window.y)
+            for screen in QGuiApplication.screens():
+                geom = screen.availableGeometry()
+                if geom.contains(target_pos[0] + 50, target_pos[1] + 50):
+                    self.move(target_pos[0], target_pos[1])
+                    break
 
         # Central widget
         central = QWidget()
@@ -122,7 +128,6 @@ class MainWindow(QMainWindow):
 
         self.loading_detail = QLabel("")
         self.loading_detail.setAlignment(Qt.AlignCenter)
-        self.loading_detail.setStyleSheet("color: gray;")
         loading_layout.addWidget(self.loading_detail)
 
         self.stack.addWidget(loading_page)  # Index 0
@@ -131,10 +136,9 @@ class MainWindow(QMainWindow):
         empty_page = QWidget()
         empty_layout = QVBoxLayout(empty_page)
         empty_layout.setAlignment(Qt.AlignCenter)
-        empty_label = QLabel("No channels added yet.\nClick the + button to add a channel.")
-        empty_label.setAlignment(Qt.AlignCenter)
-        empty_label.setStyleSheet("color: gray;")
-        empty_layout.addWidget(empty_label)
+        self.empty_label = QLabel("No channels added yet.\nClick the + button to add a channel.")
+        self.empty_label.setAlignment(Qt.AlignCenter)
+        empty_layout.addWidget(self.empty_label)
         self.stack.addWidget(empty_page)  # Index 1
 
         # All offline page
@@ -143,7 +147,6 @@ class MainWindow(QMainWindow):
         all_offline_layout.setAlignment(Qt.AlignCenter)
         self.all_offline_label = QLabel("All channels are offline")
         self.all_offline_label.setAlignment(Qt.AlignCenter)
-        self.all_offline_label.setStyleSheet("color: gray;")
         all_offline_layout.addWidget(self.all_offline_label)
         self.stack.addWidget(all_offline_page)  # Index 2
 
@@ -206,10 +209,9 @@ class MainWindow(QMainWindow):
 
         selection_layout.addStretch()
 
-        delete_selected_btn = QPushButton("Delete Selected")
-        delete_selected_btn.setStyleSheet("color: red;")
-        delete_selected_btn.clicked.connect(self._delete_selected)
-        selection_layout.addWidget(delete_selected_btn)
+        self.delete_selected_btn = QPushButton("Delete Selected")
+        self.delete_selected_btn.clicked.connect(self._delete_selected)
+        selection_layout.addWidget(self.delete_selected_btn)
 
         cancel_btn = QPushButton("Cancel")
         cancel_btn.clicked.connect(self._exit_selection_mode)
@@ -334,7 +336,7 @@ class MainWindow(QMainWindow):
         # Selection mode button
         self.select_btn = QToolButton()
         self.select_btn.setText("☑")
-        self.select_btn.setToolTip("Selection mode")
+        self.select_btn.setToolTip("Selection mode (Escape to exit, Shift+click for range)")
         self.select_btn.setCheckable(True)
         self.select_btn.clicked.connect(self._toggle_selection_mode)
         toolbar.addWidget(self.select_btn)
@@ -342,7 +344,7 @@ class MainWindow(QMainWindow):
         # Trash bin button
         self.trash_btn = QToolButton()
         self.trash_btn.setText("\u2672")
-        self.trash_btn.setToolTip("Trash bin")
+        self.trash_btn.setToolTip("Trash bin (deleted channels)")
         self.trash_btn.clicked.connect(self._show_trash_dialog)
         toolbar.addWidget(self.trash_btn)
 
@@ -351,12 +353,14 @@ class MainWindow(QMainWindow):
         # Name filter
         self.name_filter_edit = QLineEdit()
         self.name_filter_edit.setPlaceholderText("Filter by name...")
+        self.name_filter_edit.setAccessibleName("Filter channels by name")
         self.name_filter_edit.setMaximumWidth(200)
         self.name_filter_edit.textChanged.connect(self._on_name_filter_changed)
         toolbar.addWidget(self.name_filter_edit)
 
         # Platform filter
         self.platform_combo = QComboBox()
+        self.platform_combo.setAccessibleName("Filter by platform")
         self.platform_combo.addItem("All", None)
         self.platform_combo.addItem("Twitch", StreamPlatform.TWITCH)
         self.platform_combo.addItem("YouTube", StreamPlatform.YOUTUBE)
@@ -366,6 +370,7 @@ class MainWindow(QMainWindow):
 
         # Sort dropdown
         self.sort_combo = QComboBox()
+        self.sort_combo.setAccessibleName("Sort channels by")
         self.sort_combo.addItem("Name", SortMode.NAME)
         self.sort_combo.addItem("Viewers", SortMode.VIEWERS)
         self.sort_combo.addItem("Playing", SortMode.PLAYING)
@@ -378,6 +383,9 @@ class MainWindow(QMainWindow):
     def _setup_shortcuts(self):
         """Set up keyboard shortcuts."""
         QShortcut(QKeySequence("F5"), self, self._on_refresh)
+        QShortcut(QKeySequence("Escape"), self, self._on_escape)
+        QShortcut(QKeySequence("Delete"), self, self._on_delete_key)
+        QShortcut(QKeySequence("Ctrl+A"), self, self._on_ctrl_a)
 
     def _connect_signals(self):
         """Connect application signals."""
@@ -649,9 +657,14 @@ class MainWindow(QMainWindow):
         self.refresh_stream_list()
 
     def _on_name_filter_changed(self, text: str):
-        """Handle name filter text change."""
+        """Handle name filter text change (debounced)."""
         self._name_filter = text
-        self.refresh_stream_list()
+        if not hasattr(self, "_name_filter_timer"):
+            self._name_filter_timer = QTimer(self)
+            self._name_filter_timer.setSingleShot(True)
+            self._name_filter_timer.setInterval(150)
+            self._name_filter_timer.timeout.connect(self.refresh_stream_list)
+        self._name_filter_timer.start()
 
     def _on_sort_changed(self, index: int):
         """Handle sort mode change."""
@@ -682,13 +695,16 @@ class MainWindow(QMainWindow):
         mode = self.app.settings.theme_mode
         if mode == ThemeMode.AUTO:
             self.theme_btn.setText("◐")  # Half circle for auto
-            self.theme_btn.setToolTip("Theme: Auto (click to switch to Light)")
+            self.theme_btn.setToolTip("Theme: Auto (click to cycle)")
         elif mode == ThemeMode.LIGHT:
             self.theme_btn.setText("☀")  # Sun for light
-            self.theme_btn.setToolTip("Theme: Light (click to switch to Dark)")
-        else:  # DARK
+            self.theme_btn.setToolTip("Theme: Light (click to cycle)")
+        elif mode == ThemeMode.DARK:
             self.theme_btn.setText("☾")  # Moon for dark
-            self.theme_btn.setToolTip("Theme: Dark (click to switch to Auto)")
+            self.theme_btn.setToolTip("Theme: Dark (click to cycle)")
+        elif mode == ThemeMode.HIGH_CONTRAST:
+            self.theme_btn.setText("◉")  # High contrast icon
+            self.theme_btn.setToolTip("Theme: High Contrast (click to cycle)")
 
     def _on_theme_toggle(self):
         """Cycle through theme modes: Auto -> Light -> Dark -> Auto."""
@@ -700,6 +716,8 @@ class MainWindow(QMainWindow):
             new_mode = ThemeMode.LIGHT
         elif mode == ThemeMode.LIGHT:
             new_mode = ThemeMode.DARK
+        elif mode == ThemeMode.DARK:
+            new_mode = ThemeMode.HIGH_CONTRAST
         else:
             new_mode = ThemeMode.AUTO
 
@@ -801,11 +819,16 @@ class MainWindow(QMainWindow):
                     background-color: {theme.accent};
                 }}
             """)
-            # Update loading detail label color
+            # Update muted text label colors from theme
+            muted_style = f"color: {theme.text_muted};"
             if hasattr(self, "loading_detail"):
-                self.loading_detail.setStyleSheet(f"color: {theme.text_muted};")
+                self.loading_detail.setStyleSheet(muted_style)
             if hasattr(self, "all_offline_label"):
-                self.all_offline_label.setStyleSheet(f"color: {theme.text_muted};")
+                self.all_offline_label.setStyleSheet(muted_style)
+            if hasattr(self, "empty_label"):
+                self.empty_label.setStyleSheet(muted_style)
+            if hasattr(self, "delete_selected_btn"):
+                self.delete_selected_btn.setStyleSheet(f"color: {theme.status_error};")
             # Update delegate theme and repaint
             if self._stream_delegate:
                 self._stream_delegate.apply_theme()
@@ -930,6 +953,28 @@ class MainWindow(QMainWindow):
             self._stream_model.set_selection_mode(False)
         self.select_btn.setChecked(False)
         self.selection_bar.setVisible(False)
+
+    def _on_escape(self):
+        """Handle Escape key - exit selection mode or clear name filter."""
+        if self._stream_model and self._stream_model.is_selection_mode():
+            self._exit_selection_mode()
+        elif self._name_filter:
+            self.name_filter_edit.clear()
+
+    def _on_delete_key(self):
+        """Handle Delete key - delete selected in selection mode."""
+        if self._stream_model and self._stream_model.is_selection_mode():
+            self._delete_selected()
+
+    def _on_ctrl_a(self):
+        """Handle Ctrl+A - select all in selection mode, or enter selection mode."""
+        if self.name_filter_edit.hasFocus():
+            self.name_filter_edit.selectAll()
+            return
+        if self._stream_model:
+            if not self._stream_model.is_selection_mode():
+                self._toggle_selection_mode()
+            self._select_all()
 
     def _select_all(self):
         """Select all visible rows."""
@@ -1231,12 +1276,13 @@ class TrashDialog(QDialog):
         btn_layout.addWidget(restore_btn)
 
         delete_btn = QPushButton("Delete Permanently")
-        delete_btn.setStyleSheet("color: red;")
+        error_color = get_theme().status_error
+        delete_btn.setStyleSheet(f"color: {error_color};")
         delete_btn.clicked.connect(self._delete_permanently)
         btn_layout.addWidget(delete_btn)
 
         empty_btn = QPushButton("Empty Trash")
-        empty_btn.setStyleSheet("color: red;")
+        empty_btn.setStyleSheet(f"color: {error_color};")
         empty_btn.clicked.connect(self._empty_trash)
         btn_layout.addWidget(empty_btn)
 

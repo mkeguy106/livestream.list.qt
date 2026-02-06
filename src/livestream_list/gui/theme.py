@@ -106,26 +106,26 @@ DARK_THEME = ThemeColors(
     # Text colors
     text_primary="#eeeeee",
     text_secondary="#cccccc",
-    text_muted="#888888",
+    text_muted="#999999",
     # Accent colors (Twitch purple)
-    accent="#6441a5",
-    accent_hover="#7d5bbe",
+    accent="#7b5cbf",
+    accent_hover="#9171d6",
     # Borders
     border="#444444",
     border_light="#333333",
     # Selection
-    selection_bg="#6441a5",
+    selection_bg="#7b5cbf",
     selection_text="#ffffff",
     # Status colors
     status_live="#4CAF50",
-    status_offline="#888888",
+    status_offline="#999999",
     status_error="#f44336",
     status_success="#4CAF50",
     status_info="#2196F3",
     # Chat-specific
     chat_bg="#0e1525",
     chat_input_bg="#16213e",
-    chat_tab_active="#6441a5",
+    chat_tab_active="#7b5cbf",
     chat_tab_inactive="#16213e",
     chat_banner_bg="#16213e",
     chat_banner_text="#cccccc",
@@ -133,12 +133,12 @@ DARK_THEME = ThemeColors(
     chat_url_selected="#90d5ff",
     chat_system_message="#be96ff",
     chat_alt_row_even="#00000000",
-    chat_alt_row_odd="#0fffffff",
+    chat_alt_row_odd="#1affffff",
     chat_mention_highlight="#33ff8800",
     # Completer/popup backgrounds
     popup_bg="#1a1a2e",
     popup_hover="#1f2b4d",
-    popup_selected="#6441a5",
+    popup_selected="#7b5cbf",
     popup_border="#444444",
     # Toolbar
     toolbar_bg="#0e1525",
@@ -153,7 +153,7 @@ LIGHT_THEME = ThemeColors(
     # Text colors
     text_primary="#1a1a1a",
     text_secondary="#444444",
-    text_muted="#888888",
+    text_muted="#666666",
     # Accent colors (Twitch purple)
     accent="#6441a5",
     accent_hover="#7d5bbe",
@@ -165,8 +165,8 @@ LIGHT_THEME = ThemeColors(
     selection_text="#ffffff",
     # Status colors
     status_live="#2e7d32",
-    status_offline="#757575",
-    status_error="#c62828",
+    status_offline="#555555",
+    status_error="#b71c1c",
     status_success="#2e7d32",
     status_info="#1565c0",
     # Chat-specific
@@ -176,11 +176,11 @@ LIGHT_THEME = ThemeColors(
     chat_tab_inactive="#e8e8e8",
     chat_banner_bg="#e8e8f0",
     chat_banner_text="#333333",
-    chat_url="#0366d6",
-    chat_url_selected="#0550ae",
-    chat_system_message="#7b61a5",
+    chat_url="#0550ae",
+    chat_url_selected="#003d82",
+    chat_system_message="#6b4f96",
     chat_alt_row_even="#00000000",
-    chat_alt_row_odd="#08000000",
+    chat_alt_row_odd="#0f000000",
     chat_mention_highlight="#40ff8800",
     # Completer/popup backgrounds
     popup_bg="#ffffff",
@@ -189,6 +189,53 @@ LIGHT_THEME = ThemeColors(
     popup_border="#cccccc",
     # Toolbar
     toolbar_bg="#e8e8e8",
+)
+
+# High contrast theme (WCAG AAA compliant)
+HIGH_CONTRAST_THEME = ThemeColors(
+    # Window and widget backgrounds
+    window_bg="#000000",
+    widget_bg="#0a0a0a",
+    input_bg="#1a1a1a",
+    # Text colors (all exceed 7:1 on black)
+    text_primary="#ffffff",
+    text_secondary="#e0e0e0",
+    text_muted="#bbbbbb",
+    # Accent colors (bright yellow for visibility)
+    accent="#ffcc00",
+    accent_hover="#ffe066",
+    # Borders (high visibility)
+    border="#888888",
+    border_light="#666666",
+    # Selection
+    selection_bg="#ffcc00",
+    selection_text="#000000",
+    # Status colors (bright, saturated)
+    status_live="#00ff00",
+    status_offline="#bbbbbb",
+    status_error="#ff4444",
+    status_success="#00ff00",
+    status_info="#44aaff",
+    # Chat-specific
+    chat_bg="#000000",
+    chat_input_bg="#1a1a1a",
+    chat_tab_active="#ffcc00",
+    chat_tab_inactive="#1a1a1a",
+    chat_banner_bg="#1a1a1a",
+    chat_banner_text="#e0e0e0",
+    chat_url="#44aaff",
+    chat_url_selected="#88ccff",
+    chat_system_message="#ddaaff",
+    chat_alt_row_even="#00000000",
+    chat_alt_row_odd="#20ffffff",
+    chat_mention_highlight="#55ff8800",
+    # Completer/popup backgrounds
+    popup_bg="#0a0a0a",
+    popup_hover="#222222",
+    popup_selected="#ffcc00",
+    popup_border="#888888",
+    # Toolbar
+    toolbar_bg="#000000",
 )
 
 # Platform colors (same for both themes)
@@ -259,7 +306,7 @@ class ThemeManager:
             return cls._cached_is_dark
 
         mode = cls.get_theme_mode()
-        if mode == ThemeMode.DARK:
+        if mode == ThemeMode.DARK or mode == ThemeMode.HIGH_CONTRAST:
             result = True
         elif mode == ThemeMode.LIGHT:
             result = False
@@ -278,6 +325,8 @@ class ThemeManager:
     @classmethod
     def colors(cls) -> ThemeColors:
         """Get the current theme colors."""
+        if cls.get_theme_mode() == ThemeMode.HIGH_CONTRAST:
+            return HIGH_CONTRAST_THEME
         return DARK_THEME if cls.is_dark_mode() else LIGHT_THEME
 
 

@@ -21,6 +21,7 @@ class ThemeMode(str, _Enum):
     AUTO = "auto"  # Follow system preference
     LIGHT = "light"
     DARK = "dark"
+    HIGH_CONTRAST = "high_contrast"
 
 APP_NAME = "livestream-list-qt"
 APP_AUTHOR = "livestream-list-qt"

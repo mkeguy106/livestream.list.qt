@@ -78,7 +78,10 @@ class PreferencesDialog(QDialog):
 
         self.setWindowTitle("Preferences")
         self.setMinimumSize(500, 500)
-        self.resize(550, 550)
+        # Restore saved size or use default
+        pref_w = getattr(self.app.settings, "_prefs_width", 550)
+        pref_h = getattr(self.app.settings, "_prefs_height", 550)
+        self.resize(pref_w, pref_h)
 
         layout = QVBoxLayout(self)
 
@@ -105,12 +108,24 @@ class PreferencesDialog(QDialog):
         if initial_tab:
             tabs.setCurrentIndex(initial_tab)
 
-        # Close button
+        # Dialog buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
+        apply_btn = buttons.addButton(QDialogButtonBox.Apply)
+        apply_btn.clicked.connect(self._on_apply)
         layout.addWidget(buttons)
 
         self._loading = False  # Init complete, allow updates
+
+    def _on_apply(self):
+        """Explicitly save all current settings."""
+        self.app.save_settings()
+
+    def closeEvent(self, event):  # noqa: N802
+        """Save dialog size on close."""
+        self.app.settings._prefs_width = self.width()
+        self.app.settings._prefs_height = self.height()
+        super().closeEvent(event)
 
     def _create_general_tab(self) -> QWidget:
         """Create the General settings tab."""
