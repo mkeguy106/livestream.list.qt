@@ -307,6 +307,28 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
+        # Hide offline toggle
+        self.hide_offline_btn = QToolButton()
+        self.hide_offline_btn.setText("\u25c9")  # ◉ fisheye - "live only"
+        self.hide_offline_btn.setToolTip("Hide offline channels")
+        self.hide_offline_btn.setCheckable(True)
+        self.hide_offline_btn.setChecked(self.app.settings.hide_offline)
+        self.hide_offline_btn.setProperty("filterToggle", True)
+        self.hide_offline_btn.clicked.connect(self._on_filter_changed)
+        toolbar.addWidget(self.hide_offline_btn)
+
+        # Favorites toggle
+        self.favorites_btn = QToolButton()
+        self.favorites_btn.setText("\u2605")  # ★ black star
+        self.favorites_btn.setToolTip("Show favorites only")
+        self.favorites_btn.setCheckable(True)
+        self.favorites_btn.setChecked(self.app.settings.favorites_only)
+        self.favorites_btn.setProperty("filterToggle", True)
+        self.favorites_btn.clicked.connect(self._on_filter_changed)
+        toolbar.addWidget(self.favorites_btn)
+
+        toolbar.addSeparator()
+
         # Selection mode button
         self.select_btn = QToolButton()
         self.select_btn.setText("☑")
@@ -327,18 +349,6 @@ class MainWindow(QMainWindow):
         filter_widget = QWidget()
         filter_layout = QHBoxLayout(filter_widget)
         filter_layout.setContentsMargins(8, 4, 8, 4)
-
-        # Hide offline checkbox
-        self.hide_offline_cb = QCheckBox("Hide Offline")
-        self.hide_offline_cb.setChecked(self.app.settings.hide_offline)
-        self.hide_offline_cb.stateChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.hide_offline_cb)
-
-        # Favorites checkbox
-        self.favorites_cb = QCheckBox("Favorites")
-        self.favorites_cb.setChecked(self.app.settings.favorites_only)
-        self.favorites_cb.stateChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.favorites_cb)
 
         # Name filter
         self.name_filter_edit = QLineEdit()
@@ -385,8 +395,8 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self):
         """Apply current settings to the UI."""
-        self.hide_offline_cb.setChecked(self.app.settings.hide_offline)
-        self.favorites_cb.setChecked(self.app.settings.favorites_only)
+        self.hide_offline_btn.setChecked(self.app.settings.hide_offline)
+        self.favorites_btn.setChecked(self.app.settings.favorites_only)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
         # Invalidate delegate cache in case layout settings changed
         if self._stream_delegate:
@@ -464,12 +474,12 @@ class MainWindow(QMainWindow):
 
         if not livestreams:
             # Check why empty
-            if self.hide_offline_cb.isChecked():
+            if self.hide_offline_btn.isChecked():
                 if not self._initial_check_complete:
                     self.all_offline_label.setText("Checking stream status...")
                 else:
                     self.all_offline_label.setText("All channels are offline")
-            elif self.favorites_cb.isChecked():
+            elif self.favorites_btn.isChecked():
                 self.all_offline_label.setText("No favorite channels")
             elif self._name_filter:
                 self.all_offline_label.setText(f"No channels match '{self._name_filter}'")
@@ -508,8 +518,8 @@ class MainWindow(QMainWindow):
         livestreams = monitor.livestreams
 
         # Apply filters
-        hide_offline = self.hide_offline_cb.isChecked()
-        favorites_only = self.favorites_cb.isChecked()
+        hide_offline = self.hide_offline_btn.isChecked()
+        favorites_only = self.favorites_btn.isChecked()
 
         filtered = []
         for ls in livestreams:
@@ -640,8 +650,8 @@ class MainWindow(QMainWindow):
 
     def _on_filter_changed(self):
         """Handle filter checkbox changes."""
-        self.app.settings.hide_offline = self.hide_offline_cb.isChecked()
-        self.app.settings.favorites_only = self.favorites_cb.isChecked()
+        self.app.settings.hide_offline = self.hide_offline_btn.isChecked()
+        self.app.settings.favorites_only = self.favorites_btn.isChecked()
         self._platform_filter = self.platform_combo.currentData()
         self.app.save_settings()
         self.refresh_stream_list()
@@ -739,6 +749,11 @@ class MainWindow(QMainWindow):
                 QToolButton:checked {{
                     background-color: {theme.accent};
                     color: {theme.selection_text};
+                }}
+                QToolButton[filterToggle="true"]:checked {{
+                    background-color: {theme.accent_hover};
+                    color: {theme.text_primary};
+                    border: 1px solid {theme.accent};
                 }}
                 QListWidget {{
                     background-color: {theme.widget_bg};
