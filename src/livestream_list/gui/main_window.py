@@ -220,16 +220,17 @@ class MainWindow(QMainWindow):
 
         # Status bar
         self.status_bar = QStatusBar()
+        self.status_bar.setSizeGripEnabled(False)
         self.setStatusBar(self.status_bar)
 
         self.status_label = QLabel("Ready")
         self.status_bar.addWidget(self.status_label, 1)
 
         self.live_count_label = QLabel("")
+        self.live_count_label.setContentsMargins(0, 0, 6, 0)
         self.status_bar.addPermanentWidget(self.live_count_label)
 
-        self.window_size_label = QLabel("")
-        self.status_bar.addPermanentWidget(self.window_size_label)
+
 
     def _create_menu_bar(self):
         """Create the menu bar."""
@@ -660,6 +661,7 @@ class MainWindow(QMainWindow):
 
     def _on_stream_online(self, livestream):
         """Handle stream going online."""
+        self.set_status(f"{livestream.display_name} is live!")
         self.refresh_stream_list()
 
     def _on_refresh_complete(self):
@@ -1086,11 +1088,6 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import: {e}")
-
-    def resizeEvent(self, event):  # noqa: N802
-        """Update window size label on resize."""
-        super().resizeEvent(event)
-        self.window_size_label.setText(f"{self.width()} \u00d7 {self.height()}")
 
     def closeEvent(self, event):  # noqa: N802
         """Handle window close event."""
