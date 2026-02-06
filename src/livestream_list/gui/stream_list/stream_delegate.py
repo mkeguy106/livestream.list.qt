@@ -318,10 +318,12 @@ class StreamRowDelegate(QStyledItemDelegate):
         bold_font.setBold(True)
         painter.setFont(bold_font)
 
-        if self._settings.platform_colors:
+        if is_selected:
+            name_color = self._selection_text
+        elif self._settings.platform_colors:
             name_color = QColor(PLATFORM_COLORS.get(channel.platform, "#888888"))
         else:
-            name_color = self._selection_text if is_selected else self._text_primary
+            name_color = self._text_primary
 
         painter.setPen(name_color)
         bold_fm = QFontMetrics(bold_font)
