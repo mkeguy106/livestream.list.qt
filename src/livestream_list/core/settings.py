@@ -156,7 +156,7 @@ class BuiltinChatSettings:
     show_emotes: bool = True
     animate_emotes: bool = True
     line_spacing: int = 4
-    max_messages: int = 5000
+    max_messages: int = 1000
     emote_providers: list[str] = field(default_factory=lambda: ["7tv", "bttv", "ffz"])
     show_alternating_rows: bool = True
     show_metrics: bool = True
@@ -605,7 +605,7 @@ class Settings:
                     builtin_data.get("line_spacing"), 4, min_val=0, max_val=20
                 ),
                 max_messages=cls._validate_int(
-                    builtin_data.get("max_messages"), 5000, min_val=100, max_val=50000
+                    builtin_data.get("max_messages"), 1000, min_val=100, max_val=50000
                 ),
                 emote_providers=builtin_data.get("emote_providers", ["7tv", "bttv", "ffz"]),
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),

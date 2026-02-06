@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         """Set up the main window UI."""
         self.setWindowTitle("Livestream List (Qt)")
+        self.setMinimumWidth(460)
         self.resize(self.app.settings.window.width, self.app.settings.window.height)
         # Restore window position if saved
         if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
@@ -98,11 +99,8 @@ class MainWindow(QMainWindow):
         # Menu bar
         self._create_menu_bar()
 
-        # Toolbar
+        # Toolbar (includes all buttons, filters, and sort)
         self._create_toolbar()
-
-        # Filter bar
-        self._create_filter_bar(layout)
 
         # Stacked widget for different views
         self.stack = QStackedWidget()
@@ -230,6 +228,9 @@ class MainWindow(QMainWindow):
         self.live_count_label = QLabel("")
         self.status_bar.addPermanentWidget(self.live_count_label)
 
+        self.window_size_label = QLabel("")
+        self.status_bar.addPermanentWidget(self.window_size_label)
+
     def _create_menu_bar(self):
         """Create the menu bar."""
         menubar = self.menuBar()
@@ -344,33 +345,25 @@ class MainWindow(QMainWindow):
         self.trash_btn.clicked.connect(self._show_trash_dialog)
         toolbar.addWidget(self.trash_btn)
 
-    def _create_filter_bar(self, parent_layout):
-        """Create the filter/sort bar."""
-        filter_widget = QWidget()
-        filter_layout = QHBoxLayout(filter_widget)
-        filter_layout.setContentsMargins(8, 4, 8, 4)
+        toolbar.addSeparator()
 
         # Name filter
         self.name_filter_edit = QLineEdit()
         self.name_filter_edit.setPlaceholderText("Filter by name...")
         self.name_filter_edit.setMaximumWidth(200)
         self.name_filter_edit.textChanged.connect(self._on_name_filter_changed)
-        filter_layout.addWidget(self.name_filter_edit)
-
-        filter_layout.addStretch()
+        toolbar.addWidget(self.name_filter_edit)
 
         # Platform filter
-        filter_layout.addWidget(QLabel("Platform:"))
         self.platform_combo = QComboBox()
         self.platform_combo.addItem("All", None)
         self.platform_combo.addItem("Twitch", StreamPlatform.TWITCH)
         self.platform_combo.addItem("YouTube", StreamPlatform.YOUTUBE)
         self.platform_combo.addItem("Kick", StreamPlatform.KICK)
         self.platform_combo.currentIndexChanged.connect(self._on_filter_changed)
-        filter_layout.addWidget(self.platform_combo)
+        toolbar.addWidget(self.platform_combo)
 
         # Sort dropdown
-        filter_layout.addWidget(QLabel("Sort:"))
         self.sort_combo = QComboBox()
         self.sort_combo.addItem("Name", SortMode.NAME)
         self.sort_combo.addItem("Viewers", SortMode.VIEWERS)
@@ -379,9 +372,7 @@ class MainWindow(QMainWindow):
         self.sort_combo.addItem("Time Live", SortMode.TIME_LIVE)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
-        filter_layout.addWidget(self.sort_combo)
-
-        parent_layout.addWidget(filter_widget)
+        toolbar.addWidget(self.sort_combo)
 
     def _setup_shortcuts(self):
         """Set up keyboard shortcuts."""
@@ -1095,6 +1086,11 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import: {e}")
+
+    def resizeEvent(self, event):  # noqa: N802
+        """Update window size label on resize."""
+        super().resizeEvent(event)
+        self.window_size_label.setText(f"{self.width()} \u00d7 {self.height()}")
 
     def closeEvent(self, event):  # noqa: N802
         """Handle window close event."""
