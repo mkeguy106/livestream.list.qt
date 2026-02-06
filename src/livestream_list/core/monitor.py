@@ -5,7 +5,7 @@ import json
 import logging
 import threading
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..api.base import BaseApiClient
 from ..api.kick import KickApiClient
@@ -38,6 +38,9 @@ class StreamMonitor:
         self._on_stream_online: list[Callable[[Livestream], None]] = []
         self._on_stream_offline: list[Callable[[Livestream], None]] = []
         self._on_refresh_complete: list[Callable[[list[Livestream]], None]] = []
+
+        # Trash bin for deleted channels
+        self._trash: list[dict] = []
 
         # Track initial load to suppress startup notifications
         self._initial_load_complete = False
@@ -516,6 +519,8 @@ class StreamMonitor:
         except (json.JSONDecodeError, KeyError, TypeError) as e:
             logger.error(f"Error loading channels: {e}")
 
+        self._load_trash()
+
     async def _save_channels(self) -> None:
         """Save channels to disk."""
         path = get_data_dir() / "channels.json"
@@ -523,3 +528,86 @@ class StreamMonitor:
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self._serialize_channels(), f, indent=2)
+
+    # --- Trash bin management ---
+
+    def _load_trash(self) -> None:
+        """Load trash from disk."""
+        path = get_data_dir() / "trash.json"
+        if not path.exists():
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                self._trash = json.load(f)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.error(f"Error loading trash: {e}")
+            self._trash = []
+
+    def _save_trash(self) -> None:
+        """Save trash to disk."""
+        path = get_data_dir() / "trash.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self._trash, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving trash: {e}")
+
+    def trash_channels(self, keys: list[str]) -> None:
+        """Move channels to trash by their unique keys."""
+        with self._state_lock:
+            for key in keys:
+                ch = self._channels.pop(key, None)
+                self._livestreams.pop(key, None)
+                if ch:
+                    self._trash.append(
+                        {
+                            "channel_id": ch.channel_id,
+                            "platform": ch.platform.value,
+                            "display_name": ch.display_name,
+                            "favorite": ch.favorite,
+                            "dont_notify": ch.dont_notify,
+                            "trashed_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+        self._save_channels_sync()
+        self._save_trash()
+
+    def restore_from_trash(self, indices: list[int]) -> None:
+        """Restore channels from trash by their indices (sorted descending for safe removal)."""
+        restored: list[dict] = []
+        for idx in sorted(indices, reverse=True):
+            if 0 <= idx < len(self._trash):
+                restored.append(self._trash.pop(idx))
+
+        with self._state_lock:
+            for entry in restored:
+                channel = Channel(
+                    channel_id=entry["channel_id"],
+                    platform=StreamPlatform(entry["platform"]),
+                    display_name=entry.get("display_name"),
+                    favorite=entry.get("favorite", False),
+                    dont_notify=entry.get("dont_notify", False),
+                )
+                if channel.unique_key not in self._channels:
+                    self._channels[channel.unique_key] = channel
+                    self._livestreams[channel.unique_key] = Livestream(channel=channel)
+
+        self._save_channels_sync()
+        self._save_trash()
+
+    def permanently_delete_trash(self, indices: list[int]) -> None:
+        """Permanently delete entries from trash by indices."""
+        for idx in sorted(indices, reverse=True):
+            if 0 <= idx < len(self._trash):
+                self._trash.pop(idx)
+        self._save_trash()
+
+    def empty_trash(self) -> None:
+        """Clear all trash entries."""
+        self._trash.clear()
+        self._save_trash()
+
+    def get_trash(self) -> list[dict]:
+        """Return a copy of the trash list."""
+        return list(self._trash)

@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -63,6 +65,7 @@ class MainWindow(QMainWindow):
         self._platform_filter: StreamPlatform | None = None
         self._chat_launcher = ChatLauncher(app.settings.chat)
         self._force_quit = False  # When True, closeEvent quits instead of minimizing
+        self._last_clicked_index = None  # Anchor for shift+click range selection
 
         # Debounce mechanism for refresh_stream_list to prevent rapid successive calls
         self._refresh_pending = False
@@ -312,6 +315,13 @@ class MainWindow(QMainWindow):
         self.select_btn.clicked.connect(self._toggle_selection_mode)
         toolbar.addWidget(self.select_btn)
 
+        # Trash bin button
+        self.trash_btn = QToolButton()
+        self.trash_btn.setText("\u2672")
+        self.trash_btn.setToolTip("Trash bin")
+        self.trash_btn.clicked.connect(self._show_trash_dialog)
+        toolbar.addWidget(self.trash_btn)
+
     def _create_filter_bar(self, parent_layout):
         """Create the filter/sort bar."""
         filter_widget = QWidget()
@@ -450,7 +460,7 @@ class MainWindow(QMainWindow):
         livestreams = self._get_filtered_sorted_livestreams()
         t2 = time.perf_counter()
         if t2 - t1 > 0.05:
-            logger.warning(f"_get_filtered_sorted_livestreams took {(t2-t1)*1000:.1f}ms")
+            logger.warning(f"_get_filtered_sorted_livestreams took {(t2 - t1) * 1000:.1f}ms")
 
         if not livestreams:
             # Check why empty
@@ -485,8 +495,8 @@ class MainWindow(QMainWindow):
         total = t5 - t0
         if total > 0.1:
             logger.warning(
-                f"_update_view took {total*1000:.1f}ms "
-                f"(filter/sort: {(t2-t1)*1000:.1f}ms, populate: {(t4-t3)*1000:.1f}ms)"
+                f"_update_view took {total * 1000:.1f}ms "
+                f"(filter/sort: {(t2 - t1) * 1000:.1f}ms, populate: {(t4 - t3) * 1000:.1f}ms)"
             )
 
     def _get_filtered_sorted_livestreams(self) -> list[Livestream]:
@@ -931,21 +941,20 @@ class MainWindow(QMainWindow):
         self.selection_count_label.setText(f"{count} selected")
 
     def _delete_selected(self):
-        """Delete selected channels."""
+        """Move selected channels to trash."""
         selected_keys = self._stream_model.get_selected_keys() if self._stream_model else []
         if not selected_keys:
             return
 
         reply = QMessageBox.question(
             self,
-            "Delete Channels",
-            f"Delete {len(selected_keys)} channel(s)?",
+            "Move to Trash",
+            f"Move {len(selected_keys)} channel(s) to trash?",
             QMessageBox.Yes | QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
-            self.app.monitor.remove_channels(selected_keys)
-            self.app.save_channels()
+            self.app.monitor.trash_channels(selected_keys)
             self._exit_selection_mode()
             self.refresh_stream_list()
 
@@ -1130,10 +1139,14 @@ class MainWindow(QMainWindow):
         self.app.save_settings()
 
     def eventFilter(self, obj, event):  # noqa: N802
-        """Handle Ctrl+Wheel on stream list for font scaling."""
+        """Handle mouse/wheel events on stream list viewport."""
         from PySide6.QtCore import QEvent
 
-        if obj == self.stream_list.viewport() and event.type() == QEvent.Type.Wheel:
+        if obj != self.stream_list.viewport():
+            return super().eventFilter(obj, event)
+
+        # Ctrl+Wheel for font scaling
+        if event.type() == QEvent.Type.Wheel:
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 default_size = QApplication.font().pointSize()
                 current = self.app.settings.font_size
@@ -1143,15 +1156,169 @@ class MainWindow(QMainWindow):
                 new_size = max(6, min(30, current + delta))
                 self.app.settings.font_size = new_size
                 self.app.save_settings()
-                # Invalidate delegate size cache and force relayout
                 if self._stream_delegate:
                     self._stream_delegate.invalidate_size_cache()
                 if self._stream_model:
                     self._stream_model.layoutChanged.emit()
                 return True
+
+        # Selection mode: shift+click for range, track anchor on normal click
+        if (
+            event.type() == QEvent.Type.MouseButtonRelease
+            and event.button() == Qt.MouseButton.LeftButton
+            and self._stream_model
+            and self._stream_model.is_selection_mode()
+        ):
+            index = self.stream_list.indexAt(event.pos())
+            if index.isValid():
+                has_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+                if has_shift and self._last_clicked_index is not None:
+                    self._stream_model.select_range(self._last_clicked_index.row(), index.row())
+                    self._update_selection_count()
+                    return True
+                else:
+                    # Track anchor for next shift+click (let editorEvent handle toggle)
+                    self._last_clicked_index = index
+
         return super().eventFilter(obj, event)
+
+    # --- Trash dialog ---
+
+    def _show_trash_dialog(self):
+        """Show the trash bin dialog."""
+        if not self.app.monitor:
+            return
+        dialog = TrashDialog(self, self.app.monitor)
+        dialog.exec()
+        if dialog.restored_any:
+            self.app.refresh(on_complete=lambda: self.set_status("Ready"))
+            self.refresh_stream_list()
 
     def _quit_app(self):
         """Quit the application (bypasses minimize-to-tray)."""
         self._force_quit = True
         self.close()
+
+
+class TrashDialog(QDialog):
+    """Dialog for managing trashed channels."""
+
+    def __init__(self, parent, monitor):
+        super().__init__(parent)
+        self.monitor = monitor
+        self.restored_any = False
+        self.setWindowTitle("Trash Bin")
+        self.resize(450, 400)
+
+        layout = QVBoxLayout(self)
+
+        self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        layout.addWidget(self.list_widget)
+
+        btn_layout = QHBoxLayout()
+
+        restore_btn = QPushButton("Restore Selected")
+        restore_btn.clicked.connect(self._restore_selected)
+        btn_layout.addWidget(restore_btn)
+
+        delete_btn = QPushButton("Delete Permanently")
+        delete_btn.setStyleSheet("color: red;")
+        delete_btn.clicked.connect(self._delete_permanently)
+        btn_layout.addWidget(delete_btn)
+
+        empty_btn = QPushButton("Empty Trash")
+        empty_btn.setStyleSheet("color: red;")
+        empty_btn.clicked.connect(self._empty_trash)
+        btn_layout.addWidget(empty_btn)
+
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
+
+        self._populate()
+
+    def _populate(self):
+        """Populate the list with trashed channels."""
+        self.list_widget.clear()
+        trash = self.monitor.get_trash()
+        if not trash:
+            item = QListWidgetItem("Trash is empty")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            self.list_widget.addItem(item)
+            return
+
+        now = datetime.now(timezone.utc)
+        for i, entry in enumerate(trash):
+            name = entry.get("display_name") or entry.get("channel_id", "?")
+            platform = entry.get("platform", "?")
+            trashed_at = entry.get("trashed_at", "")
+            age = ""
+            if trashed_at:
+                try:
+                    dt = datetime.fromisoformat(trashed_at)
+                    delta = now - dt
+                    if delta.days > 0:
+                        age = f"{delta.days}d ago"
+                    elif delta.seconds >= 3600:
+                        age = f"{delta.seconds // 3600}h ago"
+                    else:
+                        age = f"{max(1, delta.seconds // 60)}m ago"
+                except ValueError:
+                    pass
+            label = f"{name} ({platform})"
+            if age:
+                label += f" \u2014 trashed {age}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, i)
+            self.list_widget.addItem(item)
+
+    def _get_selected_indices(self) -> list[int]:
+        """Get trash indices of selected items."""
+        indices = []
+        for item in self.list_widget.selectedItems():
+            idx = item.data(Qt.ItemDataRole.UserRole)
+            if idx is not None:
+                indices.append(idx)
+        return indices
+
+    def _restore_selected(self):
+        """Restore selected channels from trash."""
+        indices = self._get_selected_indices()
+        if not indices:
+            return
+        self.monitor.restore_from_trash(indices)
+        self.restored_any = True
+        self._populate()
+
+    def _delete_permanently(self):
+        """Permanently delete selected channels from trash."""
+        indices = self._get_selected_indices()
+        if not indices:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Delete Permanently",
+            f"Permanently delete {len(indices)} channel(s)? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.monitor.permanently_delete_trash(indices)
+            self._populate()
+
+    def _empty_trash(self):
+        """Empty the entire trash."""
+        trash = self.monitor.get_trash()
+        if not trash:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Empty Trash",
+            f"Permanently delete all {len(trash)} trashed channel(s)? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self.monitor.empty_trash()
+            self._populate()

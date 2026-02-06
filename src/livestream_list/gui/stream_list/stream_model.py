@@ -172,6 +172,26 @@ class StreamListModel(QAbstractListModel):
                 [SelectionRole],
             )
 
+    def select_range(self, start_row: int, end_row: int) -> None:
+        """Select all rows in a range (inclusive), adding to existing selection."""
+        if not self._selection_mode:
+            return
+
+        lo = min(start_row, end_row)
+        hi = max(start_row, end_row)
+        lo = max(0, lo)
+        hi = min(hi, len(self._streams) - 1)
+
+        for i in range(lo, hi + 1):
+            self._selected_keys.add(self._streams[i].channel.unique_key)
+
+        if self._streams:
+            self.dataChanged.emit(
+                self.index(lo),
+                self.index(hi),
+                [SelectionRole],
+            )
+
     def deselect_all(self) -> None:
         """Deselect all streams."""
         if not self._selected_keys:

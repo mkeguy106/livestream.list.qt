@@ -3,7 +3,7 @@
 import logging
 import time
 
-from PySide6.QtCore import QEvent, QModelIndex, QRect, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QLineF, QModelIndex, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
@@ -240,10 +240,11 @@ class StreamRowDelegate(QStyledItemDelegate):
             painter.setPen(self._text_muted)
             painter.drawRect(checkbox_rect.adjusted(2, 2, -2, -2))
             if is_selected_checkbox:
-                painter.setPen(self._accent)
-                painter.setBrush(self._accent)
-                painter.drawRect(checkbox_rect.adjusted(4, 4, -4, -4))
-                painter.setBrush(Qt.BrushStyle.NoBrush)
+                pen = QPen(QColor(220, 40, 40), 2.0)
+                painter.setPen(pen)
+                inner = checkbox_rect.adjusted(4, 4, -4, -4)
+                painter.drawLine(QLineF(inner.topLeft(), inner.bottomRight()))
+                painter.drawLine(QLineF(inner.topRight(), inner.bottomLeft()))
             x += CHECKBOX_WIDTH + spacing
 
         # === LIVE INDICATOR (draw circle, not emoji - avoids font fallback overhead) ===
