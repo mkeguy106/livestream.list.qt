@@ -1391,6 +1391,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 return True
 
         # Username click → show user's chat history; URL click → open browser
+        # @mention click → show conversation; reply context click → show conversation
         if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
             if event.button() == Qt.MouseButton.LeftButton:
                 index = self._list_view.indexAt(event.pos())
@@ -1411,8 +1412,23 @@ class ChatWidget(QWidget, ChatSearchMixin):
                             except Exception as e:
                                 logger.error(f"Failed to open URL: {e}")
                             return True
+                        mention = self._delegate._get_mention_at_position(
+                            event.pos(), option, message
+                        )
+                        if mention:
+                            self._show_conversation(
+                                message.user.display_name, mention
+                            )
+                            return True
+                        reply_rect = self._delegate._get_reply_context_rect(option, message)
+                        if reply_rect.isValid() and reply_rect.contains(event.pos()):
+                            self._show_conversation(
+                                message.user.display_name,
+                                message.reply_parent_display_name,
+                            )
+                            return True
 
-        # Cursor changes for clickable elements (URLs, usernames)
+        # Cursor changes for clickable elements (URLs, usernames, @mentions, reply context)
         if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
             viewport = self._list_view.viewport()
             index = self._list_view.indexAt(event.pos())
@@ -1428,6 +1444,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
                         return False
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+                    mention = self._delegate._get_mention_at_position(
+                        event.pos(), option, message
+                    )
+                    if mention:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+                    reply_rect = self._delegate._get_reply_context_rect(option, message)
+                    if reply_rect.isValid() and reply_rect.contains(event.pos()):
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False
             viewport.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1497,6 +1523,49 @@ class ChatWidget(QWidget, ChatSearchMixin):
             parent=self,
         )
         # Non-modal: main window stays interactive, multiple dialogs allowed
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.destroyed.connect(lambda: self._history_dialogs.discard(dialog))
+        self._history_dialogs.add(dialog)
+        dialog.show()
+
+    def _show_conversation(self, user_a_name: str, user_b_name: str) -> None:
+        """Show a dialog with the conversation between two users.
+
+        A message is considered part of the conversation if it's from user A
+        mentioning/replying-to B, or from user B mentioning/replying-to A.
+        """
+        if user_a_name.lower() == user_b_name.lower():
+            return
+
+        def matches_conversation(msg: ChatMessage) -> bool:
+            name = msg.user.display_name.lower()
+            a_low = user_a_name.lower()
+            b_low = user_b_name.lower()
+            if name == a_low:
+                other = b_low
+            elif name == b_low:
+                other = a_low
+            else:
+                return False
+            # Check reply parent
+            if msg.reply_parent_display_name and msg.reply_parent_display_name.lower() == other:
+                return True
+            # Check @mentions in text
+            for m in re.finditer(r"@(\w+)", msg.text):
+                if m.group(1).lower() == other:
+                    return True
+            return False
+
+        convo_messages = [msg for msg in self._model._messages if matches_conversation(msg)]
+
+        dialog = ConversationDialog(
+            user_a_name=user_a_name,
+            user_b_name=user_b_name,
+            messages=convo_messages,
+            settings=self.settings,
+            image_store=self._image_store,
+            parent=self,
+        )
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.destroyed.connect(lambda: self._history_dialogs.discard(dialog))
         self._history_dialogs.add(dialog)
@@ -1763,6 +1832,326 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
     # Search methods provided by ChatSearchMixin:
     # _toggle_search, _close_search, _on_search_text_changed,
     # _search_next, _search_prev, _scroll_to_search_match
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Handle Escape to close search bar."""
+        if self._handle_search_key_press(event.key()):
+            return
+        super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle Ctrl+Wheel, URL clicks, and cursor changes."""
+        if obj is not self._list_view.viewport():
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    new_size = min(self._settings.font_size + 1, 30)
+                elif delta < 0:
+                    new_size = max(self._settings.font_size - 1, 4)
+                else:
+                    return True
+                if new_size != self._settings.font_size:
+                    self._settings.font_size = new_size
+                    self._model.layoutChanged.emit()
+                return True
+
+        # URL click → open browser
+        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
+            if event.button() == Qt.MouseButton.LeftButton:
+                index = self._list_view.indexAt(event.pos())
+                if index.isValid():
+                    message = index.data(MessageRole)
+                    if message and isinstance(message, ChatMessage):
+                        option = QStyleOptionViewItem()
+                        self._list_view.initViewItemOption(option)
+                        option.rect = self._list_view.visualRect(index)
+                        url = self._delegate._get_url_at_position(event.pos(), option, message)
+                        if url:
+                            try:
+                                webbrowser.open(url)
+                            except Exception as e:
+                                logger.error(f"Failed to open URL: {e}")
+                            return True
+
+        # Cursor changes for URLs
+        if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+            viewport = self._list_view.viewport()
+            index = self._list_view.indexAt(event.pos())
+            if index.isValid():
+                message = index.data(MessageRole)
+                if message and isinstance(message, ChatMessage):
+                    option = QStyleOptionViewItem()
+                    self._list_view.initViewItemOption(option)
+                    option.rect = self._list_view.visualRect(index)
+                    url = self._delegate._get_url_at_position(event.pos(), option, message)
+                    if url:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+            viewport.setCursor(Qt.CursorShape.ArrowCursor)
+            return False
+
+        return super().eventFilter(obj, event)
+
+
+class ConversationDialog(QDialog, ChatSearchMixin):
+    """Dialog showing the conversation between two users (via @mentions and replies)."""
+
+    def __init__(
+        self,
+        user_a_name: str,
+        user_b_name: str,
+        messages: list[ChatMessage],
+        settings: BuiltinChatSettings,
+        image_store: EmoteCache | None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
+        self._user_a_name = user_a_name
+        self._user_b_name = user_b_name
+        self._settings = settings
+        self.setWindowTitle(f"Conversation \u2014 {user_a_name} & {user_b_name}")
+        self.setMinimumSize(400, 300)
+        self.resize(450, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header
+        self._header = QLabel(f"  {user_a_name} & {user_b_name} \u2014 {len(messages)} messages")
+        layout.addWidget(self._header)
+
+        # Search bar (hidden by default)
+        self._search_widget = QWidget()
+        search_layout = QHBoxLayout(self._search_widget)
+        search_layout.setContentsMargins(6, 4, 6, 4)
+        search_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search messages...")
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_input.returnPressed.connect(self._search_next)
+        search_layout.addWidget(self._search_input)
+
+        self._search_count_label = QLabel("")
+        search_layout.addWidget(self._search_count_label)
+
+        self._search_prev_btn = QPushButton("\u25b2")
+        self._search_prev_btn.setFixedSize(24, 24)
+        self._search_prev_btn.clicked.connect(self._search_prev)
+        search_layout.addWidget(self._search_prev_btn)
+
+        self._search_next_btn = QPushButton("\u25bc")
+        self._search_next_btn.setFixedSize(24, 24)
+        self._search_next_btn.clicked.connect(self._search_next)
+        search_layout.addWidget(self._search_next_btn)
+
+        self._search_close_btn = QPushButton("\u2715")
+        self._search_close_btn.setFixedSize(24, 24)
+        self._search_close_btn.clicked.connect(self._close_search)
+        search_layout.addWidget(self._search_close_btn)
+
+        self._search_widget.hide()
+        layout.addWidget(self._search_widget)
+
+        self._search_matches: list[int] = []
+        self._search_current: int = -1
+
+        # Message list using the same delegate
+        self._model = ChatMessageModel(max_messages=settings.max_messages, parent=self)
+        self._delegate = ChatMessageDelegate(settings, parent=self)
+        if image_store:
+            self._delegate.set_image_store(image_store)
+
+        self._list_view = QListView()
+        self._list_view.setModel(self._model)
+        self._list_view.setItemDelegate(self._delegate)
+        self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        self._list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
+        self._list_view.setWordWrap(True)
+        self._list_view.setUniformItemSizes(False)
+        self._list_view.setSpacing(0)
+        layout.addWidget(self._list_view)
+
+        # Enable mouse tracking for URL cursor changes and Ctrl+scroll
+        self._list_view.viewport().setMouseTracking(True)
+        self._list_view.viewport().installEventFilter(self)
+
+        # Copy shortcut (Ctrl+C)
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
+        copy_shortcut.activated.connect(self._copy_selected_messages)
+
+        # Find shortcut (Ctrl+F)
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self._toggle_search)
+
+        # Resize debounce timer
+        self._resize_timer: QTimer | None = None
+
+        # Populate
+        self._model.add_messages(messages)
+
+        # Scroll to bottom (most recent)
+        self._list_view.scrollToBottom()
+
+        # Apply theme colors
+        self.apply_theme()
+
+    def _matches_conversation(self, msg: ChatMessage) -> bool:
+        """Check if a message is part of the conversation between user A and user B."""
+        name = msg.user.display_name.lower()
+        a_low = self._user_a_name.lower()
+        b_low = self._user_b_name.lower()
+        if name == a_low:
+            other = b_low
+        elif name == b_low:
+            other = a_low
+        else:
+            return False
+        if msg.reply_parent_display_name and msg.reply_parent_display_name.lower() == other:
+            return True
+        for m in re.finditer(r"@(\w+)", msg.text):
+            if m.group(1).lower() == other:
+                return True
+        return False
+
+    def apply_theme(self) -> None:
+        """Apply the current theme to the dialog."""
+        theme = get_theme()
+
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme.window_bg};
+            }}
+        """)
+
+        self._header.setStyleSheet(f"""
+            QLabel {{
+                background-color: {theme.chat_input_bg};
+                color: {theme.text_primary};
+                padding: 8px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+        """)
+
+        self._search_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme.chat_input_bg};
+                border-bottom: 1px solid {theme.border_light};
+            }}
+        """)
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme.widget_bg};
+                border: 1px solid {theme.border};
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {theme.accent}; }}
+        """)
+        self._search_count_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; min-width: 50px;"
+        )
+        search_btn_style = f"""
+            QPushButton {{
+                background: transparent; color: {theme.text_muted}; border: none;
+                font-size: 14px; padding: 2px 6px;
+            }}
+            QPushButton:hover {{
+                color: {theme.text_primary}; background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }}
+        """
+        self._search_prev_btn.setStyleSheet(search_btn_style)
+        self._search_next_btn.setStyleSheet(search_btn_style)
+        self._search_close_btn.setStyleSheet(search_btn_style)
+
+        self._list_view.setStyleSheet(f"""
+            QListView {{
+                background-color: {theme.chat_bg};
+                border: none;
+                padding: 4px;
+            }}
+        """)
+
+        self._delegate.apply_theme()
+        self._list_view.viewport().update()
+
+    def add_messages(self, messages: list[ChatMessage]) -> None:
+        """Add new messages that match the conversation (called by ChatWidget)."""
+        convo_msgs = [msg for msg in messages if self._matches_conversation(msg)]
+        if not convo_msgs:
+            return
+
+        was_at_bottom = self._is_at_bottom()
+        self._model.add_messages(convo_msgs)
+
+        count = self._model.rowCount()
+        self._header.setText(
+            f"  {self._user_a_name} & {self._user_b_name} \u2014 {count} messages"
+        )
+
+        if was_at_bottom:
+            self._list_view.scrollToBottom()
+
+    def apply_moderation(self, event) -> None:
+        """Apply a moderation event to messages in this dialog."""
+        self._model.apply_moderation(event)
+
+    def _is_at_bottom(self) -> bool:
+        """Check if the view is scrolled to the bottom."""
+        scrollbar = self._list_view.verticalScrollBar()
+        return scrollbar.value() >= scrollbar.maximum() - 10
+
+    def _copy_selected_messages(self) -> None:
+        """Copy selected messages to clipboard as text."""
+        indexes = self._list_view.selectionModel().selectedIndexes()
+        if not indexes:
+            return
+
+        indexes.sort(key=lambda idx: idx.row())
+
+        lines: list[str] = []
+        for index in indexes:
+            message = index.data(MessageRole)
+            if not message or not isinstance(message, ChatMessage):
+                continue
+            prefix = ""
+            if self._settings.show_timestamps:
+                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+            name = message.user.display_name
+            if message.is_action:
+                lines.append(f"{prefix}{name} {message.text}")
+            else:
+                lines.append(f"{prefix}{name}: {message.text}")
+
+        if lines:
+            clipboard = QApplication.clipboard()
+            clipboard.setText("\n".join(lines))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Invalidate item layout cache on resize to prevent text overlap."""
+        super().resizeEvent(event)
+        self._list_view.scheduleDelayedItemsLayout()
+        if self._resize_timer is None:
+            self._resize_timer = QTimer(self)
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._on_resize_debounced)
+        self._resize_timer.start(30)
+
+    def _on_resize_debounced(self) -> None:
+        """Force full relayout after resize settles."""
+        self._delegate.invalidate_size_cache()
+        self._model.layoutChanged.emit()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handle Escape to close search bar."""

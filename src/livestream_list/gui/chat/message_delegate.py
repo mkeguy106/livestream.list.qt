@@ -32,6 +32,9 @@ MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
 # URL detection
 URL_RE = re.compile(r'https?://[^\s<>\[\]"\'`)\]]+')
 
+# @mention detection (must be at start of text or preceded by whitespace)
+MENTION_RE = re.compile(r'(?:^|(?<=\s))@(\w+)')
+
 # Shared alignment flags
 ALIGN_LEFT_VCENTER = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 ALIGN_WRAP = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap
@@ -446,6 +449,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         right_edge = x + available_width
         last_end = 0
         url_ranges = self._get_url_ranges(text)
+        mention_ranges = self._get_mention_ranges(text)
         last_emote_rect: QRect | None = None
 
         for start, end, emote in emote_positions:
@@ -464,6 +468,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     fm,
                     is_moderated,
                     url_ranges=url_ranges,
+                    mention_ranges=mention_ranges,
                     text_offset=last_end,
                     is_selected=is_selected,
                 )
@@ -538,6 +543,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 fm,
                 is_moderated,
                 url_ranges=url_ranges,
+                mention_ranges=mention_ranges,
                 text_offset=last_end,
                 is_selected=is_selected,
             )
@@ -546,6 +552,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def _get_url_ranges(text: str) -> list[tuple[int, int, str]]:
         """Find all URLs in text, returning (start, end, url) tuples."""
         return [(m.start(), m.end(), m.group()) for m in URL_RE.finditer(text)]
+
+    @staticmethod
+    def _get_mention_ranges(text: str) -> list[tuple[int, int, str]]:
+        """Find all @mentions in text, returning (start, end, username) tuples.
+
+        start/end cover the full '@username' span; username is without '@'.
+        """
+        return [(m.start(), m.end(), m.group(1)) for m in MENTION_RE.finditer(text)]
 
     def _draw_wrapping_text(
         self,
@@ -559,6 +573,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         is_moderated: bool,
         url_ranges: list[tuple[int, int, str]] | None = None,
+        mention_ranges: list[tuple[int, int, str]] | None = None,
         text_offset: int = 0,
         is_selected: bool = False,
     ) -> tuple[int, int]:
@@ -566,6 +581,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         Returns (current_x, current_y) after drawing.
         url_ranges are absolute (start, end, url) tuples in the full message text.
+        mention_ranges are absolute (start, end, username) tuples in the full message text.
         text_offset is the position of this segment in the full message text.
         """
         words = text.split(" ")
@@ -599,6 +615,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         in_url = True
                         break
 
+            # Check if word is an @mention
+            in_mention = False
+            if not in_url and mention_ranges and not is_moderated:
+                for m_start, m_end, _ in mention_ranges:
+                    if abs_word_start < m_end and abs_word_end > m_start:
+                        in_mention = True
+                        break
+
             if draw_word:
                 if in_url:
                     saved_pen = painter.pen()
@@ -617,6 +641,21 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     )
                     font.setUnderline(False)
                     painter.setFont(font)
+                    painter.setPen(saved_pen)
+                elif in_mention:
+                    saved_pen = painter.pen()
+                    mention_color = (
+                        self._url_color_selected if is_selected else self._url_color
+                    )
+                    painter.setPen(mention_color)
+                    painter.drawText(
+                        int(current_x),
+                        int(current_y),
+                        word_width + 2,
+                        line_height,
+                        ALIGN_LEFT_VCENTER,
+                        draw_word,
+                    )
                     painter.setPen(saved_pen)
                 elif is_moderated:
                     self._draw_strikethrough_text(
@@ -659,6 +698,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         """Paint text with word wrapping."""
         right_edge = x + available_width
         url_ranges = self._get_url_ranges(text)
+        mention_ranges = self._get_mention_ranges(text)
         self._draw_wrapping_text(
             painter,
             text,
@@ -670,6 +710,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             fm,
             is_moderated,
             url_ranges=url_ranges,
+            mention_ranges=mention_ranges,
             text_offset=0,
             is_selected=is_selected,
         )
@@ -1337,6 +1378,238 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if badge_rect.contains(pos):
                 return badge
             x += badge_size + BADGE_SPACING
+
+        return None
+
+    def _get_reply_context_rect(
+        self, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> QRect:
+        """Get the bounding rect of the reply context line, if present."""
+        if not message.reply_parent_display_name:
+            return QRect()
+
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        x = rect.x()
+        y = rect.y()
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+
+        badge_size = self._get_badge_size(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Skip timestamp
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+
+        # Skip system text lines
+        if message.is_system and message.system_text:
+            if message.text:
+                sys_font = QFont(font)
+                sys_font.setItalic(True)
+                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+                remaining = rect.width() - (x - rect.x())
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                return QRect()
+
+        # Reply context line rect
+        reply_font = QFont(font)
+        reply_font.setItalic(True)
+        reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+        reply_fm = QFontMetrics(reply_font)
+        reply_text = message.reply_parent_text
+        if len(reply_text) > 50:
+            reply_text = reply_text[:50] + "\u2026"
+        reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
+        reply_width = reply_fm.horizontalAdvance(reply_str)
+        remaining = rect.width() - (x - rect.x())
+        return QRect(int(x), int(y), min(int(reply_width), int(remaining)), reply_fm.height())
+
+    def _get_mention_at_position(
+        self, pos, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> str | None:
+        """Find which @mention (if any) is at the given position.
+
+        Returns the bare username (without @) if hit, else None.
+        """
+        mention_ranges = self._get_mention_ranges(message.text)
+        if not mention_ranges:
+            return None
+
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        x = rect.x()
+        y = rect.y()
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
+
+        badge_size = self._get_badge_size(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Skip timestamp
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+
+        # Skip system text lines
+        if message.is_system and message.system_text:
+            if message.text:
+                sys_font = QFont(font)
+                sys_font.setItalic(True)
+                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+                remaining = rect.width() - (x - rect.x())
+                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+                y += line_height * sys_lines
+                x = rect.x()
+            else:
+                return None
+
+        # Skip reply context line
+        if message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            y += QFontMetrics(reply_font).height() + 2
+            x = rect.x()
+
+        # Skip badges
+        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
+            for badge in message.user.badges:
+                is_mod = badge.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod:
+                    continue
+                if not self.settings.show_mod_badges and is_mod:
+                    continue
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
+                if pixmap and not pixmap.isNull():
+                    x += badge_size + BADGE_SPACING
+
+        # Skip username
+        bold_font = QFont(font)
+        bold_font.setBold(True)
+        suffix = " " if message.is_action else ": "
+        name_text = message.user.display_name + suffix
+        x += QFontMetrics(bold_font).horizontalAdvance(name_text)
+
+        # Walk through text checking mention word positions
+        text = message.text
+        start_x = x
+        current_x = x
+        current_y = y
+        right_edge = rect.x() + rect.width()
+        has_base_emote = False
+
+        if message.emote_positions:
+            last_end = 0
+            for em_start, em_end, emote in message.emote_positions:
+                if em_start > last_end:
+                    segment = text[last_end:em_start]
+                    prev_y = current_y
+                    result = self._check_mention_words_at_pos(
+                        segment, current_x, current_y, start_x, right_edge,
+                        line_height, fm, pos, mention_ranges, last_end,
+                    )
+                    if result:
+                        return result
+                    current_x, current_y = self._advance_wrapping_text(
+                        segment, current_x, current_y, start_x, right_edge, line_height, fm,
+                    )
+                    if current_y != prev_y:
+                        has_base_emote = False
+                # Skip emote
+                emote_height = self._get_emote_height(fm)
+                image_ref = self._get_image_ref_for_scale(emote, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
+                if pixmap and not pixmap.isNull():
+                    emote_w = self._scaled_width(pixmap, emote_height)
+                else:
+                    emote_text = text[em_start:em_end] if em_end <= len(text) else emote.name
+                    emote_w = fm.horizontalAdvance(emote_text)
+                if emote.zero_width and has_base_emote:
+                    last_end = em_end
+                    continue
+                if current_x + emote_w > right_edge and current_x > start_x:
+                    current_x = start_x
+                    current_y += line_height
+                    has_base_emote = False
+                current_x += emote_w
+                has_base_emote = True
+                last_end = em_end
+
+            if last_end < len(text):
+                segment = text[last_end:]
+                result = self._check_mention_words_at_pos(
+                    segment, current_x, current_y, start_x, right_edge,
+                    line_height, fm, pos, mention_ranges, last_end,
+                )
+                if result:
+                    return result
+        else:
+            result = self._check_mention_words_at_pos(
+                text, current_x, current_y, start_x, right_edge,
+                line_height, fm, pos, mention_ranges, 0,
+            )
+            if result:
+                return result
+
+        return None
+
+    def _check_mention_words_at_pos(
+        self,
+        text: str,
+        current_x: int,
+        current_y: int,
+        start_x: int,
+        right_edge: int,
+        line_height: int,
+        fm: QFontMetrics,
+        pos,
+        mention_ranges: list[tuple[int, int, str]],
+        text_offset: int,
+    ) -> str | None:
+        """Check if pos hits any @mention word in the given text segment."""
+        words = text.split(" ")
+        char_pos = 0
+        for i, word in enumerate(words):
+            draw_word = word if i == 0 else " " + word
+            word_width = fm.horizontalAdvance(draw_word)
+
+            if i == 0:
+                abs_word_start = text_offset + char_pos
+            else:
+                abs_word_start = text_offset + char_pos + 1
+            abs_word_end = abs_word_start + len(word)
+
+            if current_x + word_width > right_edge and current_x > start_x:
+                current_x = start_x
+                current_y += line_height
+                if draw_word.startswith(" "):
+                    draw_word = draw_word[1:]
+                    word_width = fm.horizontalAdvance(draw_word)
+
+            for m_start, m_end, username in mention_ranges:
+                if abs_word_start < m_end and abs_word_end > m_start:
+                    word_rect = QRect(
+                        int(current_x), int(current_y), int(word_width), line_height,
+                    )
+                    if word_rect.contains(pos):
+                        return username
+                    break
+
+            current_x += word_width
+            char_pos += len(draw_word) if i == 0 else 1 + len(word)
 
         return None
 
