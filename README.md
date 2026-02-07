@@ -223,7 +223,6 @@ Planned features for future releases:
 - [ ] Previous message cycling — up/down arrows to cycle through previously sent messages
 - [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
 - [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
-- [ ] Lua plugin system — extensibility via Lua scripts for custom commands and behavior
 - [ ] Pronouns display — show user pronouns on user cards
 - [ ] Always-on-top / overlay mode — transparent overlay window for use with OBS or other apps
 - [ ] Prediction badge details — show picked outcome in prediction badges
