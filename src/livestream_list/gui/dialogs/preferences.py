@@ -489,7 +489,19 @@ class PreferencesDialog(QDialog):
         self.chat_timestamps_cb = QCheckBox("Show timestamps")
         self.chat_timestamps_cb.setChecked(self.app.settings.chat.builtin.show_timestamps)
         self.chat_timestamps_cb.stateChanged.connect(self._on_chat_changed)
-        builtin_layout.addRow(self.chat_timestamps_cb)
+
+        self.chat_ts_format_combo = QComboBox()
+        self.chat_ts_format_combo.addItem("24-hour", "24h")
+        self.chat_ts_format_combo.addItem("12-hour", "12h")
+        current_fmt = self.app.settings.chat.builtin.timestamp_format
+        self.chat_ts_format_combo.setCurrentIndex(1 if current_fmt == "12h" else 0)
+        self.chat_ts_format_combo.currentIndexChanged.connect(self._on_chat_changed)
+
+        ts_row = QHBoxLayout()
+        ts_row.addWidget(self.chat_timestamps_cb)
+        ts_row.addWidget(self.chat_ts_format_combo)
+        ts_row.addStretch()
+        builtin_layout.addRow(ts_row)
 
         self.chat_name_colors_cb = QCheckBox("Use platform name colors")
         self.chat_name_colors_cb.setChecked(self.app.settings.chat.builtin.use_platform_name_colors)
@@ -1110,6 +1122,9 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.line_spacing = self.chat_spacing_spin.value()
         self.app.settings.chat.builtin.max_messages = self.scrollback_spin.value()
         self.app.settings.chat.builtin.show_timestamps = self.chat_timestamps_cb.isChecked()
+        self.app.settings.chat.builtin.timestamp_format = (
+            self.chat_ts_format_combo.currentData()
+        )
         self.app.settings.chat.builtin.show_badges = self.chat_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
@@ -1395,6 +1410,9 @@ class PreferencesDialog(QDialog):
             self.emote_bttv_cb.setChecked("bttv" in builtin.emote_providers)
             self.emote_ffz_cb.setChecked("ffz" in builtin.emote_providers)
             self.chat_timestamps_cb.setChecked(builtin.show_timestamps)
+            self.chat_ts_format_combo.setCurrentIndex(
+                0 if builtin.timestamp_format == "24h" else 1
+            )
             self.chat_badges_cb.setChecked(builtin.show_badges)
             self.chat_mod_badges_cb.setChecked(builtin.show_mod_badges)
             self.chat_emotes_cb.setChecked(builtin.show_emotes)

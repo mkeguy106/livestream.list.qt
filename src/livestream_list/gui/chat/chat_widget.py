@@ -403,6 +403,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._scroll_pause_timer.setSingleShot(True)
         self._scroll_pause_timer.setInterval(5 * 60 * 1000)  # 5 minutes
         self._scroll_pause_timer.timeout.connect(self._scroll_to_bottom)
+        self._countdown_remaining = 300
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._countdown_tick)
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
         self._gif_timer = None
@@ -614,7 +618,18 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._input = ChatInput()
         self._input.setObjectName("chat_input")
         self._input.returnPressed.connect(self._on_send)
+        self._input.textChanged.connect(self._update_char_counter)
         input_layout.addWidget(self._input)
+
+        self._char_counter = QLabel()
+        self._char_counter.setObjectName("chat_char_counter")
+        self._char_counter.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self._char_counter.setFixedWidth(32)
+        self._char_counter.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._char_counter.hide()
+        input_layout.addWidget(self._char_counter)
 
         self._send_button = QPushButton("Whisper" if self._is_dm else "Chat")
         self._send_button.setObjectName("chat_send_btn")
@@ -977,6 +992,31 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Clear all messages."""
         self._model.clear_messages()
 
+    def _get_char_limit(self) -> int:
+        """Return the character limit for the current platform."""
+        if self.livestream:
+            platform = self.livestream.channel.platform
+            if platform == StreamPlatform.YOUTUBE:
+                return 200
+        return 500  # Twitch and Kick both use 500
+
+    def _update_char_counter(self, text: str) -> None:
+        """Update the character counter label."""
+        limit = self._get_char_limit()
+        length = len(text)
+        if length == 0:
+            self._char_counter.hide()
+            return
+        remaining = limit - length
+        self._char_counter.setText(str(remaining))
+        if remaining < 0:
+            self._char_counter.setStyleSheet("QLabel { color: #e74c3c; font-size: 11px; }")
+        elif remaining <= 50:
+            self._char_counter.setStyleSheet("QLabel { color: #e67e22; font-size: 11px; }")
+        else:
+            self._char_counter.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self._char_counter.show()
+
     def _on_send(self) -> None:
         """Handle send button/enter key."""
         text = self._input.text().strip()
@@ -1033,6 +1073,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._model.flush_trim()
         self._list_view.scrollToBottom()
         self._new_msg_button.hide()
+        self._countdown_timer.stop()
+
+    def _countdown_tick(self) -> None:
+        """Update the countdown display on the new-messages button."""
+        self._countdown_remaining -= 1
+        if self._countdown_remaining <= 0:
+            return  # _scroll_pause_timer handles the actual scroll
+        mins, secs = divmod(self._countdown_remaining, 60)
+        self._new_msg_button.setText(f"New messages ({mins}:{secs:02d})")
 
     def _copy_selected_messages(self) -> None:
         """Copy selected messages to clipboard as text."""
@@ -1050,7 +1099,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 continue
             prefix = ""
             if self.settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self.settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")
@@ -1180,13 +1229,17 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 self._model._trim_paused = False
                 self._model.flush_trim()
             self._scroll_pause_timer.stop()
+            self._countdown_timer.stop()
             self._new_msg_button.hide()
         elif scrollbar.maximum() > 0:
             # User scrolled up — pause trimming so the view doesn't jump
             self._auto_scroll = False
             self._model._trim_paused = True
-            if not self._scroll_pause_timer.isActive():
-                self._scroll_pause_timer.start()
+            # Reset and (re)start the 5-minute countdown
+            self._countdown_remaining = 300
+            self._new_msg_button.setText("New messages (5:00)")
+            self._scroll_pause_timer.start()
+            self._countdown_timer.start()
 
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""
@@ -2086,7 +2139,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                 continue
             prefix = ""
             if self._settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self._settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")
@@ -2410,7 +2463,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                 continue
             prefix = ""
             if self._settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self._settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")

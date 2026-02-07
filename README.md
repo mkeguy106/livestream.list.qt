@@ -50,6 +50,9 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Recent chat history on channel join (Twitch)
   - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")
   - Copy messages with Ctrl+C
+  - Up/down arrow to cycle through previously sent messages
+  - Message character counter (500 for Twitch/Kick, 200 for YouTube)
+  - Configurable timestamp format (12-hour or 24-hour)
   - Chat mode indicators (sub-only, slow mode, emote-only, followers-only, R9K)
   - Slow mode countdown timer in input box
   - Deleted message options (strikethrough, truncated, or hidden)
@@ -204,11 +207,11 @@ Planned features for future releases:
 - [ ] User ignore list — right-click to hide a user's messages, with a settings page to review and unblock
 - [ ] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
 - [x] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
-- [ ] Message character counter — show remaining characters near the input
+- [x] Message character counter — show remaining characters near the input
 - [ ] User card popup — click a username to see account age, follow date, channel history
 - [ ] Split view — view two chats side by side in the same window
 - [x] Chat log export — save chat history to a text file
-- [ ] Timestamp format option — 12h vs 24h toggle
+- [x] Timestamp format option — 12h vs 24h toggle
 - [x] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 - [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
 - [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
@@ -225,7 +228,7 @@ Planned features for future releases:
 - [ ] User notes — attach notes to users, visible on their user card
 - [ ] Multiple accounts — quick account switcher popup for managing multiple logins per platform
 - [ ] Configurable mod timeout buttons — quick mod-action buttons with customizable durations
-- [ ] Previous message cycling — up/down arrows to cycle through previously sent messages
+- [x] Previous message cycling — up/down arrows to cycle through previously sent messages
 - [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
 - [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
 - [ ] Pronouns display — show user pronouns on user cards
