@@ -362,6 +362,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._dm_partner_name = dm_partner_name
         self._dm_partner_id = dm_partner_id
         self._auto_scroll = True
+        self._scroll_pause_timer = QTimer(self)
+        self._scroll_pause_timer.setSingleShot(True)
+        self._scroll_pause_timer.setInterval(5 * 60 * 1000)  # 5 minutes
+        self._scroll_pause_timer.timeout.connect(self._scroll_to_bottom)
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
         self._gif_timer = None
@@ -710,7 +714,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 )
                 self._hype_banner.show()
 
-        was_at_bottom = self._is_at_bottom()
+        should_scroll = self._auto_scroll
         self._model.add_messages(filtered)
 
         # Forward to any open user history dialogs
@@ -718,7 +722,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             for dialog in list(self._history_dialogs):
                 dialog.add_messages(filtered)
 
-        if was_at_bottom or self._auto_scroll:
+        if should_scroll:
             self._scroll_to_bottom()
         else:
             self._new_msg_button.show()
@@ -927,9 +931,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _scroll_to_bottom(self) -> None:
         """Scroll to the latest message."""
+        self._auto_scroll = True
+        self._model._trim_paused = False
+        self._model.flush_trim()
         self._list_view.scrollToBottom()
         self._new_msg_button.hide()
-        self._auto_scroll = True
 
     def _copy_selected_messages(self) -> None:
         """Copy selected messages to clipboard as text."""
@@ -1030,11 +1036,21 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _on_scroll_changed(self, value: int) -> None:
         """Track scroll position for auto-scroll behavior."""
         scrollbar = self._list_view.verticalScrollBar()
-        if value >= scrollbar.maximum() - 10:
-            self._auto_scroll = True
+        at_bottom = value >= scrollbar.maximum() - 10
+        if at_bottom:
+            if not self._auto_scroll:
+                # Returning to bottom — flush any deferred trim
+                self._auto_scroll = True
+                self._model._trim_paused = False
+                self._model.flush_trim()
+            self._scroll_pause_timer.stop()
             self._new_msg_button.hide()
-        else:
+        elif scrollbar.maximum() > 0:
+            # User scrolled up — pause trimming so the view doesn't jump
             self._auto_scroll = False
+            self._model._trim_paused = True
+            if not self._scroll_pause_timer.isActive():
+                self._scroll_pause_timer.start()
 
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""

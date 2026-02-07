@@ -19,8 +19,11 @@ class ChatMessageModel(QAbstractListModel):
 
     def __init__(self, max_messages: int = 5000, parent=None):
         super().__init__(parent)
-        self._messages: collections.deque[ChatMessage] = collections.deque(maxlen=max_messages)
+        # No maxlen on deque — we manage trimming ourselves so we can defer it
+        # when the user has scrolled up (to prevent visible scroll jumping)
+        self._messages: collections.deque[ChatMessage] = collections.deque()
         self._max_messages = max_messages
+        self._trim_paused = False
 
     def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
         if parent.isValid():
@@ -43,30 +46,38 @@ class ChatMessageModel(QAbstractListModel):
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add a batch of messages to the model.
 
-        If adding would exceed max_messages, old messages are silently dropped.
+        If adding would exceed max_messages, old messages are trimmed from the
+        front — unless trimming is paused (user scrolled up), in which case
+        the buffer grows beyond max_messages temporarily to avoid scroll jumping.
         """
         if not messages:
             return
 
-        current_len = len(self._messages)
         new_count = len(messages)
 
-        # Calculate how many will be removed from front due to deque maxlen
-        overflow = max(0, current_len + new_count - self._max_messages)
-
-        if overflow > 0:
-            # Remove overflowed rows from the beginning
-            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
-            # The deque will handle removal when we append
-            for _ in range(overflow):
-                self._messages.popleft()
-            self.endRemoveRows()
+        # Trim from front unless paused (user scrolled up)
+        if not self._trim_paused:
+            overflow = max(0, len(self._messages) + new_count - self._max_messages)
+            if overflow > 0:
+                self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
+                for _ in range(overflow):
+                    self._messages.popleft()
+                self.endRemoveRows()
 
         # Insert new messages at the end
         insert_start = len(self._messages)
         self.beginInsertRows(QModelIndex(), insert_start, insert_start + new_count - 1)
         self._messages.extend(messages)
         self.endInsertRows()
+
+    def flush_trim(self) -> None:
+        """Trim deferred overflow after the user scrolls back to the bottom."""
+        overflow = max(0, len(self._messages) - self._max_messages)
+        if overflow > 0:
+            self.beginRemoveRows(QModelIndex(), 0, overflow - 1)
+            for _ in range(overflow):
+                self._messages.popleft()
+            self.endRemoveRows()
 
     def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to existing messages."""
