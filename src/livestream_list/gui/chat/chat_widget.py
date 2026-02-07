@@ -403,6 +403,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._scroll_pause_timer.setSingleShot(True)
         self._scroll_pause_timer.setInterval(5 * 60 * 1000)  # 5 minutes
         self._scroll_pause_timer.timeout.connect(self._scroll_to_bottom)
+        self._countdown_remaining = 300
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.setInterval(1000)
+        self._countdown_timer.timeout.connect(self._countdown_tick)
         self._resize_timer: QTimer | None = None
         self._history_dialogs: set = set()
         self._gif_timer = None
@@ -1010,6 +1014,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._model.flush_trim()
         self._list_view.scrollToBottom()
         self._new_msg_button.hide()
+        self._countdown_timer.stop()
+
+    def _countdown_tick(self) -> None:
+        """Update the countdown display on the new-messages button."""
+        self._countdown_remaining -= 1
+        if self._countdown_remaining <= 0:
+            return  # _scroll_pause_timer handles the actual scroll
+        mins, secs = divmod(self._countdown_remaining, 60)
+        self._new_msg_button.setText(f"New messages ({mins}:{secs:02d})")
 
     def _copy_selected_messages(self) -> None:
         """Copy selected messages to clipboard as text."""
@@ -1118,13 +1131,17 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 self._model._trim_paused = False
                 self._model.flush_trim()
             self._scroll_pause_timer.stop()
+            self._countdown_timer.stop()
             self._new_msg_button.hide()
         elif scrollbar.maximum() > 0:
             # User scrolled up — pause trimming so the view doesn't jump
             self._auto_scroll = False
             self._model._trim_paused = True
-            if not self._scroll_pause_timer.isActive():
-                self._scroll_pause_timer.start()
+            # Reset and (re)start the 5-minute countdown
+            self._countdown_remaining = 300
+            self._new_msg_button.setText("New messages (5:00)")
+            self._scroll_pause_timer.start()
+            self._countdown_timer.start()
 
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""
