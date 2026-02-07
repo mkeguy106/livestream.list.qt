@@ -142,6 +142,18 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 - **Stale-while-revalidate**: Cached user emotes used immediately, fresh emotes fetched in background. If changed, UI updates automatically.
 - **Manual refresh**: Chat menu → "Refresh Emotes" (Ctrl+Shift+E) clears cache and re-fetches
 
+**Whisper/DM system**: EventSub WebSocket for receiving whispers, Helix API for sending. Whisper conversations persisted via `WhisperStore` in data dir.
+
+**Reply threading**: Twitch uses `@reply-parent-msg-id` IRC tag, Kick uses `reply_to_original_message_id` API field. `ChatMessage` has `reply_parent_display_name` and `reply_parent_text` fields for rendering reply context.
+
+**Per-channel badge caching**: `_badge_url_map` is `dict[str, dict[str, tuple[str, str]]]` (channel_key → badge_id → (url, title)). Badge images are cached per-channel to avoid showing wrong channel's sub badges.
+
+**Scroll pause**: `_trim_paused` flag on `ChatMessageModel` defers buffer trimming when user has scrolled up. Flush on scroll-to-bottom. Auto-resumes after 5 minutes.
+
+**Recent messages**: robotty.de API loads ~50 recent messages on Twitch channel join, parsed through the same IRC message handler.
+
+**Spellcheck**: hunspell-based via `spellchecker` library, custom dictionary stored in data dir. Correction popup via `SpellCompleter`.
+
 **Channel Socials Banner**: Displays clickable social links (Discord, Twitter, etc.) below the stream title banner. Fetched via `SocialsFetchWorker` (QThread) when chat opens.
 
 - **Twitch**: GraphQL query for `channel.socialMedias` array (returns name + URL directly)
@@ -213,6 +225,11 @@ class DismissibleBanner(QWidget):
 | `src/livestream_list/__version__.py` | Single source of truth for version |
 | `src/livestream_list/core/models.py` | Data classes: Channel, Livestream, StreamPlatform |
 | `src/livestream_list/core/streamlink.py` | Stream launch via streamlink or yt-dlp |
+| `src/livestream_list/chat/whisper_store.py` | Whisper conversation persistence |
+| `src/livestream_list/gui/chat/spell_completer.py` | Spellcheck correction popup |
+| `src/livestream_list/gui/chat/mention_completer.py` | @mention autocomplete |
+| `src/livestream_list/chat/spellcheck/checker.py` | Spellcheck engine |
+| `src/livestream_list/gui/chat/message_model.py` | Chat message list model with deferred trim |
 
 ### Versioning
 
@@ -247,6 +264,8 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 | YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
 | YouTube chat send requires cookies | Copy cookies from browser (SID, HSID, SSID, APISID, SAPISID) into Preferences > Accounts |
+| Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
+| Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
 
 ## CI/CD - Self-Hosted Runner
 

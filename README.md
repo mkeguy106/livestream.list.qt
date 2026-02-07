@@ -26,6 +26,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - First-launch prompt to choose behavior (quit or run in background)
 - **Launch on Startup** - Option to start automatically when you log in
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
+  - Low-latency defaults for Twitch streams
 - **Built-in Chat Client** - Native multi-channel chat with tabbed interface
   - Twitch and Kick chat with full emote and badge rendering
   - Emote support: Twitch, Kick native, 7TV, BTTV, FFZ
@@ -39,6 +40,15 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Customizable tab colors via color picker
   - Twitch OAuth login for sending messages
   - Kick OAuth 2.1 + PKCE login for sending messages
+  - Twitch whispers/DMs (send and receive direct messages)
+  - Reply to messages (right-click → Reply, with visual indicator)
+  - @mention autocomplete (type @ to suggest usernames)
+  - @mention highlighting with tab flashing for notifications
+  - Conversation view (click @mention or reply to see back-and-forth)
+  - Real-time spellcheck with custom dictionary
+  - Chat scroll pause in busy channels (auto-resumes after 5 min)
+  - Recent chat history on channel join (Twitch)
+  - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")
   - Copy messages with Ctrl+C
 - **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
@@ -56,6 +66,8 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 - **Sort Options** - Sort by Name, Viewers, or Playing status
 - **Hide Offline** - Toggle to show only live streams
 - **Selection Mode** - Multi-select channels for bulk deletion
+  - Shift+click range selection
+  - Trash bin for soft-delete with restore
 - **UI Styles** - Default, Compact 1, Compact 2, Compact 3 layouts
   - All UI elements scale with compact modes (buttons, icons, toolbar)
 - **Stream Playback Tracking** - Shows "Playing" indicator with stop button
@@ -110,6 +122,9 @@ python -m livestream_list
 - `Ctrl+R` / `F5` - Refresh
 - `Ctrl+,` - Preferences
 - `Ctrl+Q` - Quit
+- `Ctrl+Shift+E` - Refresh emotes (chat)
+- `Ctrl+C` - Copy message (chat)
+- `Escape` - Cancel reply / close popup (chat)
 
 ### Adding Channels
 
@@ -188,7 +203,6 @@ Planned features for future releases:
 - [ ] User card popup — click a username to see account age, follow date, channel history
 - [ ] Split view — view two chats side by side in the same window
 - [ ] Chat log export — save chat history to a text file
-- [ ] Raid/host banner — visual notification when a raid arrives
 - [ ] Timestamp format option — 12h vs 24h toggle
 - [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 
