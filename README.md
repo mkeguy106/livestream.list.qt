@@ -196,7 +196,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 Planned features for future releases:
 
-- [ ] User ignore list — right-click to hide a user's messages
+- [ ] User ignore list — right-click to hide a user's messages, with a settings page to review and unblock
 - [ ] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
 - [ ] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
 - [ ] Message character counter — show remaining characters near the input
