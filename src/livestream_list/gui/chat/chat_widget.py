@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.emotes.cache import EmoteCache
-from ...chat.models import ChatEmote, ChatMessage, ModerationEvent
+from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
@@ -413,6 +413,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
         self._reply_to_msg: ChatMessage | None = None  # Message being replied to
+        self._slow_mode_remaining: int = 0
+        self._slow_mode_timer = QTimer(self)
+        self._slow_mode_timer.setInterval(1000)
+        self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -432,6 +436,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._socials_banner.dismissed.connect(self._on_socials_dismissed)
         self._socials_banner.hide()  # Hidden until socials are loaded
         layout.addWidget(self._socials_banner)
+
+        self._room_state: ChatRoomState | None = None
 
         # Apply banner styling and update title
         self._update_banner_style()
@@ -563,6 +569,25 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._new_msg_button.hide()
         self._new_msg_button.clicked.connect(self._scroll_to_bottom)
         layout.addWidget(self._new_msg_button)
+
+        # Room state indicator (sub-only, slow mode, etc.)
+        self._room_state_widget = QWidget()
+        self._room_state_widget.setObjectName("chat_room_state")
+        rs_layout = QHBoxLayout(self._room_state_widget)
+        rs_layout.setContentsMargins(8, 4, 4, 4)
+        rs_layout.setSpacing(4)
+        self._room_state_label = QLabel()
+        self._room_state_label.setObjectName("chat_room_state_label")
+        self._room_state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rs_layout.addWidget(self._room_state_label, 1)
+        rs_close = QPushButton("\u2715")
+        rs_close.setObjectName("chat_room_state_close")
+        rs_close.setFixedSize(20, 20)
+        rs_close.clicked.connect(self._dismiss_room_state)
+        rs_layout.addWidget(rs_close)
+        self._room_state_widget.hide()
+        self._room_state_dismissed = False
+        layout.addWidget(self._room_state_widget)
 
         # Reply indicator (hidden by default)
         self._reply_widget = QWidget()
@@ -957,10 +982,44 @@ class ChatWidget(QWidget, ChatSearchMixin):
         text = self._input.text().strip()
         if text:
             self._input.add_to_history(text)
+            # Track emote usage for autocomplete sorting
+            emote_map = self._emote_completer._emote_map
+            if emote_map:
+                for word in text.split():
+                    if word in emote_map:
+                        self._emote_completer.record_usage(word)
             reply_id = self._reply_to_msg.id if self._reply_to_msg else ""
             self.message_sent.emit(self.channel_key, text, reply_id)
             self._input.clear()
             self._cancel_reply()
+            # Start slow mode countdown if active
+            if self._room_state and self._room_state.slow > 0:
+                self._slow_mode_remaining = self._room_state.slow
+                self._input.setEnabled(False)
+                self._send_button.setEnabled(False)
+                self._input.setPlaceholderText(f"Slow mode ({self._slow_mode_remaining}s)...")
+                self._slow_mode_timer.start()
+
+    def _slow_mode_tick(self) -> None:
+        """Tick the slow mode countdown timer."""
+        self._slow_mode_remaining -= 1
+        if self._slow_mode_remaining <= 0:
+            self._slow_mode_timer.stop()
+            self._restore_input_after_slow_mode()
+        else:
+            self._input.setPlaceholderText(f"Slow mode ({self._slow_mode_remaining}s)...")
+
+    def _restore_input_after_slow_mode(self) -> None:
+        """Restore input field after slow mode countdown expires."""
+        self._slow_mode_remaining = 0
+        self._slow_mode_timer.stop()
+        if self._authenticated:
+            self._input.setEnabled(True)
+            self._send_button.setEnabled(True)
+            if self._is_dm:
+                self._input.setPlaceholderText(f"Whisper to {self._dm_partner_name}...")
+            else:
+                self._input.setPlaceholderText("Send a message...")
 
     def _is_at_bottom(self) -> bool:
         """Check if the view is scrolled to the bottom."""
@@ -1044,8 +1103,47 @@ class ChatWidget(QWidget, ChatSearchMixin):
                         )
                     )
 
+        # Export chat log
+        if self._model.rowCount() > 0:
+            menu.addSeparator()
+            export_action = menu.addAction("Export chat log...")
+            export_action.triggered.connect(self._export_chat_log)
+
         if not menu.isEmpty():
             menu.exec(self._list_view.viewport().mapToGlobal(pos))
+
+    def _export_chat_log(self) -> None:
+        """Export chat messages to a text file."""
+        from datetime import datetime as dt
+
+        from PySide6.QtWidgets import QFileDialog
+
+        # Build default filename
+        channel_name = self.channel_key.split(":", 1)[-1] if ":" in self.channel_key else "chat"
+        date_str = dt.now().strftime("%Y-%m-%d")
+        default_name = f"{channel_name}_{date_str}.txt"
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export Chat Log", default_name, "Text files (*.txt);;All files (*)"
+        )
+        if not path:
+            return
+
+        messages = self.get_all_messages()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                for msg in messages:
+                    ts = msg.timestamp.astimezone().strftime("%H:%M:%S")
+                    if msg.is_system and msg.system_text:
+                        f.write(f"[{ts}] *** {msg.system_text} ***\n")
+                        if msg.text:
+                            f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
+                    elif msg.is_action:
+                        f.write(f"[{ts}] {msg.user.display_name} {msg.text}\n")
+                    else:
+                        f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
+        except OSError as e:
+            logger.error(f"Failed to export chat log: {e}")
 
     def hideEvent(self, event) -> None:  # noqa: N802
         """Handle widget hidden."""
@@ -1223,6 +1321,42 @@ class ChatWidget(QWidget, ChatSearchMixin):
         else:
             self._socials_banner.hide()
 
+    def update_room_state(self, state: ChatRoomState) -> None:
+        """Update the room state indicator label."""
+        # Cancel slow mode countdown if slow mode was disabled
+        if self._room_state and self._room_state.slow > 0 and state.slow == 0:
+            if self._slow_mode_timer.isActive():
+                self._restore_input_after_slow_mode()
+        self._room_state = state
+        parts: list[str] = []
+        if state.subs_only:
+            parts.append("Sub-only")
+        if state.emote_only:
+            parts.append("Emote-only")
+        if state.r9k:
+            parts.append("R9K")
+        if state.slow > 0:
+            parts.append(f"Slow ({state.slow}s)")
+        if state.followers_only >= 0:
+            if state.followers_only == 0:
+                parts.append("Followers-only")
+            else:
+                parts.append(f"Followers-only ({state.followers_only}m)")
+        if parts:
+            self._room_state_label.setText(" | ".join(parts))
+            # New modes → reset dismissed state so user sees changes
+            if self._room_state_dismissed:
+                self._room_state_dismissed = False
+            self._room_state_widget.show()
+        else:
+            self._room_state_widget.hide()
+            self._room_state_dismissed = False
+
+    def _dismiss_room_state(self) -> None:
+        """Dismiss the room state indicator."""
+        self._room_state_dismissed = True
+        self._room_state_widget.hide()
+
     def apply_theme(self) -> None:
         """Apply the current theme to the chat widget.
 
@@ -1238,6 +1372,30 @@ class ChatWidget(QWidget, ChatSearchMixin):
             /* Widget background */
             ChatWidget {{
                 background-color: {theme.chat_bg};
+            }}
+
+            /* Room state indicator */
+            #chat_room_state {{
+                background-color: {theme.accent};
+                border-bottom: 1px solid {theme.border_light};
+                margin-top: 3px;
+            }}
+            #chat_room_state_label {{
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+                background: transparent;
+            }}
+            #chat_room_state_close {{
+                background: rgba(0, 0, 0, 0.2);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            #chat_room_state_close:hover {{
+                background: rgba(255, 100, 100, 0.5);
             }}
 
             /* Search widget container */

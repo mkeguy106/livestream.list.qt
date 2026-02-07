@@ -69,6 +69,17 @@ class ChatMessage:
 
 
 @dataclass
+class ChatRoomState:
+    """Represents the current state of a chat room (Twitch ROOMSTATE)."""
+
+    slow: int = 0  # seconds (0 = off)
+    subs_only: bool = False
+    emote_only: bool = False
+    followers_only: int = -1  # minutes (-1 = off, 0 = any follower)
+    r9k: bool = False
+
+
+@dataclass
 class ModerationEvent:
     """Represents a moderation action (ban, timeout, delete)."""
 

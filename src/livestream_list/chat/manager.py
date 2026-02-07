@@ -1075,6 +1075,8 @@ class ChatManager(QObject):
     socials_fetched = Signal(str, dict)
     # Emitted when a whisper/DM is received (platform_str, ChatMessage)
     whisper_received = Signal(str, object)
+    # Emitted when room state changes (channel_key, ChatRoomState)
+    room_state_changed = Signal(str, object)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1227,6 +1229,9 @@ class ChatManager(QObject):
         )
         connection.error.connect(lambda msg, key=channel_key: (self._on_connection_error(key, msg)))
         connection.connected.connect(lambda key=channel_key: self.chat_connected.emit(key))
+        connection.room_state_changed.connect(
+            lambda state, key=channel_key: self.room_state_changed.emit(key, state)
+        )
 
         self._connections[channel_key] = connection
 
@@ -2228,6 +2233,7 @@ class ChatManager(QObject):
                 connection.moderation_event.disconnect()
                 connection.error.disconnect()
                 connection.connected.disconnect()
+                connection.room_state_changed.disconnect()
             except (RuntimeError, TypeError):
                 # Signal may already be disconnected
                 pass

@@ -116,6 +116,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             self.settings.show_badges,
             self.settings.show_mod_badges,
             self.settings.show_emotes,
+            self.settings.moderated_message_display,
         )
 
     def _get_emote_height(self, fm: QFontMetrics) -> int:
@@ -270,8 +271,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if color.alpha() > 0:
                 painter.fillRect(option.rect, color)
 
-        # Apply moderation opacity
+        # Apply moderation display mode
+        mod_display = self.settings.moderated_message_display
         if message.is_moderated:
+            if mod_display == "hidden":
+                painter.restore()
+                return
             painter.setOpacity(0.5)
 
         padding_v = self.settings.line_spacing
@@ -393,6 +398,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
             painter.setPen(user_color)
         else:
             painter.setPen(option.palette.text().color())
+
+        # Truncated mode: replace text with "<message deleted>"
+        if message.is_moderated and mod_display == "truncated":
+            painter.setPen(highlight_color if is_selected else self._text_muted_color)
+            deleted_text = "<message deleted>"
+            remaining_width = available_width - (x - rect.x())
+            painter.drawText(
+                int(x), int(y), remaining_width, line_height,
+                ALIGN_LEFT_VCENTER, deleted_text,
+            )
+            painter.restore()
+            return
 
         msg_text = message.text
         text_x = x
@@ -744,6 +761,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         message: ChatMessage | None = index.data(MessageRole)
         if not message:
             return QSize(option.rect.width(), 24)
+
+        # Hidden moderated messages take zero height
+        if message.is_moderated and self.settings.moderated_message_display == "hidden":
+            return QSize(option.rect.width(), 0)
 
         # Calculate available width early for cache lookup
         rect_width = option.rect.width()

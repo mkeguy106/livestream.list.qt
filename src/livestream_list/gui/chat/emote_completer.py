@@ -41,6 +41,7 @@ class EmoteCompleter(QWidget):
         self._trigger_pos: int = -1  # Position of the ':' trigger
         self._active = False
         self._platform: str = ""  # Current platform (twitch, kick, youtube)
+        self._usage_counts: dict[str, int] = {}  # emote_name -> usage count (per session)
 
         self._setup_ui()
         self._connect_signals()
@@ -95,6 +96,10 @@ class EmoteCompleter(QWidget):
     def _connect_signals(self) -> None:
         """Connect to the input widget's signals."""
         self._input.textChanged.connect(self._on_text_changed)
+
+    def record_usage(self, emote_name: str) -> None:
+        """Record an emote usage for frequency-based sorting."""
+        self._usage_counts[emote_name] = self._usage_counts.get(emote_name, 0) + 1
 
     def set_emotes(self, emote_map: dict[str, ChatEmote]) -> None:
         """Set the available emotes for completion."""
@@ -198,9 +203,10 @@ class EmoteCompleter(QWidget):
             self._dismiss()
             return
 
-        # Sort: prefix matches first, then by length (shorter first), then alphabetical
+        # Sort: most-used first, then prefix matches, then shorter, then alphabetical
         matches.sort(
             key=lambda x: (
+                -self._usage_counts.get(x[0], 0),
                 not x[0].lower().startswith(partial_lower),
                 len(x[0]),  # Shorter names first
                 x[0].lower(),
@@ -249,6 +255,7 @@ class EmoteCompleter(QWidget):
         """Handle emote selection from the list."""
         # Get original emote name (stored in UserRole, fallback to text)
         emote_name = item.data(Qt.ItemDataRole.UserRole) or item.text()
+        self.record_usage(emote_name)
         if self._trigger_pos >= 0:
             cursor_pos = self._input.cursorPosition()
             trigger_pos = self._trigger_pos  # Save before setText triggers textChanged

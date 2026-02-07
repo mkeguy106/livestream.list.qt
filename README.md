@@ -50,6 +50,11 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Recent chat history on channel join (Twitch)
   - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")
   - Copy messages with Ctrl+C
+  - Chat mode indicators (sub-only, slow mode, emote-only, followers-only, R9K)
+  - Slow mode countdown timer in input box
+  - Deleted message options (strikethrough, truncated, or hidden)
+  - Chat log export to text file
+  - Emote autocomplete prioritizes recently used emotes
 - **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
@@ -198,19 +203,19 @@ Planned features for future releases:
 
 - [ ] User ignore list — right-click to hide a user's messages, with a settings page to review and unblock
 - [ ] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
-- [ ] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
+- [x] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
 - [ ] Message character counter — show remaining characters near the input
 - [ ] User card popup — click a username to see account age, follow date, channel history
 - [ ] Split view — view two chats side by side in the same window
-- [ ] Chat log export — save chat history to a text file
+- [x] Chat log export — save chat history to a text file
 - [ ] Timestamp format option — 12h vs 24h toggle
-- [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
+- [x] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 - [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
 - [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
 - [ ] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
 - [ ] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
-- [ ] Deleted message options — configurable handling of deleted messages: strikethrough, truncated, or fully hidden
-- [ ] Slow mode countdown — show countdown timer in input box indicating when you can send your next message
+- [x] Deleted message options — configurable handling of deleted messages: strikethrough, truncated, or fully hidden
+- [x] Slow mode countdown — show countdown timer in input box indicating when you can send your next message
 - [ ] Link tooltip previews — hover over links to see rich previews (YouTube thumbnails, Twitter embeds, etc.)
 - [ ] Zero-width emotes — support 7TV/BTTV overlay emotes that stack on top of other emotes (e.g., slide, rainbow)
 - [ ] Smooth scrolling — animated scroll on new messages instead of jumping

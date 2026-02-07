@@ -7,7 +7,7 @@ from abc import abstractmethod
 
 from PySide6.QtCore import QObject, Signal
 
-from ..models import ChatMessage, ModerationEvent
+from ..models import ChatMessage, ChatRoomState, ModerationEvent
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,8 @@ class BaseChatConnection(QObject):
     messages_received = Signal(list)
     # Emitted on moderation events
     moderation_event = Signal(object)  # ModerationEvent
+    # Room state changes (sub-only, slow mode, etc.)
+    room_state_changed = Signal(object)  # ChatRoomState
     # Connection state signals
     connected = Signal()
     disconnected = Signal()
@@ -97,6 +99,10 @@ class BaseChatConnection(QObject):
     def _emit_moderation(self, event: ModerationEvent) -> None:
         """Emit a moderation event."""
         self.moderation_event.emit(event)
+
+    def _emit_room_state(self, state: ChatRoomState) -> None:
+        """Emit a room state change."""
+        self.room_state_changed.emit(state)
 
     def _emit_error(self, message: str) -> None:
         """Emit an error."""

@@ -9,7 +9,7 @@ import aiohttp
 
 from ...core.models import StreamPlatform
 from ..emotes.image import ImageSet, ImageSpec
-from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser, ModerationEvent
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatRoomState, ChatUser, ModerationEvent
 from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
@@ -422,6 +422,8 @@ class TwitchChatConnection(BaseChatConnection):
                 logger.warning(f"Twitch IRC: auth failed: {text}")
                 self._auth_failed = True
                 self._should_stop = True  # Break out of _read_loop
+        elif command == "ROOMSTATE":
+            self._handle_roomstate(parsed)
         elif command == "USERNOTICE":
             self._handle_usernotice(parsed)
 
@@ -538,6 +540,18 @@ class TwitchChatConnection(BaseChatConnection):
             target_user_id=tags.get("login", ""),
         )
         self._emit_moderation(event)
+
+    def _handle_roomstate(self, parsed: dict) -> None:
+        """Handle ROOMSTATE (chat mode changes)."""
+        tags = parsed["tags"]
+        state = ChatRoomState(
+            slow=int(tags.get("slow", "0")),
+            subs_only=tags.get("subs-only", "0") == "1",
+            emote_only=tags.get("emote-only", "0") == "1",
+            followers_only=int(tags.get("followers-only", "-1")),
+            r9k=tags.get("r9k", "0") == "1",
+        )
+        self._emit_room_state(state)
 
     def _handle_usernotice(self, parsed: dict) -> None:
         """Handle USERNOTICE (subs, resubs, gift subs, raids, announcements)."""

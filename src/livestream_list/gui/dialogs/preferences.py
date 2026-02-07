@@ -535,6 +535,18 @@ class PreferencesDialog(QDialog):
         self.chat_spellcheck_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_spellcheck_cb)
 
+        # Moderated message display
+        self.moderated_display_combo = QComboBox()
+        self.moderated_display_combo.addItem("Strikethrough", "strikethrough")
+        self.moderated_display_combo.addItem("Truncated", "truncated")
+        self.moderated_display_combo.addItem("Hidden", "hidden")
+        current_mod = self.app.settings.chat.builtin.moderated_message_display
+        idx = self.moderated_display_combo.findData(current_mod)
+        if idx >= 0:
+            self.moderated_display_combo.setCurrentIndex(idx)
+        self.moderated_display_combo.currentIndexChanged.connect(self._on_chat_changed)
+        builtin_layout.addRow("Deleted messages:", self.moderated_display_combo)
+
         # Theme color selector - allows editing dark or light mode colors
         builtin_layout.addRow(QLabel("<b>Theme Colors</b>"))
         self.color_theme_combo = QComboBox()
@@ -1105,6 +1117,9 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
         self.app.settings.chat.builtin.show_metrics = self.chat_metrics_cb.isChecked()
         self.app.settings.chat.builtin.spellcheck_enabled = self.chat_spellcheck_cb.isChecked()
+        self.app.settings.chat.builtin.moderated_message_display = (
+            self.moderated_display_combo.currentData()
+        )
         self.app.settings.chat.builtin.use_platform_name_colors = (
             self.chat_name_colors_cb.isChecked()
         )

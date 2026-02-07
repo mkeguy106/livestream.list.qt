@@ -728,6 +728,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.chat_error.connect(self._on_chat_error)
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
+        self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -851,6 +852,14 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget and isinstance(event, ModerationEvent):
             widget.apply_moderation(event)
+
+    def _on_room_state_changed(self, channel_key: str, state: object) -> None:
+        """Route room state changes to the correct chat widget."""
+        from ...chat.models import ChatRoomState
+
+        widget = self._widgets.get(channel_key)
+        if widget and isinstance(state, ChatRoomState):
+            widget.update_room_state(state)
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - debounce repaint requests."""
