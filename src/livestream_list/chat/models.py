@@ -27,6 +27,7 @@ class ChatBadge:
     name: str
     image_url: str
     image_set: ImageSet | None = None
+    title: str = ""  # Descriptive label (e.g. "6-Month Subscriber")
 
 
 @dataclass

@@ -1560,7 +1560,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     # Check badges
                     badge = self._delegate._get_badge_at_position(event.pos(), option, message)
                     if badge:
-                        QToolTip.showText(tip_pos, badge.name, viewport)
+                        QToolTip.showText(tip_pos, badge.title or badge.name, viewport)
                         return True
 
                     # Check emotes

@@ -219,14 +219,15 @@ class EmoteFetchWorker(QThread):
 
         return all_emotes
 
-    async def _fetch_twitch_badges(self) -> dict[str, str]:
-        """Fetch Twitch badge image URLs (global + channel).
+    async def _fetch_twitch_badges(self) -> dict[str, tuple[str, str]]:
+        """Fetch Twitch badge image URLs and titles (global + channel).
 
         Tries authenticated Helix API first, falls back to public badge API.
+        Returns: {badge_id: (image_url, title)}
         """
         import aiohttp
 
-        badge_map: dict[str, str] = {}  # "name/version" -> image_url
+        badge_map: dict[str, tuple[str, str]] = {}
 
         # Try Helix API if we have auth credentials
         if self.oauth_token and self.client_id:
@@ -252,8 +253,9 @@ class EmoteFetchWorker(QThread):
                                         or version.get("image_url_1x")
                                         or ""
                                     )
+                                    title = version.get("title", "")
                                     if set_id and vid and url:
-                                        badge_map[f"{set_id}/{vid}"] = url
+                                        badge_map[f"{set_id}/{vid}"] = (url, title)
                         else:
                             logger.warning(
                                 f"Helix badge API returned {resp.status}, trying public API"
@@ -277,8 +279,9 @@ class EmoteFetchWorker(QThread):
                                         or version.get("image_url_1x")
                                         or ""
                                     )
+                                    title = version.get("title", "")
                                     if set_id and vid and url:
-                                        badge_map[f"{set_id}/{vid}"] = url
+                                        badge_map[f"{set_id}/{vid}"] = (url, title)
             except Exception as e:
                 logger.warning(f"Failed to fetch Twitch badges via Helix: {e}")
 
@@ -289,11 +292,11 @@ class EmoteFetchWorker(QThread):
         logger.debug(f"Fetched {len(badge_map)} Twitch badge URLs")
         return badge_map
 
-    async def _fetch_public_twitch_badges(self) -> dict[str, str]:
+    async def _fetch_public_twitch_badges(self) -> dict[str, tuple[str, str]]:
         """Fetch Twitch badges from the public (unauthenticated) badge API."""
         import aiohttp
 
-        badge_map: dict[str, str] = {}
+        badge_map: dict[str, tuple[str, str]] = {}
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -311,8 +314,9 @@ class EmoteFetchWorker(QThread):
                                     or version_data.get("image_url_1x")
                                     or ""
                                 )
+                                title = version_data.get("title", "")
                                 if url:
-                                    badge_map[f"{set_id}/{vid}"] = url
+                                    badge_map[f"{set_id}/{vid}"] = (url, title)
                     else:
                         logger.warning(f"Public badge API returned {resp.status}")
         except Exception as e:
@@ -1104,9 +1108,9 @@ class ChatManager(QObject):
         self._user_emotes_fetched_at: float = 0.0
         self._channel_emotes_fetched_at: dict[str, float] = {}
 
-        # Badge URL mapping from Twitch API, per-channel: channel_key -> {badge_id -> url}
+        # Badge data from Twitch API, per-channel: channel_key -> {badge_id -> (url, title)}
         # Channel-specific because subscriber/bits badges differ per channel
-        self._badge_url_map: dict[str, dict[str, str]] = {}
+        self._badge_url_map: dict[str, dict[str, tuple[str, str]]] = {}
         self._badge_image_sets: dict[str, dict[str, ImageSet]] = {}
         self._badges_fetched_at: dict[str, float] = {}
 
@@ -1742,11 +1746,18 @@ class ChatManager(QObject):
         """Ensure a badge has an ImageSet bound to the shared cache.
 
         Badge maps are per-channel because subscriber/bits badges differ per channel.
+        Also applies the descriptive title from the badge API (e.g. "6-Month Subscriber").
         """
         if badge.image_set:
             return badge.image_set
         channel_badges = self._badge_url_map.get(channel_key, {})
-        url = channel_badges.get(badge.id) or badge.image_url
+        badge_data = channel_badges.get(badge.id)
+        if badge_data:
+            url, title = badge_data
+            if title and not badge.title:
+                badge.title = title
+        else:
+            url = badge.image_url
         if not url:
             self._queued_badge_urls.setdefault(channel_key, set()).add(badge.id)
             return None
@@ -2033,7 +2044,10 @@ class ChatManager(QObject):
         self._user_emotes_fetched_at = time.monotonic()
 
     def _on_badges_fetched(self, channel_key: str, badge_map: dict) -> None:
-        """Handle fetched badge URL data from Twitch API."""
+        """Handle fetched badge data from Twitch API.
+
+        badge_map: {badge_id: (image_url, title)}
+        """
         channel_badges = self._badge_url_map.setdefault(channel_key, {})
         channel_badges.update(badge_map)
         self._badges_fetched_at[channel_key] = time.monotonic()
@@ -2043,7 +2057,7 @@ class ChatManager(QObject):
 
         # Build or update badge image sets for this channel
         channel_sets = self._badge_image_sets.setdefault(channel_key, {})
-        for badge_id, url in badge_map.items():
+        for badge_id, (url, _title) in badge_map.items():
             if badge_id not in channel_sets:
                 cache_key = f"badge:{channel_key}:{badge_id}"
                 specs = {
