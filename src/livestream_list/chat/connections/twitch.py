@@ -212,6 +212,10 @@ class TwitchChatConnection(BaseChatConnection):
                 self._oauth_token = ""  # Disable sending
                 await self._connect_with_auth(channel, channel_id)
 
+                # If anonymous also failed, stop reconnecting entirely
+                if self._auth_failed:
+                    self._should_reconnect = False
+
         except Exception as e:
             if not self._should_stop:
                 self._emit_error(f"Connection failed: {e}")

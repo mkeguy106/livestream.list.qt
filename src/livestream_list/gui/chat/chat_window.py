@@ -726,6 +726,9 @@ class ChatWindow(QMainWindow):
         self.chat_manager.emote_map_updated.connect(self._on_emote_map_updated)
         self.chat_manager.auth_state_changed.connect(self._on_auth_state_changed)
         self.chat_manager.chat_error.connect(self._on_chat_error)
+        self.chat_manager.chat_disconnected.connect(self._on_chat_disconnected)
+        self.chat_manager.chat_reconnecting.connect(self._on_chat_reconnecting)
+        self.chat_manager.chat_reconnect_failed.connect(self._on_chat_reconnect_failed)
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
         self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
@@ -1021,6 +1024,24 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.show_error(message)
+
+    def _on_chat_disconnected(self, channel_key: str) -> None:
+        """Handle a chat connection being lost."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_disconnected()
+
+    def _on_chat_reconnecting(self, channel_key: str, delay: float) -> None:
+        """Handle a chat connection preparing to reconnect."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_reconnecting(delay)
+
+    def _on_chat_reconnect_failed(self, channel_key: str) -> None:
+        """Handle exhausted reconnection attempts."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_reconnect_failed()
 
     def _on_socials_fetched(self, channel_key: str, socials: dict) -> None:
         """Update a chat widget with fetched social links."""

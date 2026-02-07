@@ -34,24 +34,31 @@ MAX_PENDING_MESSAGES = 5000
 
 
 class ChatConnectionWorker(QThread):
-    """Worker thread that runs a chat connection's async event loop."""
+    """Worker thread that runs a chat connection's async event loop.
+
+    Wraps connect_to_channel in a reconnect loop using the base connection's
+    backoff infrastructure. After an unintentional disconnect the worker will
+    retry up to ``_max_reconnect_attempts`` times with exponential backoff.
+    """
+
+    reconnecting = Signal(float)  # delay in seconds before next attempt
+    reconnect_failed = Signal()  # exhausted all attempts
 
     def __init__(self, connection: BaseChatConnection, channel_id: str, parent=None, **kwargs):
         super().__init__(parent)
         self.connection = connection
         self.channel_id = channel_id
-        self.kwargs = kwargs
+        self.kwargs = dict(kwargs)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._should_stop = False
+        self._wake_event: asyncio.Event | None = None
 
     def run(self):
-        """Run the connection in a new event loop."""
+        """Run the connection in a new event loop with reconnect support."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         try:
-            self._loop.run_until_complete(
-                self.connection.connect_to_channel(self.channel_id, **self.kwargs)
-            )
+            self._loop.run_until_complete(self._run_with_reconnect())
         except Exception as e:
             if not self._should_stop:
                 logger.error(f"Chat worker error: {e}")
@@ -60,9 +67,59 @@ class ChatConnectionWorker(QThread):
             self._loop.close()
             self._loop = None
 
+    async def _run_with_reconnect(self):
+        """Connect, and reconnect on unintentional disconnects."""
+        self._wake_event = asyncio.Event()
+        attempts = 0
+
+        while not self._should_stop:
+            try:
+                await self.connection.connect_to_channel(self.channel_id, **self.kwargs)
+            except Exception as e:
+                if not self._should_stop:
+                    logger.error(f"Chat worker error: {e}")
+                    self.connection._emit_error(str(e))
+
+            # After connect_to_channel returns, decide whether to reconnect
+            if self._should_stop or not self.connection._should_reconnect:
+                break
+
+            attempts += 1
+            max_attempts = self.connection._max_reconnect_attempts
+            if max_attempts and attempts >= max_attempts:
+                logger.warning(f"Chat reconnect exhausted ({attempts} attempts)")
+                self.reconnect_failed.emit()
+                break
+
+            delay = self.connection._get_next_backoff()
+            logger.info(f"Chat reconnecting in {delay:.1f}s (attempt {attempts})")
+            self.reconnecting.emit(delay)
+
+            # Interruptible sleep — wake_event is set by request_immediate_reconnect
+            self._wake_event.clear()
+            try:
+                await asyncio.wait_for(self._wake_event.wait(), timeout=delay)
+                # Woken early — reset backoff for immediate retry
+                self.connection._reset_backoff()
+                attempts = 0
+            except asyncio.TimeoutError:
+                pass  # normal backoff elapsed
+
+    def request_immediate_reconnect(self):
+        """Wake the backoff sleep so the worker reconnects now (thread-safe)."""
+        if self._loop and self._wake_event is not None:
+            self._loop.call_soon_threadsafe(self._wake_event.set)
+
+    def update_kwargs(self, **new_kwargs):
+        """Update connection kwargs (e.g. YouTube video_id on stream restart)."""
+        self.kwargs.update(new_kwargs)
+
     def stop(self):
-        """Request the worker to stop."""
+        """Request the worker to stop (no reconnect)."""
         self._should_stop = True
+        self.connection._should_reconnect = False
+        if self._wake_event is not None and self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._wake_event.set)
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -1077,6 +1134,12 @@ class ChatManager(QObject):
     whisper_received = Signal(str, object)
     # Emitted when room state changes (channel_key, ChatRoomState)
     room_state_changed = Signal(str, object)
+    # Emitted when a connection is lost (channel_key)
+    chat_disconnected = Signal(str)
+    # Emitted when reconnecting with delay (channel_key, delay_seconds)
+    chat_reconnecting = Signal(str, float)
+    # Emitted when reconnection attempts are exhausted (channel_key)
+    chat_reconnect_failed = Signal(str)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1147,6 +1210,26 @@ class ChatManager(QObject):
         self._ensure_global_emotes()
         self._ensure_user_emotes()
         self._ensure_whisper_listener()
+
+        # Listen for streams coming online to trigger immediate reconnect
+        if self._monitor:
+            self._monitor.on_stream_online(self._on_stream_came_online)
+
+    def _on_stream_came_online(self, livestream: Livestream) -> None:
+        """Handle a stream coming online — trigger immediate reconnect if we have a worker."""
+        channel_key = livestream.channel.unique_key
+        worker = self._workers.get(channel_key)
+        if not worker or not worker.isRunning():
+            return
+
+        # For YouTube, update the video_id in case it changed
+        if livestream.channel.platform == StreamPlatform.YOUTUBE:
+            new_kwargs = self._get_connection_kwargs(livestream)
+            worker.update_kwargs(**new_kwargs)
+
+        logger.info(f"Stream came online for {channel_key}, triggering immediate reconnect")
+        worker.connection._reset_backoff()
+        worker.request_immediate_reconnect()
 
     @property
     def emote_cache(self) -> EmoteCache:
@@ -1229,6 +1312,9 @@ class ChatManager(QObject):
         )
         connection.error.connect(lambda msg, key=channel_key: (self._on_connection_error(key, msg)))
         connection.connected.connect(lambda key=channel_key: self.chat_connected.emit(key))
+        connection.disconnected.connect(
+            lambda key=channel_key: self.chat_disconnected.emit(key)
+        )
         connection.room_state_changed.connect(
             lambda state, key=channel_key: self.room_state_changed.emit(key, state)
         )
@@ -1244,6 +1330,12 @@ class ChatManager(QObject):
             livestream.channel.channel_id,
             parent=self,
             **kwargs,
+        )
+        worker.reconnecting.connect(
+            lambda delay, key=channel_key: self.chat_reconnecting.emit(key, delay)
+        )
+        worker.reconnect_failed.connect(
+            lambda key=channel_key: self.chat_reconnect_failed.emit(key)
         )
         self._workers[channel_key] = worker
         worker.start()
@@ -2244,6 +2336,7 @@ class ChatManager(QObject):
                 connection.moderation_event.disconnect()
                 connection.error.disconnect()
                 connection.connected.disconnect()
+                connection.disconnected.disconnect()
                 connection.room_state_changed.disconnect()
             except (RuntimeError, TypeError):
                 # Signal may already be disconnected

@@ -821,6 +821,48 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Hide the connecting indicator and show the message list."""
         self._connecting_label.setText("Waiting for messages\u2026")
         self._list_view.show()
+        # Stop any active reconnect countdown
+        if hasattr(self, "_reconnect_timer") and self._reconnect_timer.isActive():
+            self._reconnect_timer.stop()
+
+    def set_disconnected(self) -> None:
+        """Show a disconnected message alongside the message list."""
+        self._connecting_label.setText("Disconnected. Reconnecting\u2026")
+        self._connecting_label.show()
+        # Keep _list_view visible so user can still see past messages
+
+    def set_reconnecting(self, delay: float) -> None:
+        """Show a reconnecting countdown alongside the message list."""
+        self._reconnect_remaining = int(delay)
+        self._update_reconnect_label()
+        self._connecting_label.show()
+        if not hasattr(self, "_reconnect_timer"):
+            self._reconnect_timer = QTimer(self)
+            self._reconnect_timer.setInterval(1000)
+            self._reconnect_timer.timeout.connect(self._reconnect_countdown_tick)
+        self._reconnect_timer.start()
+
+    def set_reconnect_failed(self) -> None:
+        """Show a permanent connection lost message."""
+        if hasattr(self, "_reconnect_timer"):
+            self._reconnect_timer.stop()
+        self._connecting_label.setText("Connection lost. Could not reconnect.")
+        self._connecting_label.show()
+
+    def _reconnect_countdown_tick(self) -> None:
+        """Decrement the reconnect countdown label each second."""
+        self._reconnect_remaining -= 1
+        if self._reconnect_remaining <= 0:
+            self._reconnect_timer.stop()
+            self._connecting_label.setText("Reconnecting\u2026")
+        else:
+            self._update_reconnect_label()
+
+    def _update_reconnect_label(self) -> None:
+        """Update the reconnect label with the current countdown."""
+        self._connecting_label.setText(
+            f"Reconnecting in {self._reconnect_remaining}s\u2026"
+        )
 
     def set_authenticated(self, state: bool) -> None:
         """Enable or disable the input based on authentication state."""

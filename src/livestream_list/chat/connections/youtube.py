@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # Required cookies for InnerTube authentication
 REQUIRED_COOKIE_KEYS = {"SID", "HSID", "SSID", "APISID", "SAPISID"}
 
+# Max age for extracted send params before proactive re-extraction (2 hours)
+PARAMS_MAX_AGE = 7200
+
 # SuperChat tier thresholds (USD equivalent)
 _SUPERCHAT_TIERS = [
     (100, "RED"),
@@ -101,6 +104,8 @@ class YouTubeChatConnection(BaseChatConnection):
         self._video_id: str = ""
         self._cookies: dict[str, str] = {}
         self._chat_restriction: str = ""  # e.g. "Subscribers-only mode"
+        self._params_extracted_at: float = 0.0
+        self._extract_lock: asyncio.Lock = asyncio.Lock()
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a YouTube channel's live chat.
@@ -156,18 +161,15 @@ class YouTubeChatConnection(BaseChatConnection):
         self._cleanup_pytchat()
 
     async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
-        """Send a message to YouTube chat via InnerTube API."""
-        if not self._send_params or not self._innertube_api_key:
-            if self._chat_restriction:
-                # Subscriber-only chats require browser state we can't replicate
-                self._emit_error(
-                    f"Cannot send: {self._chat_restriction}. "
-                    "Use browser popout chat for restricted chats."
-                )
-            elif not self._cookies:
-                self._emit_error("YouTube chat sending not available (cookies not configured)")
-            else:
-                self._emit_error("YouTube chat sending not available (chat may be restricted)")
+        """Send a message to YouTube chat via InnerTube API with retry logic."""
+        if not self._cookies:
+            self._emit_error("YouTube chat sending not available (cookies not configured)")
+            return False
+        if self._chat_restriction and not self._send_params:
+            self._emit_error(
+                f"Cannot send: {self._chat_restriction}. "
+                "Use browser popout chat for restricted chats."
+            )
             return False
 
         sapisid = self._cookies.get("SAPISID", "")
@@ -175,9 +177,58 @@ class YouTubeChatConnection(BaseChatConnection):
             self._emit_error("Missing SAPISID cookie for YouTube auth")
             return False
 
+        # Proactive re-extract if params are stale
+        if self._params_extracted_at and self._send_params:
+            age = time.monotonic() - self._params_extracted_at
+            if age > PARAMS_MAX_AGE:
+                logger.info(f"YouTube send params are {age:.0f}s old, re-extracting")
+                await self._re_extract_send_params()
+
+        if not self._send_params or not self._innertube_api_key:
+            self._emit_error("YouTube chat sending not available (chat may be restricted)")
+            return False
+
+        result = await self._do_send_yt(text)
+        if result is True:
+            return True
+
+        if result == "auth_expired":
+            logger.info("YouTube send auth expired, re-extracting params and retrying")
+            if await self._re_extract_send_params():
+                retry = await self._do_send_yt(text)
+                if retry is True:
+                    return True
+            self._emit_error("YouTube auth expired. Try refreshing your cookies.")
+            return False
+
+        if result == "server_error":
+            logger.info("YouTube server error, retrying once after 2s")
+            await asyncio.sleep(2)
+            retry = await self._do_send_yt(text)
+            if retry is True:
+                return True
+            self._emit_error("YouTube server error. Try again later.")
+            return False
+
+        if result == "rate_limited":
+            self._emit_error("YouTube rate limit reached. Wait a moment before sending again.")
+            return False
+
+        # Generic failure
+        self._emit_error("Failed to send YouTube message")
+        return False
+
+    async def _do_send_yt(self, text: str) -> bool | str:
+        """Perform the actual YouTube send HTTP request.
+
+        Returns:
+            True on success, or a string indicating the failure type:
+            "auth_expired", "rate_limited", "server_error", or False.
+        """
         try:
             import aiohttp
 
+            sapisid = self._cookies.get("SAPISID", "")
             auth_header = _generate_sapisidhash(sapisid)
             cookie_header = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
 
@@ -222,17 +273,56 @@ class YouTubeChatConnection(BaseChatConnection):
                 ) as resp:
                     if resp.status == 200:
                         return True
+                    elif resp.status in (401, 403):
+                        logger.warning(f"YouTube send auth failed ({resp.status})")
+                        return "auth_expired"
+                    elif resp.status == 429:
+                        logger.warning("YouTube send rate limited")
+                        return "rate_limited"
+                    elif resp.status >= 500:
+                        logger.warning(f"YouTube server error ({resp.status})")
+                        return "server_error"
                     else:
                         error_text = await resp.text()
                         logger.warning(
                             f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
                         )
-                        self._emit_error(f"Failed to send message (HTTP {resp.status})")
                         return False
 
         except Exception as e:
             logger.error(f"YouTube send_message error: {e}")
-            self._emit_error(f"Send error: {e}")
+            return False
+
+    async def _re_extract_send_params(self) -> bool:
+        """Re-extract InnerTube send params under lock.
+
+        Returns True if params were successfully re-extracted.
+        """
+        async with self._extract_lock:
+            # Skip if another coroutine just re-extracted
+            if self._params_extracted_at and (
+                time.monotonic() - self._params_extracted_at < 60
+            ):
+                return bool(self._send_params and self._innertube_api_key)
+
+            old_api_key = self._innertube_api_key
+            old_params = self._send_params
+            old_datasync = self._datasync_id
+
+            self._innertube_api_key = ""
+            self._send_params = ""
+            self._datasync_id = ""
+
+            await self._extract_send_params(self._video_id)
+
+            if self._send_params and self._innertube_api_key:
+                return True
+
+            # Restore old params if re-extraction failed entirely
+            logger.warning("YouTube param re-extraction failed, restoring old params")
+            self._innertube_api_key = old_api_key
+            self._send_params = old_params
+            self._datasync_id = old_datasync
             return False
 
     async def _extract_send_params(self, video_id: str) -> None:
@@ -323,6 +413,7 @@ class YouTubeChatConnection(BaseChatConnection):
                 logger.info(f"YouTube slow mode detected: {slow_seconds}s")
 
             if self._innertube_api_key and self._send_params:
+                self._params_extracted_at = time.monotonic()
                 logger.info("YouTube InnerTube send params extracted successfully")
             else:
                 reason = ""
