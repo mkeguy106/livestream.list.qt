@@ -242,6 +242,7 @@ Planned features for future releases:
   - Recommended (based on channels you already follow)
   - Just Went Live (channels that started streaming in the last few minutes)
   - Rising Stars (small streamers with growing audiences)
+- [ ] VOD chat replay — play back chat messages from recorded Twitch VODs synced to the video timeline
 
 ## License
 

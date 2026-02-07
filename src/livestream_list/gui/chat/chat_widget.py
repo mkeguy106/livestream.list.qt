@@ -1231,37 +1231,183 @@ class ChatWidget(QWidget, ChatSearchMixin):
             pass
 
     def _export_chat_log(self) -> None:
-        """Export chat messages to a text file."""
+        """Export chat messages to a text, HTML, or JSON file."""
         from datetime import datetime as dt
 
         from PySide6.QtWidgets import QFileDialog
 
-        # Build default filename
+        # Build default filename (no extension — dialog filter controls it)
         channel_name = self.channel_key.split(":", 1)[-1] if ":" in self.channel_key else "chat"
         date_str = dt.now().strftime("%Y-%m-%d")
-        default_name = f"{channel_name}_{date_str}.txt"
+        default_name = f"{channel_name}_{date_str}"
 
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Chat Log", default_name, "Text files (*.txt);;All files (*)"
+            self,
+            "Export Chat Log",
+            default_name,
+            "Text files (*.txt);;HTML files (*.html);;JSON files (*.json);;All files (*)",
         )
         if not path:
             return
 
         messages = self.get_all_messages()
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                for msg in messages:
-                    ts = msg.timestamp.astimezone().strftime("%H:%M:%S")
-                    if msg.is_system and msg.system_text:
-                        f.write(f"[{ts}] *** {msg.system_text} ***\n")
-                        if msg.text:
-                            f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
-                    elif msg.is_action:
-                        f.write(f"[{ts}] {msg.user.display_name} {msg.text}\n")
-                    else:
-                        f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
+            if path.endswith(".html"):
+                self._export_as_html(path, messages)
+            elif path.endswith(".json"):
+                self._export_as_json(path, messages)
+            else:
+                self._export_as_text(path, messages)
         except OSError as e:
             logger.error(f"Failed to export chat log: {e}")
+            self._show_export_error(str(e))
+
+    def _export_as_text(self, path: str, messages: list) -> None:
+        """Export chat messages as plain text."""
+        with open(path, "w", encoding="utf-8") as f:
+            for msg in messages:
+                ts = msg.timestamp.astimezone().strftime("%H:%M:%S")
+                if msg.is_system and msg.system_text:
+                    f.write(f"[{ts}] *** {msg.system_text} ***\n")
+                    if msg.text:
+                        f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
+                elif msg.is_action:
+                    f.write(f"[{ts}] {msg.user.display_name} {msg.text}\n")
+                else:
+                    f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
+
+    def _export_as_html(self, path: str, messages: list) -> None:
+        """Export chat messages as a dark-themed HTML file."""
+        import html
+
+        channel_name = self.channel_key.split(":", 1)[-1] if ":" in self.channel_key else "chat"
+        lines: list[str] = []
+        lines.append("<!DOCTYPE html>")
+        lines.append("<html><head><meta charset='utf-8'>")
+        lines.append(f"<title>Chat Log — {html.escape(channel_name)}</title>")
+        lines.append("<style>")
+        lines.append(
+            "body{background:#1a1a2e;color:#e0e0e0;font-family:monospace;font-size:14px;"
+            "margin:20px;}"
+        )
+        lines.append(".msg{margin:2px 0;line-height:1.5;}")
+        lines.append(".ts{color:#666;}")
+        lines.append(".system{color:#888;font-style:italic;}")
+        lines.append(".badge{color:#999;font-size:0.85em;}")
+        lines.append(".reply{color:#777;font-size:0.9em;margin-left:20px;}")
+        lines.append(
+            ".hype{background:#4a3000;border-left:3px solid #ffb300;padding:2px 6px;}"
+        )
+        lines.append("</style></head><body>")
+        lines.append(f"<h2>Chat Log — {html.escape(channel_name)}</h2>")
+
+        for msg in messages:
+            ts = msg.timestamp.astimezone().strftime("%H:%M:%S")
+            ts_span = f"<span class='ts'>[{ts}]</span>"
+
+            if msg.is_system and msg.system_text:
+                lines.append(
+                    f"<div class='msg system'>{ts_span} *** "
+                    f"{html.escape(msg.system_text)} ***</div>"
+                )
+                if msg.text:
+                    lines.append(
+                        f"<div class='msg'>{ts_span} "
+                        f"{html.escape(msg.user.display_name)}: "
+                        f"{html.escape(msg.text)}</div>"
+                    )
+                continue
+
+            # Reply context
+            if msg.reply_parent_display_name:
+                lines.append(
+                    f"<div class='reply'>{ts_span} Replying to "
+                    f"@{html.escape(msg.reply_parent_display_name)}: "
+                    f"{html.escape(msg.reply_parent_text)}</div>"
+                )
+
+            # Badges
+            badge_str = ""
+            if msg.user.badges:
+                badge_names = [html.escape(b.name) for b in msg.user.badges]
+                badge_str = (
+                    "<span class='badge'>[" + "][".join(badge_names) + "]</span> "
+                )
+
+            # Username color
+            color = msg.user.color or "#aaa"
+            name_span = (
+                f"<span style='color:{html.escape(color)};font-weight:bold'>"
+                f"{html.escape(msg.user.display_name)}</span>"
+            )
+
+            text_escaped = html.escape(msg.text)
+            css_class = "msg hype" if msg.is_hype_chat else "msg"
+
+            if msg.is_action:
+                lines.append(
+                    f"<div class='{css_class}'>{ts_span} {badge_str}"
+                    f"{name_span} {text_escaped}</div>"
+                )
+            else:
+                lines.append(
+                    f"<div class='{css_class}'>{ts_span} {badge_str}"
+                    f"{name_span}: {text_escaped}</div>"
+                )
+
+        lines.append("</body></html>")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+    def _export_as_json(self, path: str, messages: list) -> None:
+        """Export chat messages as a JSON array."""
+        import json
+
+        entries = []
+        for msg in messages:
+            entry = {
+                "id": msg.id,
+                "timestamp": msg.timestamp.isoformat(),
+                "platform": msg.platform.value,
+                "user": {
+                    "id": msg.user.id,
+                    "name": msg.user.name,
+                    "display_name": msg.user.display_name,
+                    "color": msg.user.color,
+                    "badges": [
+                        {"id": b.id, "name": b.name} for b in msg.user.badges
+                    ],
+                },
+                "text": msg.text,
+                "emotes": [
+                    {"id": e.id, "name": e.name, "start": s, "end": end}
+                    for s, end, e in msg.emote_positions
+                ],
+                "is_action": msg.is_action,
+                "is_system": msg.is_system,
+                "system_text": msg.system_text,
+            }
+            if msg.reply_parent_display_name:
+                entry["reply"] = {
+                    "parent_display_name": msg.reply_parent_display_name,
+                    "parent_text": msg.reply_parent_text,
+                }
+            if msg.is_hype_chat:
+                entry["hype_chat"] = {
+                    "amount": msg.hype_chat_amount,
+                    "currency": msg.hype_chat_currency,
+                    "level": msg.hype_chat_level,
+                }
+            entries.append(entry)
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(entries, f, indent=2, ensure_ascii=False)
+
+    def _show_export_error(self, error: str) -> None:
+        """Show an error dialog for export failures."""
+        from PySide6.QtWidgets import QMessageBox
+
+        QMessageBox.warning(self, "Export Failed", f"Could not export chat log:\n{error}")
 
     def hideEvent(self, event) -> None:  # noqa: N802
         """Handle widget hidden."""

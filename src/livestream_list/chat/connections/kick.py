@@ -134,6 +134,7 @@ class KickChatConnection(BaseChatConnection):
 
         Uses the official Kick public API with OAuth bearer token.
         Automatically refreshes the token on 401 and retries once.
+        Handles 429 rate limiting and 5xx server errors with retry.
         Uses a lock to prevent concurrent token refresh races.
         """
         if not self._auth_token:
@@ -145,22 +146,53 @@ class KickChatConnection(BaseChatConnection):
             return False
 
         result = await self._do_send(text, reply_to_msg_id)
+
+        if result is True:
+            return True
+
         if result is None:
             # 401 - try refreshing token under lock to prevent concurrent refreshes
             async with self._refresh_lock:
                 if await self._refresh_auth_token():
-                    result = await self._do_send(text, reply_to_msg_id)
-                    if result is None:
+                    retry = await self._do_send(text, reply_to_msg_id)
+                    if retry is True:
+                        return True
+                    if retry is None:
                         self._emit_error("Send failed after token refresh (401)")
-                        return False
-                    return result
+                    elif retry == "rate_limited":
+                        self._emit_error(
+                            "Rate limit reached. Wait a moment before sending again."
+                        )
+                    elif retry == "server_error":
+                        self._emit_error("Kick server error after token refresh")
+                    return False
                 else:
                     self._emit_error("Authentication expired - please re-login to Kick")
                     return False
-        return result
 
-    async def _do_send(self, text: str, reply_to_msg_id: str = "") -> bool | None:
-        """Attempt to send a message. Returns None on 401 (needs refresh)."""
+        if result == "rate_limited":
+            self._emit_error("Rate limit reached. Wait a moment before sending again.")
+            return False
+
+        if result == "server_error":
+            # Retry once after a short delay
+            await asyncio.sleep(2)
+            retry = await self._do_send(text, reply_to_msg_id)
+            if retry is True:
+                return True
+            self._emit_error("Kick server error — please try again later.")
+            return False
+
+        # result is False (other error already emitted by _do_send)
+        return False
+
+    async def _do_send(self, text: str, reply_to_msg_id: str = "") -> bool | str | None:
+        """Attempt to send a message.
+
+        Returns:
+            True/False for success/failure, None on 401 (needs refresh),
+            "rate_limited" on 429, "server_error" on 5xx.
+        """
         try:
             url = "https://api.kick.com/public/v1/chat"
             headers = {
@@ -188,6 +220,13 @@ class KickChatConnection(BaseChatConnection):
                     body = await resp.text()
                     logger.warning(f"Kick chat send got 401: {body}")
                     return None  # Signal to refresh and retry
+                if resp.status == 429:
+                    logger.warning("Kick chat send got 429 (rate limited)")
+                    return "rate_limited"
+                if resp.status >= 500:
+                    body = await resp.text()
+                    logger.warning(f"Kick chat send got {resp.status}: {body}")
+                    return "server_error"
                 body = await resp.text()
                 logger.error(f"Kick chat send failed ({resp.status}): {body}")
                 self._emit_error(f"Send failed ({resp.status})")

@@ -513,6 +513,40 @@ class Application(QApplication):
         self._active_workers.append(worker)
         worker.start()
 
+    def show_notification_log(self):
+        """Show recent notification history in a dialog."""
+        from PySide6.QtWidgets import QDialog, QLabel, QListWidget, QVBoxLayout
+
+        if not self.notifier:
+            return
+
+        log = self.notifier.notification_log
+        parent = self.main_window
+
+        dlg = QDialog(parent)
+        dlg.setWindowTitle("Recent Notifications")
+        dlg.resize(420, 350)
+        layout = QVBoxLayout(dlg)
+
+        if not log:
+            label = QLabel("No notifications yet.")
+            layout.addWidget(label)
+        else:
+            list_widget = QListWidget()
+            # Show most recent first
+            for entry in reversed(log):
+                ts = entry["timestamp"].astimezone().strftime("%Y-%m-%d %H:%M")
+                platform = entry["platform"].capitalize()
+                name = entry["display_name"]
+                game = entry["game"]
+                line = f"[{ts}] [{platform}] {name}"
+                if game:
+                    line += f" — {game}"
+                list_widget.addItem(line)
+            layout.addWidget(list_widget)
+
+        dlg.exec()
+
     def cleanup(self):
         """Clean up resources."""
         # Stop timers
@@ -592,6 +626,7 @@ def run() -> int:
             set_notifications_enabled=lambda enabled: (
                 setattr(app.settings.notifications, "enabled", enabled) or app.save_settings()
             ),
+            on_show_notification_log=app.show_notification_log,
         )
         tray.show()
         app.tray_icon = tray

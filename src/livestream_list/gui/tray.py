@@ -88,6 +88,7 @@ class TrayIcon(QSystemTrayIcon):
         on_quit: Callable[[], None],
         get_notifications_enabled: Callable[[], bool],
         set_notifications_enabled: Callable[[bool], None],
+        on_show_notification_log: Callable[[], None] | None = None,
     ):
         super().__init__(parent)
 
@@ -95,6 +96,7 @@ class TrayIcon(QSystemTrayIcon):
         self._on_quit = on_quit
         self._get_notifications_enabled = get_notifications_enabled
         self._set_notifications_enabled = set_notifications_enabled
+        self._on_show_notification_log = on_show_notification_log
 
         # Create icon
         self._create_icon()
@@ -127,6 +129,11 @@ class TrayIcon(QSystemTrayIcon):
         self._notifications_action.setCheckable(True)
         self._notifications_action.setChecked(self._get_notifications_enabled())
         self._notifications_action.triggered.connect(self._on_notifications_toggled)
+
+        # Recent Notifications log
+        if self._on_show_notification_log:
+            log_action = menu.addAction("Recent Notifications...")
+            log_action.triggered.connect(self._on_show_notification_log)
 
         menu.addSeparator()
 

@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from ..core.models import Livestream
 from ..core.settings import NotificationSettings
@@ -24,6 +25,7 @@ class Notifier:
         self.on_open_stream = on_open_stream
         self._notifier = None
         self._pending_streams: dict[str, Livestream] = {}
+        self._notification_log: list[dict] = []
         self._init_backend()
 
     def _init_backend(self) -> None:
@@ -240,6 +242,28 @@ class Notifier:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+
+        if not is_test:
+            self._log_notification(livestream)
+
+    def _log_notification(self, livestream: Livestream) -> None:
+        """Record a notification in the in-memory log (max 50 entries)."""
+        entry = {
+            "channel_key": livestream.channel.unique_key,
+            "display_name": livestream.display_name,
+            "platform": livestream.channel.platform.value,
+            "title": livestream.title or "",
+            "game": livestream.game or "",
+            "timestamp": datetime.now(timezone.utc),
+        }
+        self._notification_log.append(entry)
+        if len(self._notification_log) > 50:
+            self._notification_log = self._notification_log[-50:]
+
+    @property
+    def notification_log(self) -> list[dict]:
+        """Read-only access to the notification log (most recent last)."""
+        return list(self._notification_log)
 
     async def clear_all(self) -> None:
         """Clear all pending notifications."""
