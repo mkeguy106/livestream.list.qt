@@ -589,7 +589,18 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._input = ChatInput()
         self._input.setObjectName("chat_input")
         self._input.returnPressed.connect(self._on_send)
+        self._input.textChanged.connect(self._update_char_counter)
         input_layout.addWidget(self._input)
+
+        self._char_counter = QLabel()
+        self._char_counter.setObjectName("chat_char_counter")
+        self._char_counter.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self._char_counter.setFixedWidth(32)
+        self._char_counter.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._char_counter.hide()
+        input_layout.addWidget(self._char_counter)
 
         self._send_button = QPushButton("Whisper" if self._is_dm else "Chat")
         self._send_button.setObjectName("chat_send_btn")
@@ -952,6 +963,31 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Clear all messages."""
         self._model.clear_messages()
 
+    def _get_char_limit(self) -> int:
+        """Return the character limit for the current platform."""
+        if self.livestream:
+            platform = self.livestream.channel.platform
+            if platform == StreamPlatform.YOUTUBE:
+                return 200
+        return 500  # Twitch and Kick both use 500
+
+    def _update_char_counter(self, text: str) -> None:
+        """Update the character counter label."""
+        limit = self._get_char_limit()
+        length = len(text)
+        if length == 0:
+            self._char_counter.hide()
+            return
+        remaining = limit - length
+        self._char_counter.setText(str(remaining))
+        if remaining < 0:
+            self._char_counter.setStyleSheet("QLabel { color: #e74c3c; font-size: 11px; }")
+        elif remaining <= 50:
+            self._char_counter.setStyleSheet("QLabel { color: #e67e22; font-size: 11px; }")
+        else:
+            self._char_counter.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
+        self._char_counter.show()
+
     def _on_send(self) -> None:
         """Handle send button/enter key."""
         text = self._input.text().strip()
@@ -991,7 +1027,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 continue
             prefix = ""
             if self.settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self.settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")
@@ -1928,7 +1964,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                 continue
             prefix = ""
             if self._settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self._settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")
@@ -2252,7 +2288,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                 continue
             prefix = ""
             if self._settings.show_timestamps:
-                prefix = f"[{message.timestamp.astimezone().strftime('%H:%M')}] "
+                prefix = f"[{message.timestamp.astimezone().strftime(self._settings.ts_strftime)}] "
             name = message.user.display_name
             if message.is_action:
                 lines.append(f"{prefix}{name} {message.text}")

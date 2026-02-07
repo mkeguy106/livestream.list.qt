@@ -113,6 +113,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             self.settings.font_size,
             self.settings.line_spacing,
             self.settings.show_timestamps,
+            self.settings.timestamp_format,
             self.settings.show_badges,
             self.settings.show_mod_badges,
             self.settings.show_emotes,
@@ -294,7 +295,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Timestamp (optional)
         if self.settings.show_timestamps:
-            ts_text = message.timestamp.astimezone().strftime("%H:%M")
+            ts_text = message.timestamp.astimezone().strftime(self.settings.ts_strftime)
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
@@ -776,7 +777,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            prefix_width += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            prefix_width += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             badge_count = 0
             for b in message.user.badges:
@@ -899,7 +902,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -963,7 +968,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1097,7 +1104,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1339,7 +1348,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1404,7 +1415,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1460,7 +1473,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance("00:00") + TIMESTAMP_PADDING
+            x += QFontMetrics(ts_font).horizontalAdvance(
+                self.settings.ts_measure_text
+            ) + TIMESTAMP_PADDING
 
         # Skip system text lines
         if message.is_system and message.system_text:

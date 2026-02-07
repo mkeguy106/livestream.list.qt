@@ -157,6 +157,7 @@ class BuiltinChatSettings:
 
     font_size: int = 13
     show_timestamps: bool = False
+    timestamp_format: str = "12h"  # "12h" or "24h"
     show_badges: bool = True
     show_mod_badges: bool = True
     show_emotes: bool = True
@@ -176,6 +177,16 @@ class BuiltinChatSettings:
     # Theme-specific color settings
     dark_colors: ChatColorSettings = field(default_factory=ChatColorSettings)
     light_colors: ChatColorSettings = field(default_factory=_default_light_colors)
+
+    @property
+    def ts_strftime(self) -> str:
+        """Return strftime format string based on timestamp_format setting."""
+        return "%I:%M %p" if self.timestamp_format == "12h" else "%H:%M"
+
+    @property
+    def ts_measure_text(self) -> str:
+        """Return a representative text for measuring timestamp width."""
+        return "00:00 AM" if self.timestamp_format == "12h" else "00:00"
 
     def get_colors(self, is_dark: bool) -> ChatColorSettings:
         """Get the color settings for the current theme mode.
@@ -602,6 +613,7 @@ class Settings:
                     builtin_data.get("font_size"), 13, min_val=8, max_val=72
                 ),
                 show_timestamps=builtin_data.get("show_timestamps", False),
+                timestamp_format=builtin_data.get("timestamp_format", "12h"),
                 show_badges=builtin_data.get("show_badges", True),
                 show_mod_badges=builtin_data.get("show_mod_badges", True),
                 show_emotes=builtin_data.get("show_emotes", True),
@@ -758,6 +770,7 @@ class Settings:
                 "builtin": {
                     "font_size": self.chat.builtin.font_size,
                     "show_timestamps": self.chat.builtin.show_timestamps,
+                    "timestamp_format": self.chat.builtin.timestamp_format,
                     "show_badges": self.chat.builtin.show_badges,
                     "show_mod_badges": self.chat.builtin.show_mod_badges,
                     "show_emotes": self.chat.builtin.show_emotes,
