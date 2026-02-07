@@ -204,8 +204,8 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 Planned features for future releases:
 
-- [ ] User ignore list — right-click to hide a user's messages, with a settings page to review and unblock
-- [ ] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
+- [x] User ignore list — right-click to hide a user's messages, with a settings page to review and unblock
+- [x] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
 - [x] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
 - [x] Message character counter — show remaining characters near the input
 - [ ] User card popup — click a username to see account age, follow date, channel history
@@ -224,8 +224,8 @@ Planned features for future releases:
 - [ ] Smooth scrolling — animated scroll on new messages instead of jumping
 - [ ] Streamer mode — auto-detect OBS/streaming software and hide usernames/whispers for privacy
 - [ ] Reply thread popup — open full reply threads in a dedicated popup window
-- [ ] User nicknames — assign custom local display names to other users
-- [ ] User notes — attach notes to users, visible on their user card
+- [x] User nicknames — assign custom local display names to other users
+- [x] User notes — attach notes to users, visible on their user card
 - [ ] Multiple accounts — quick account switcher popup for managing multiple logins per platform
 - [ ] Configurable mod timeout buttons — quick mod-action buttons with customizable durations
 - [x] Previous message cycling — up/down arrows to cycle through previously sent messages
