@@ -15,8 +15,11 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -816,12 +819,143 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(self.builtin_group)
 
+        # Highlight Keywords group
+        self.keywords_group = QGroupBox("Highlight Keywords")
+        kw_layout = QVBoxLayout(self.keywords_group)
+        kw_info = QLabel("Messages containing these words will be highlighted (case-insensitive).")
+        kw_info.setStyleSheet("color: gray; font-style: italic;")
+        kw_info.setWordWrap(True)
+        kw_layout.addWidget(kw_info)
+        self.kw_search = QLineEdit()
+        self.kw_search.setPlaceholderText("Filter keywords\u2026")
+        self.kw_search.setClearButtonEnabled(True)
+        self.kw_search.textChanged.connect(self._refresh_keywords_list)
+        kw_layout.addWidget(self.kw_search)
+        self.keywords_list = QListWidget()
+        self.keywords_list.setMaximumHeight(100)
+        self.keywords_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        kw_layout.addWidget(self.keywords_list)
+        kw_buttons = QHBoxLayout()
+        kw_add_btn = QPushButton("Add")
+        kw_add_btn.clicked.connect(self._add_keyword)
+        kw_buttons.addWidget(kw_add_btn)
+        kw_remove_btn = QPushButton("Remove Selected")
+        kw_remove_btn.clicked.connect(self._remove_keywords)
+        kw_buttons.addWidget(kw_remove_btn)
+        kw_buttons.addStretch()
+        kw_layout.addLayout(kw_buttons)
+        self._refresh_keywords_list()
+        layout.addWidget(self.keywords_group)
+
+        # Blocked Users group
+        self.blocked_group = QGroupBox("Blocked Users")
+        bl_layout = QVBoxLayout(self.blocked_group)
+        bl_filter_row = QHBoxLayout()
+        self.bl_search = QLineEdit()
+        self.bl_search.setPlaceholderText("Filter users\u2026")
+        self.bl_search.setClearButtonEnabled(True)
+        self.bl_search.textChanged.connect(self._refresh_blocked_list)
+        bl_filter_row.addWidget(self.bl_search)
+        self.bl_platform_filter = self._create_platform_filter_combo()
+        self.bl_platform_filter.currentIndexChanged.connect(
+            lambda: self._refresh_blocked_list()
+        )
+        bl_filter_row.addWidget(self.bl_platform_filter)
+        bl_layout.addLayout(bl_filter_row)
+        self.blocked_list = QListWidget()
+        self.blocked_list.setMaximumHeight(120)
+        self.blocked_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        bl_layout.addWidget(self.blocked_list)
+        bl_buttons = QHBoxLayout()
+        bl_remove_btn = QPushButton("Remove Selected")
+        bl_remove_btn.clicked.connect(self._remove_blocked_users)
+        bl_buttons.addWidget(bl_remove_btn)
+        bl_clear_btn = QPushButton("Clear All")
+        bl_clear_btn.clicked.connect(self._clear_all_blocked)
+        bl_buttons.addWidget(bl_clear_btn)
+        bl_buttons.addStretch()
+        bl_layout.addLayout(bl_buttons)
+        self._refresh_blocked_list()
+        layout.addWidget(self.blocked_group)
+
+        # User Nicknames group
+        self.nicknames_group = QGroupBox("User Nicknames")
+        nn_layout = QVBoxLayout(self.nicknames_group)
+        nn_filter_row = QHBoxLayout()
+        self.nn_search = QLineEdit()
+        self.nn_search.setPlaceholderText("Filter nicknames\u2026")
+        self.nn_search.setClearButtonEnabled(True)
+        self.nn_search.textChanged.connect(self._refresh_nicknames_list)
+        nn_filter_row.addWidget(self.nn_search)
+        self.nn_platform_filter = self._create_platform_filter_combo()
+        self.nn_platform_filter.currentIndexChanged.connect(
+            lambda: self._refresh_nicknames_list()
+        )
+        nn_filter_row.addWidget(self.nn_platform_filter)
+        nn_layout.addLayout(nn_filter_row)
+        self.nicknames_list = QListWidget()
+        self.nicknames_list.setMaximumHeight(120)
+        self.nicknames_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        nn_layout.addWidget(self.nicknames_list)
+        nn_buttons = QHBoxLayout()
+        nn_add_btn = QPushButton("Add")
+        nn_add_btn.clicked.connect(self._add_nickname)
+        nn_buttons.addWidget(nn_add_btn)
+        nn_edit_btn = QPushButton("Edit")
+        nn_edit_btn.clicked.connect(self._edit_nickname)
+        nn_buttons.addWidget(nn_edit_btn)
+        nn_remove_btn = QPushButton("Remove Selected")
+        nn_remove_btn.clicked.connect(self._remove_nicknames)
+        nn_buttons.addWidget(nn_remove_btn)
+        nn_buttons.addStretch()
+        nn_layout.addLayout(nn_buttons)
+        self._refresh_nicknames_list()
+        layout.addWidget(self.nicknames_group)
+
+        # User Notes group
+        self.notes_group = QGroupBox("User Notes")
+        nt_layout = QVBoxLayout(self.notes_group)
+        nt_filter_row = QHBoxLayout()
+        self.nt_search = QLineEdit()
+        self.nt_search.setPlaceholderText("Filter notes\u2026")
+        self.nt_search.setClearButtonEnabled(True)
+        self.nt_search.textChanged.connect(self._refresh_notes_list)
+        nt_filter_row.addWidget(self.nt_search)
+        self.nt_platform_filter = self._create_platform_filter_combo()
+        self.nt_platform_filter.currentIndexChanged.connect(
+            lambda: self._refresh_notes_list()
+        )
+        nt_filter_row.addWidget(self.nt_platform_filter)
+        nt_layout.addLayout(nt_filter_row)
+        self.notes_list = QListWidget()
+        self.notes_list.setMaximumHeight(120)
+        self.notes_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        nt_layout.addWidget(self.notes_list)
+        nt_buttons = QHBoxLayout()
+        nt_add_btn = QPushButton("Add")
+        nt_add_btn.clicked.connect(self._add_note)
+        nt_buttons.addWidget(nt_add_btn)
+        nt_edit_btn = QPushButton("Edit")
+        nt_edit_btn.clicked.connect(self._edit_note)
+        nt_buttons.addWidget(nt_edit_btn)
+        nt_remove_btn = QPushButton("Remove Selected")
+        nt_remove_btn.clicked.connect(self._remove_notes)
+        nt_buttons.addWidget(nt_remove_btn)
+        nt_buttons.addStretch()
+        nt_layout.addLayout(nt_buttons)
+        self._refresh_notes_list()
+        layout.addWidget(self.notes_group)
+
         # Set initial visibility based on current mode
         show_browser = current_mode == "browser"
         self.browser_label.setVisible(show_browser)
         self.browser_combo.setVisible(show_browser)
         self.new_window_cb.setVisible(show_browser)
         self.builtin_group.setVisible(not show_browser)
+        self.keywords_group.setVisible(not show_browser)
+        self.blocked_group.setVisible(not show_browser)
+        self.nicknames_group.setVisible(not show_browser)
+        self.notes_group.setVisible(not show_browser)
 
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(lambda: self._reset_tab_defaults("Chat"))
@@ -1108,6 +1242,10 @@ class PreferencesDialog(QDialog):
         self.browser_combo.setVisible(show_browser)
         self.new_window_cb.setVisible(show_browser)
         self.builtin_group.setVisible(not show_browser)
+        self.keywords_group.setVisible(not show_browser)
+        self.blocked_group.setVisible(not show_browser)
+        self.nicknames_group.setVisible(not show_browser)
+        self.notes_group.setVisible(not show_browser)
         self._on_chat_changed()
 
     def _on_chat_changed(self):
@@ -1419,17 +1557,24 @@ class PreferencesDialog(QDialog):
             self.chat_animate_emotes_cb.setChecked(builtin.animate_emotes)
             self.chat_alt_rows_cb.setChecked(builtin.show_alternating_rows)
             self.chat_metrics_cb.setChecked(builtin.show_metrics)
-            self.alt_row_even_edit.setText(builtin.alt_row_color_even)
-            self.alt_row_odd_edit.setText(builtin.alt_row_color_odd)
+            self.chat_spellcheck_cb.setChecked(builtin.spellcheck_enabled)
+            idx = self.moderated_display_combo.findData(builtin.moderated_message_display)
+            if idx >= 0:
+                self.moderated_display_combo.setCurrentIndex(idx)
             self.chat_name_colors_cb.setChecked(builtin.use_platform_name_colors)
-            self.tab_active_color_edit.setText(builtin.tab_active_color)
-            self.tab_inactive_color_edit.setText(builtin.tab_inactive_color)
-            self.mention_color_edit.setText(builtin.mention_highlight_color)
+            # Color settings (use defaults for the currently selected color theme)
+            is_dark = self.color_theme_combo.currentData() == "dark"
+            colors = builtin.dark_colors if is_dark else builtin.light_colors
+            self.alt_row_even_edit.setText(colors.alt_row_color_even)
+            self.alt_row_odd_edit.setText(colors.alt_row_color_odd)
+            self.tab_active_color_edit.setText(colors.tab_active_color)
+            self.tab_inactive_color_edit.setText(colors.tab_inactive_color)
+            self.mention_color_edit.setText(colors.mention_highlight_color)
             # Banner settings
             self.show_stream_title_cb.setChecked(builtin.show_stream_title)
             self.show_socials_cb.setChecked(builtin.show_socials_banner)
-            self.banner_bg_edit.setText(builtin.banner_bg_color)
-            self.banner_text_edit.setText(builtin.banner_text_color)
+            self.banner_bg_edit.setText(colors.banner_bg_color)
+            self.banner_text_edit.setText(colors.banner_text_color)
             self._on_chat_changed()
 
     def _on_twitch_login(self):
@@ -1636,3 +1781,270 @@ class PreferencesDialog(QDialog):
 
             # Then check their live status
             self.app.refresh(on_complete=on_refresh_complete)
+
+    # --- Shared filter helpers ---
+
+    def _create_platform_filter_combo(self) -> QComboBox:
+        """Create a platform filter dropdown with All + each platform."""
+        combo = QComboBox()
+        combo.addItem("All", "all")
+        for p in StreamPlatform:
+            combo.addItem(p.value.capitalize(), p.value)
+        combo.setFixedWidth(100)
+        return combo
+
+    def _format_platform_label(self, user_key: str) -> str:
+        """Extract platform from user_key and return a capitalised label."""
+        platform = user_key.split(":")[0] if ":" in user_key else "?"
+        return platform.capitalize()
+
+    def _matches_platform_filter(self, user_key: str, platform_filter: str) -> bool:
+        """Check if a user_key matches the selected platform filter."""
+        if platform_filter == "all":
+            return True
+        return user_key.startswith(platform_filter + ":")
+
+    # --- Highlight Keywords helpers ---
+
+    def _refresh_keywords_list(self):
+        self.keywords_list.clear()
+        search = self.kw_search.text().strip().lower()
+        for kw in self.app.settings.chat.builtin.highlight_keywords:
+            if search and search not in kw.lower():
+                continue
+            self.keywords_list.addItem(kw)
+
+    def _add_keyword(self):
+        text, ok = QInputDialog.getText(self, "Add Highlight Keyword", "Keyword:")
+        if ok and text.strip():
+            kw = text.strip()
+            if kw not in self.app.settings.chat.builtin.highlight_keywords:
+                self.app.settings.chat.builtin.highlight_keywords.append(kw)
+                self.app.save_settings()
+                self._refresh_keywords_list()
+
+    def _remove_keywords(self):
+        for item in self.keywords_list.selectedItems():
+            kw = item.text()
+            if kw in self.app.settings.chat.builtin.highlight_keywords:
+                self.app.settings.chat.builtin.highlight_keywords.remove(kw)
+        self.app.save_settings()
+        self._refresh_keywords_list()
+
+    # --- Blocked Users helpers ---
+
+    def _refresh_blocked_list(self):
+        self.blocked_list.clear()
+        search = self.bl_search.text().strip().lower()
+        platform_filter = self.bl_platform_filter.currentData()
+        builtin = self.app.settings.chat.builtin
+        for user_key in builtin.blocked_users:
+            if not self._matches_platform_filter(user_key, platform_filter):
+                continue
+            display = builtin.blocked_user_names.get(user_key, user_key)
+            platform = self._format_platform_label(user_key)
+            label = f"[{platform}]  {display}"
+            if search and search not in label.lower():
+                continue
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, user_key)
+            self.blocked_list.addItem(item)
+
+    def _remove_blocked_users(self):
+        builtin = self.app.settings.chat.builtin
+        for item in self.blocked_list.selectedItems():
+            user_key = item.data(Qt.ItemDataRole.UserRole)
+            if user_key and user_key in builtin.blocked_users:
+                builtin.blocked_users.remove(user_key)
+            builtin.blocked_user_names.pop(user_key, None)
+        self.app.save_settings()
+        self._refresh_blocked_list()
+
+    def _clear_all_blocked(self):
+        if not self.app.settings.chat.builtin.blocked_users:
+            return
+        result = QMessageBox.question(
+            self,
+            "Clear All Blocked Users",
+            "Remove all blocked users?",
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if result == QMessageBox.StandardButton.Ok:
+            self.app.settings.chat.builtin.blocked_users.clear()
+            self.app.settings.chat.builtin.blocked_user_names.clear()
+            self.app.save_settings()
+            self._refresh_blocked_list()
+
+    # --- User Nicknames helpers ---
+
+    def _refresh_nicknames_list(self):
+        self.nicknames_list.clear()
+        search = self.nn_search.text().strip().lower()
+        platform_filter = self.nn_platform_filter.currentData()
+        builtin = self.app.settings.chat.builtin
+        for user_key, nickname in builtin.user_nicknames.items():
+            if not self._matches_platform_filter(user_key, platform_filter):
+                continue
+            original = builtin.user_nickname_display_names.get(user_key, user_key)
+            platform = self._format_platform_label(user_key)
+            label = f"[{platform}]  {original} \u2192 {nickname}"
+            if search and search not in label.lower():
+                continue
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, user_key)
+            self.nicknames_list.addItem(item)
+
+    def _add_nickname(self):
+        """Add a nickname for a user via dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add Nickname")
+        dialog.setMinimumWidth(350)
+        form = QFormLayout(dialog)
+
+        platform_combo = QComboBox()
+        for p in StreamPlatform:
+            platform_combo.addItem(p.value.capitalize(), p.value)
+        form.addRow("Platform:", platform_combo)
+
+        username_edit = QLineEdit()
+        username_edit.setPlaceholderText("e.g. ninja, pokimane")
+        form.addRow("Username:", username_edit)
+
+        nickname_edit = QLineEdit()
+        nickname_edit.setPlaceholderText("Nickname to display")
+        form.addRow("Nickname:", nickname_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            username = username_edit.text().strip()
+            nickname = nickname_edit.text().strip()
+            if username and nickname:
+                platform = platform_combo.currentData()
+                user_key = f"{platform}:{username}"
+                self.app.settings.chat.builtin.user_nicknames[user_key] = nickname
+                self.app.settings.chat.builtin.user_nickname_display_names[user_key] = username
+                self.app.save_settings()
+                self._refresh_nicknames_list()
+
+    def _edit_nickname(self):
+        """Edit the selected nickname."""
+        items = self.nicknames_list.selectedItems()
+        if not items:
+            return
+        user_key = items[0].data(Qt.ItemDataRole.UserRole)
+        if not user_key:
+            return
+        builtin = self.app.settings.chat.builtin
+        current = builtin.user_nicknames.get(user_key, "")
+        display = builtin.user_nickname_display_names.get(user_key, user_key)
+        text, ok = QInputDialog.getText(
+            self, "Edit Nickname", f"Nickname for {display}:", text=current
+        )
+        if ok and text.strip():
+            builtin.user_nicknames[user_key] = text.strip()
+            self.app.save_settings()
+            self._refresh_nicknames_list()
+
+    def _remove_nicknames(self):
+        builtin = self.app.settings.chat.builtin
+        for item in self.nicknames_list.selectedItems():
+            user_key = item.data(Qt.ItemDataRole.UserRole)
+            if user_key:
+                builtin.user_nicknames.pop(user_key, None)
+                builtin.user_nickname_display_names.pop(user_key, None)
+        self.app.save_settings()
+        self._refresh_nicknames_list()
+
+    # --- User Notes helpers ---
+
+    def _refresh_notes_list(self):
+        self.notes_list.clear()
+        search = self.nt_search.text().strip().lower()
+        platform_filter = self.nt_platform_filter.currentData()
+        builtin = self.app.settings.chat.builtin
+        for user_key, note in builtin.user_notes.items():
+            if not self._matches_platform_filter(user_key, platform_filter):
+                continue
+            display = builtin.user_note_display_names.get(user_key, user_key)
+            platform = self._format_platform_label(user_key)
+            truncated = note if len(note) <= 60 else note[:57] + "\u2026"
+            label = f"[{platform}]  {display}: {truncated}"
+            if search and search not in label.lower():
+                continue
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, user_key)
+            self.notes_list.addItem(item)
+
+    def _add_note(self):
+        """Add a note for a user via dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Add User Note")
+        dialog.setMinimumWidth(350)
+        form = QFormLayout(dialog)
+
+        platform_combo = QComboBox()
+        for p in StreamPlatform:
+            platform_combo.addItem(p.value.capitalize(), p.value)
+        form.addRow("Platform:", platform_combo)
+
+        username_edit = QLineEdit()
+        username_edit.setPlaceholderText("e.g. ninja, pokimane")
+        form.addRow("Username:", username_edit)
+
+        note_edit = QLineEdit()
+        note_edit.setPlaceholderText("Note text")
+        form.addRow("Note:", note_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            username = username_edit.text().strip()
+            note = note_edit.text().strip()
+            if username and note:
+                platform = platform_combo.currentData()
+                user_key = f"{platform}:{username}"
+                self.app.settings.chat.builtin.user_notes[user_key] = note
+                self.app.settings.chat.builtin.user_note_display_names[user_key] = username
+                self.app.save_settings()
+                self._refresh_notes_list()
+
+    def _edit_note(self):
+        """Edit the selected note."""
+        items = self.notes_list.selectedItems()
+        if not items:
+            return
+        user_key = items[0].data(Qt.ItemDataRole.UserRole)
+        if not user_key:
+            return
+        builtin = self.app.settings.chat.builtin
+        current = builtin.user_notes.get(user_key, "")
+        display = builtin.user_note_display_names.get(user_key, user_key)
+        text, ok = QInputDialog.getText(
+            self, "Edit Note", f"Note for {display}:", text=current
+        )
+        if ok and text.strip():
+            builtin.user_notes[user_key] = text.strip()
+            self.app.save_settings()
+            self._refresh_notes_list()
+
+    def _remove_notes(self):
+        builtin = self.app.settings.chat.builtin
+        for item in self.notes_list.selectedItems():
+            user_key = item.data(Qt.ItemDataRole.UserRole)
+            if user_key:
+                builtin.user_notes.pop(user_key, None)
+                builtin.user_note_display_names.pop(user_key, None)
+        self.app.save_settings()
+        self._refresh_notes_list()

@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.emotes.cache import EmoteCache
-from ...chat.models import ChatMessage
+from ...chat.models import ChatBadge, ChatMessage
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
 from .message_model import MessageRole
@@ -78,6 +78,47 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._mention_highlight = QColor(colors.mention_highlight_color)
         self._hype_chat_accent = QColor(218, 165, 32)
         self._mention_accent = QColor(255, 165, 0)
+
+    def _resolve_display_name(self, message: ChatMessage) -> str:
+        """Return display name with nickname if set, e.g. 'nickname (original)'."""
+        original = message.user.display_name
+        user_key = f"{message.user.platform.value}:{message.user.id}"
+        nickname = self.settings.user_nicknames.get(user_key)
+        if nickname:
+            return f"{nickname} ({original})"
+        return original
+
+    def _has_user_note(self, message: ChatMessage) -> bool:
+        """Check if the message author has a user note attached."""
+        user_key = f"{message.user.platform.value}:{message.user.id}"
+        return user_key in self.settings.user_notes
+
+    def _draw_notebook_icon(self, painter: QPainter, x: int, y: int, size: int) -> None:
+        """Draw a small notebook icon at the given position using QPainter."""
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Body: warm muted tan/brown rounded rect
+        body_color = QColor(180, 155, 110)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(body_color)
+        painter.drawRoundedRect(x, y, size, size, 2, 2)
+
+        # Binding strip on left edge
+        binding_w = max(size // 5, 2)
+        painter.setBrush(QColor(140, 115, 80))
+        painter.drawRoundedRect(x, y, binding_w, size, 1, 1)
+
+        # Ruled lines inside the body
+        painter.setPen(QColor(120, 100, 70))
+        line_x_start = x + binding_w + 1
+        line_x_end = x + size - 1
+        num_lines = 3
+        for i in range(1, num_lines + 1):
+            ly = y + (size * i) // (num_lines + 1)
+            painter.drawLine(line_x_start, ly, line_x_end, ly)
+
+        painter.restore()
 
     def apply_theme(self) -> None:
         """Apply theme colors (call when theme changes).
@@ -369,6 +410,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     painter.drawPixmap(x, badge_y, badge_size, badge_size, pixmap)
                     x += badge_size + BADGE_SPACING
 
+        # Notebook icon for users with notes
+        if self._has_user_note(message):
+            note_y = y + (line_height - badge_size) // 2
+            self._draw_notebook_icon(painter, int(x), int(note_y), badge_size)
+            x += badge_size + BADGE_SPACING
+
         # Username
         bold_font = QFont(font)
         bold_font.setBold(True)
@@ -380,7 +427,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             user_color = QColor(100, 180, 220)
         painter.setPen(highlight_color if is_selected else user_color)
 
-        name_text = message.user.display_name
+        name_text = self._resolve_display_name(message)
         if message.is_action:
             name_width = QFontMetrics(bold_font).horizontalAdvance(name_text + " ")
             painter.drawText(x, y, name_width, line_height, ALIGN_LEFT_VCENTER, name_text)
@@ -812,10 +859,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 badge_count += 1
             prefix_width += badge_count * (badge_size + BADGE_SPACING)
 
+        if self._has_user_note(message):
+            prefix_width += badge_size + BADGE_SPACING
+
         bold_font = QFont(font)
         bold_font.setBold(True)
         suffix = ": " if not message.is_action else " "
-        name_text = message.user.display_name + suffix
+        name_text = self._resolve_display_name(message) + suffix
         prefix_width += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Calculate number of lines needed via wrapping simulation
@@ -962,10 +1012,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
+        # Skip notebook icon
+        if self._has_user_note(message):
+            x += badge_size + BADGE_SPACING
+
         # Username rect
         bold_font = QFont(font)
         bold_font.setBold(True)
-        name_text = message.user.display_name
+        name_text = self._resolve_display_name(message)
         name_width = QFontMetrics(bold_font).horizontalAdvance(name_text)
         return QRect(int(x), int(y), int(name_width), line_height)
 
@@ -1028,11 +1082,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
+        # Skip notebook icon
+        if self._has_user_note(message):
+            x += badge_size + BADGE_SPACING
+
         # Skip username
         bold_font = QFont(font)
         bold_font.setBold(True)
         suffix = " " if message.is_action else ": "
-        name_text = message.user.display_name + suffix
+        name_text = self._resolve_display_name(message) + suffix
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text + emotes with wrapping logic
@@ -1164,11 +1222,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
+        # Skip notebook icon
+        if self._has_user_note(message):
+            x += badge_size + BADGE_SPACING
+
         # Skip username
         bold_font = QFont(font)
         bold_font.setBold(True)
         suffix = " " if message.is_action else ": "
-        name_text = message.user.display_name + suffix
+        name_text = self._resolve_display_name(message) + suffix
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text with wrapping, checking URL word positions
@@ -1347,9 +1409,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
     def _get_badge_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
         """Find which badge (if any) is at the given position."""
-        if not message.user.badges:
-            return None
-        if not (self.settings.show_badges or self.settings.show_mod_badges):
+        has_badges = message.user.badges and (
+            self.settings.show_badges or self.settings.show_mod_badges
+        )
+        has_note = self._has_user_note(message)
+        if not has_badges and not has_note:
             return None
 
         padding_v = self.settings.line_spacing
@@ -1394,22 +1458,33 @@ class ChatMessageDelegate(QStyledItemDelegate):
             y += QFontMetrics(reply_font).height() + 2
             x = rect.x()
 
-        # Check each badge
+        # Check each platform badge
         badge_y = y + (line_height - badge_size) // 2
-        for badge in message.user.badges:
-            is_mod_badge = badge.name in MOD_BADGE_NAMES
-            if not self.settings.show_badges and not is_mod_badge:
-                continue
-            if not self.settings.show_mod_badges and is_mod_badge:
-                continue
-            image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-            pixmap = self._get_loaded_pixmap(image_ref)
-            if not pixmap or pixmap.isNull():
-                continue
-            badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
-            if badge_rect.contains(pos):
-                return badge
-            x += badge_size + BADGE_SPACING
+        if has_badges:
+            for badge in message.user.badges:
+                is_mod_badge = badge.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod_badge:
+                    continue
+                if not self.settings.show_mod_badges and is_mod_badge:
+                    continue
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
+                if not pixmap or pixmap.isNull():
+                    continue
+                badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
+                if badge_rect.contains(pos):
+                    return badge
+                x += badge_size + BADGE_SPACING
+
+        # Check notebook icon
+        if has_note:
+            note_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
+            if note_rect.contains(pos):
+                user_key = f"{message.user.platform.value}:{message.user.id}"
+                note_text = self.settings.user_notes.get(user_key, "")
+                return ChatBadge(
+                    id="note", name="note", image_url="", title=note_text
+                )
 
         return None
 
@@ -1532,11 +1607,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if pixmap and not pixmap.isNull():
                     x += badge_size + BADGE_SPACING
 
+        # Skip notebook icon
+        if self._has_user_note(message):
+            x += badge_size + BADGE_SPACING
+
         # Skip username
         bold_font = QFont(font)
         bold_font.setBold(True)
         suffix = " " if message.is_action else ": "
-        name_text = message.user.display_name + suffix
+        name_text = self._resolve_display_name(message) + suffix
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text checking mention word positions

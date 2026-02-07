@@ -168,6 +168,12 @@ class BuiltinChatSettings:
     show_alternating_rows: bool = True
     show_metrics: bool = True
     blocked_users: list[str] = field(default_factory=list)  # "platform:user_id" strings
+    blocked_user_names: dict[str, str] = field(default_factory=dict)  # user_key → display name
+    highlight_keywords: list[str] = field(default_factory=list)
+    user_nicknames: dict[str, str] = field(default_factory=dict)  # user_key → nickname
+    user_nickname_display_names: dict[str, str] = field(default_factory=dict)  # user_key → original
+    user_notes: dict[str, str] = field(default_factory=dict)  # user_key → note text
+    user_note_display_names: dict[str, str] = field(default_factory=dict)  # user_key → display name
     use_platform_name_colors: bool = True
     # Banner settings (stream title + socials)
     show_stream_title: bool = True
@@ -629,6 +635,14 @@ class Settings:
                 show_alternating_rows=builtin_data.get("show_alternating_rows", True),
                 show_metrics=builtin_data.get("show_metrics", True),
                 blocked_users=builtin_data.get("blocked_users", []),
+                blocked_user_names=builtin_data.get("blocked_user_names", {}),
+                highlight_keywords=builtin_data.get("highlight_keywords", []),
+                user_nicknames=builtin_data.get("user_nicknames", {}),
+                user_nickname_display_names=builtin_data.get(
+                    "user_nickname_display_names", {}
+                ),
+                user_notes=builtin_data.get("user_notes", {}),
+                user_note_display_names=builtin_data.get("user_note_display_names", {}),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
@@ -785,6 +799,12 @@ class Settings:
                     "show_alternating_rows": self.chat.builtin.show_alternating_rows,
                     "show_metrics": self.chat.builtin.show_metrics,
                     "blocked_users": self.chat.builtin.blocked_users,
+                    "blocked_user_names": self.chat.builtin.blocked_user_names,
+                    "highlight_keywords": self.chat.builtin.highlight_keywords,
+                    "user_nicknames": self.chat.builtin.user_nicknames,
+                    "user_nickname_display_names": self.chat.builtin.user_nickname_display_names,
+                    "user_notes": self.chat.builtin.user_notes,
+                    "user_note_display_names": self.chat.builtin.user_note_display_names,
                     "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
                     "show_stream_title": self.chat.builtin.show_stream_title,
                     "show_socials_banner": self.chat.builtin.show_socials_banner,

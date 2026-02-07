@@ -1129,6 +1129,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
             message = index.data(MessageRole)
             if message and isinstance(message, ChatMessage):
                 user_menu = UserContextMenu(message.user, self.settings, parent=self)
+                user_menu.nickname_changed.connect(self._on_nickname_changed)
+                user_menu.note_changed.connect(self._on_note_changed)
                 for action in user_menu.actions():
                     menu.addAction(action)
 
@@ -1160,6 +1162,31 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         if not menu.isEmpty():
             menu.exec(self._list_view.viewport().mapToGlobal(pos))
+
+    def _on_nickname_changed(self, user_key: str, nickname: str) -> None:
+        """Handle nickname change — invalidate delegate cache and save settings."""
+        if hasattr(self, "_delegate"):
+            self._delegate._size_cache.clear()
+            self._list_view.viewport().update()
+        self._save_settings()
+
+    def _on_note_changed(self, user_key: str, note: str) -> None:
+        """Handle note change — invalidate delegate cache and save settings."""
+        if hasattr(self, "_delegate"):
+            self._delegate._size_cache.clear()
+            self._list_view.viewport().update()
+        self._save_settings()
+
+    def _save_settings(self) -> None:
+        """Save settings via the app."""
+        try:
+            from ..app import Application
+
+            app = Application.instance()
+            if app:
+                app.save_settings()
+        except Exception:
+            pass
 
     def _export_chat_log(self) -> None:
         """Export chat messages to a text file."""

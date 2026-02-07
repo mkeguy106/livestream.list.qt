@@ -707,7 +707,7 @@ class ChatWindow(QMainWindow):
 
     def update_spellcheck(self) -> None:
         """Update spellcheck enabled state on all widgets."""
-        enabled = self.settings.spellcheck_enabled
+        enabled = self.settings.chat.builtin.spellcheck_enabled
         for widget in self._widgets.values():
             widget.set_spellcheck_enabled(enabled)
 

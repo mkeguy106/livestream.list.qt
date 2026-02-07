@@ -1850,6 +1850,17 @@ class ChatManager(QObject):
                 if mention_pattern in msg.text.lower():
                     msg.is_mention = True
 
+        # Detect custom highlight keywords
+        keywords = self.settings.chat.builtin.highlight_keywords
+        if keywords:
+            for msg in messages:
+                if not msg.is_mention:
+                    text_lower = msg.text.lower()
+                    for kw in keywords:
+                        if kw.lower() in text_lower:
+                            msg.is_mention = True
+                            break
+
         return messages
 
     def _get_our_nick(self, channel_key: str) -> str | None:
