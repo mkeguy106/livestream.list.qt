@@ -165,8 +165,12 @@ class EmoteCompleter(QWidget):
         # Get the partial emote name after ':'
         partial = text[trigger_pos + 1 : cursor_pos]
 
-        # Don't trigger on empty or whitespace
+        # Don't trigger on empty, whitespace, or non-alphanumeric starts
+        # (avoids matching emoticons like :( :) :/ etc.)
         if not partial or " " in partial or len(partial) < MIN_TRIGGER_LENGTH:
+            self._dismiss()
+            return
+        if not partial[0].isalnum():
             self._dismiss()
             return
 
