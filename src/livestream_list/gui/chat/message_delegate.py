@@ -3,7 +3,16 @@
 import re
 
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QHelpEvent, QPainter, QPixmap
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QHelpEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QStyle,
@@ -28,6 +37,9 @@ _BASE_FONT_SIZE = 10  # Reference font size for layout constants
 
 # Mod-related badge names
 MOD_BADGE_NAMES = {"moderator", "vip", "staff", "admin", "broadcaster"}
+
+# Badge IDs that use QPainter fallback icons (YouTube badges without image URLs)
+FALLBACK_BADGE_IDS = {"owner", "moderator", "verified", "member"}
 
 # URL detection
 URL_RE = re.compile(r'https?://[^\s<>\[\]"\'`)\]]+')
@@ -117,6 +129,107 @@ class ChatMessageDelegate(QStyledItemDelegate):
         for i in range(1, num_lines + 1):
             ly = y + (size * i) // (num_lines + 1)
             painter.drawLine(line_x_start, ly, line_x_end, ly)
+
+        painter.restore()
+
+    def _draw_fallback_badge(
+        self, painter: QPainter, badge_id: str, x: int, y: int, size: int
+    ) -> None:
+        """Draw a QPainter fallback badge icon for YouTube badges without image URLs."""
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        cx = x + size / 2.0
+        cy = y + size / 2.0
+        r = size / 2.0
+
+        if badge_id == "owner":
+            # Gold circle with a crown silhouette
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(255, 214, 0))
+            painter.drawEllipse(x, y, size, size)
+            # Crown: 3 points on top, flat base
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(50, 40, 0))
+            m = size * 0.2  # margin
+            path = QPainterPath()
+            base_y = cy + r * 0.35
+            top_y = cy - r * 0.45
+            mid_y = cy - r * 0.05
+            path.moveTo(x + m, base_y)
+            path.lineTo(x + m, mid_y)
+            path.lineTo(cx - r * 0.25, top_y)
+            path.lineTo(cx, mid_y)
+            path.lineTo(cx + r * 0.25, top_y)
+            path.lineTo(x + size - m, mid_y)
+            path.lineTo(x + size - m, base_y)
+            path.closeSubpath()
+            painter.drawPath(path)
+
+        elif badge_id == "moderator":
+            # Blue circle with a wrench/sword icon
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(94, 132, 241))
+            painter.drawEllipse(x, y, size, size)
+            # Sword: vertical line with cross-guard
+            pen = QPen(QColor(255, 255, 255))
+            pen.setWidthF(max(size * 0.12, 1.0))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            # Blade
+            painter.drawLine(int(cx), int(cy - r * 0.5), int(cx), int(cy + r * 0.35))
+            # Cross-guard
+            painter.drawLine(
+                int(cx - r * 0.3), int(cy - r * 0.05),
+                int(cx + r * 0.3), int(cy - r * 0.05),
+            )
+            # Handle
+            pen.setWidthF(max(size * 0.15, 1.0))
+            painter.setPen(pen)
+            painter.drawLine(int(cx), int(cy + r * 0.35), int(cx), int(cy + r * 0.55))
+
+        elif badge_id == "verified":
+            # Blue circle with a checkmark
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(94, 132, 241))
+            painter.drawEllipse(x, y, size, size)
+            pen = QPen(QColor(255, 255, 255))
+            pen.setWidthF(max(size * 0.14, 1.0))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            path = QPainterPath()
+            path.moveTo(cx - r * 0.35, cy)
+            path.lineTo(cx - r * 0.05, cy + r * 0.3)
+            path.lineTo(cx + r * 0.35, cy - r * 0.3)
+            painter.drawPath(path)
+
+        elif badge_id == "member":
+            # Green circle with a star
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(43, 166, 64))
+            painter.drawEllipse(x, y, size, size)
+            # 5-point star
+            import math
+
+            painter.setBrush(QColor(255, 255, 255))
+            star = QPainterPath()
+            star_r = r * 0.5
+            inner_r = star_r * 0.4
+            for i in range(5):
+                angle = math.radians(-90 + i * 72)
+                px = cx + star_r * math.cos(angle)
+                py = cy + star_r * math.sin(angle)
+                if i == 0:
+                    star.moveTo(px, py)
+                else:
+                    star.lineTo(px, py)
+                inner_angle = math.radians(-90 + i * 72 + 36)
+                ipx = cx + inner_r * math.cos(inner_angle)
+                ipy = cy + inner_r * math.sin(inner_angle)
+                star.lineTo(ipx, ipy)
+            star.closeSubpath()
+            painter.drawPath(star)
 
         painter.restore()
 
@@ -401,6 +514,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 if not self.settings.show_mod_badges and is_mod_badge:
                     continue
                 if not badge.image_set or not self._image_store:
+                    if badge.id in FALLBACK_BADGE_IDS:
+                        self._draw_fallback_badge(
+                            painter, badge.id, int(x), int(badge_y), badge_size
+                        )
+                        x += badge_size + BADGE_SPACING
                     continue
                 image_set = badge.image_set.bind(self._image_store)
                 badge.image_set = image_set
@@ -1006,10 +1124,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                # Only advance x if pixmap exists (matches paint behavior)
+                # Advance x if pixmap exists or fallback badge drawn
                 image_ref = self._get_badge_image_ref_for_scale(badge, scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
-                if pixmap and not pixmap.isNull():
+                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
                     x += badge_size + BADGE_SPACING
 
         # Skip notebook icon
@@ -1076,10 +1194,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                # Only advance x if pixmap exists (matches paint behavior)
+                # Advance x if pixmap exists or fallback badge drawn
                 image_ref = self._get_badge_image_ref_for_scale(badge, scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
-                if pixmap and not pixmap.isNull():
+                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
                     x += badge_size + BADGE_SPACING
 
         # Skip notebook icon
@@ -1216,10 +1334,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 if not self.settings.show_mod_badges and is_mod:
                     continue
-                # Only advance x if pixmap exists (matches paint behavior)
+                # Advance x if pixmap exists or fallback badge drawn
                 image_ref = self._get_badge_image_ref_for_scale(badge, scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
-                if pixmap and not pixmap.isNull():
+                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
                     x += badge_size + BADGE_SPACING
 
         # Skip notebook icon
@@ -1469,7 +1587,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     continue
                 image_ref = self._get_badge_image_ref_for_scale(badge, scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
-                if not pixmap or pixmap.isNull():
+                has_pixmap = pixmap and not pixmap.isNull()
+                is_fallback = badge.id in FALLBACK_BADGE_IDS
+                if not has_pixmap and not is_fallback:
                     continue
                 badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
                 if badge_rect.contains(pos):

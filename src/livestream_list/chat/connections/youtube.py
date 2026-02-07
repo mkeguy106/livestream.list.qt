@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from ...core.models import StreamPlatform
 from ...core.settings import YouTubeSettings
 from ..emotes.image import ImageSet, ImageSpec
-from ..models import ChatBadge, ChatEmote, ChatMessage, ChatUser
+from ..models import ChatBadge, ChatEmote, ChatMessage, ChatRoomState, ChatUser
 from .base import BaseChatConnection
+from .youtube_processor import LivestreamListProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class YouTubeChatConnection(BaseChatConnection):
         super().__init__(parent)
         self._should_stop = False
         self._pytchat = None  # pytchat.LiveChat instance
+        self._processor: LivestreamListProcessor | None = None
         self._message_batch: list[ChatMessage] = []
         self._last_flush: float = 0
         self._youtube_settings = youtube_settings
@@ -130,7 +132,10 @@ class YouTubeChatConnection(BaseChatConnection):
                 await self._extract_send_params(video_id)
 
         try:
-            self._pytchat = pytchat.create(video_id=video_id, interruptable=False)
+            self._processor = LivestreamListProcessor()
+            self._pytchat = pytchat.create(
+                video_id=video_id, processor=self._processor, interruptable=False
+            )
             self._set_connected(channel_id)
             self._reset_backoff()  # Reset backoff on successful connection
             self._last_flush = time.monotonic()
@@ -302,6 +307,20 @@ class YouTubeChatConnection(BaseChatConnection):
             if restriction_match:
                 self._chat_restriction = restriction_match.group(1)
                 logger.info(f"YouTube chat restriction detected: {self._chat_restriction}")
+                # Emit initial room state for detected restrictions
+                restriction_lower = self._chat_restriction.lower()
+                if "subscriber" in restriction_lower or "member" in restriction_lower:
+                    self._emit_room_state(ChatRoomState(subs_only=True))
+
+            # Check for slow mode in initial page data
+            slow_match = re.search(
+                r'"slowModeRenderer"\s*:\s*\{[^}]*"slowModeDurationSeconds"\s*:\s*"?(\d+)',
+                html,
+            )
+            if slow_match:
+                slow_seconds = int(slow_match.group(1))
+                self._emit_room_state(ChatRoomState(slow=slow_seconds))
+                logger.info(f"YouTube slow mode detected: {slow_seconds}s")
 
             if self._innertube_api_key and self._send_params:
                 logger.info("YouTube InnerTube send params extracted successfully")
@@ -336,6 +355,10 @@ class YouTubeChatConnection(BaseChatConnection):
                     if message:
                         self._message_batch.append(message)
 
+                # Process moderation events and mode changes from custom processor
+                if self._processor:
+                    self._process_extra_events()
+
                 # Flush batched messages
                 now = time.monotonic()
                 if len(self._message_batch) >= 10 or (
@@ -351,6 +374,37 @@ class YouTubeChatConnection(BaseChatConnection):
             await asyncio.sleep(0.5)
 
         self._flush_batch()
+
+    def _process_extra_events(self) -> None:
+        """Process moderation events, room state changes, and system messages."""
+        if not self._processor:
+            return
+
+        # Emit moderation events (deletions, bans)
+        for event in self._processor.pop_moderation_events():
+            self._emit_moderation(event)
+
+        # Emit room state changes (slow mode, members-only)
+        for state in self._processor.pop_room_state_changes():
+            self._emit_room_state(state)
+
+        # Add mode change system messages to the batch
+        for msg_id, text in self._processor.pop_system_messages():
+            sys_msg = ChatMessage(
+                id=msg_id or str(uuid.uuid4()),
+                user=ChatUser(
+                    id="youtube-system",
+                    name="YouTube",
+                    display_name="YouTube",
+                    platform=StreamPlatform.YOUTUBE,
+                ),
+                text="",
+                timestamp=datetime.now(timezone.utc),
+                platform=StreamPlatform.YOUTUBE,
+                is_system=True,
+                system_text=text,
+            )
+            self._message_batch.append(sys_msg)
 
     def _parse_badges(self, item) -> list[ChatBadge]:
         """Parse badge information from a pytchat item's author."""
@@ -548,3 +602,4 @@ class YouTubeChatConnection(BaseChatConnection):
             except Exception:
                 pass
             self._pytchat = None
+        self._processor = None
