@@ -67,6 +67,7 @@ Qt requires UI updates on the main thread. Pattern for async operations using As
 class AsyncWorker(QThread):
     finished = Signal(object)
     error = Signal(str)
+    progress = Signal(str, str)  # message, detail
 
     def __init__(self, coro_func, monitor=None, parent=None):
         super().__init__(parent)
@@ -79,21 +80,24 @@ class AsyncWorker(QThread):
         try:
             # CRITICAL: Reset aiohttp sessions for this event loop
             if self.monitor:
-                for client in self.monitor._clients.values():
-                    client._session = None
+                self.monitor.reset_all_sessions()
             result = loop.run_until_complete(self.coro_func())
             self.finished.emit(result)
+            # Close sessions before closing loop
+            if self.monitor:
+                loop.run_until_complete(self.monitor.close_all_sessions())
+        except Exception as e:
+            self.error.emit(str(e))
         finally:
             if self.monitor:
-                for client in self.monitor._clients.values():
-                    client._session = None
+                self.monitor.reset_all_sessions()
             loop.close()
 ```
 
 **Key points:**
 - Always pass `parent=self` when creating AsyncWorker to prevent QThread garbage collection crashes
 - Use Qt Signals for cross-thread communication (thread-safe)
-- Always set `client._session = None` before/after async operations in threads
+- Call `monitor.reset_all_sessions()` before/after async operations in threads
 
 ### Data Flow
 
