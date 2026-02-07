@@ -140,100 +140,36 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
-**Emote Caching**:
-- **Image cache**: Two-tier (memory LRU 2000 entries + disk 500MB max) in `~/.local/share/livestream-list-qt/emote_cache/`
-- **User emotes**: Twitch subscriber emotes from other channels fetched via `/chat/emotes/user` (requires `user:read:emotes` scope)
-- **Stale-while-revalidate**: Cached user emotes used immediately, fresh emotes fetched in background. If changed, UI updates automatically.
-- **Manual refresh**: Chat menu → "Refresh Emotes" (Ctrl+Shift+E) clears cache and re-fetches
+**Emote Caching**: Two-tier (memory LRU 2000 entries + disk 500MB max). User emotes use stale-while-revalidate pattern. Manual refresh via Ctrl+Shift+E.
 
-**Whisper/DM system**: EventSub WebSocket for receiving whispers, Helix API for sending. Whisper conversations persisted via `WhisperStore` in data dir.
+**Whisper/DM system**: EventSub WebSocket (`WhisperEventSubWorker` in manager.py) for receiving whispers, Helix API for sending. Persisted via `WhisperStore`.
 
-**Reply threading**: Twitch uses `@reply-parent-msg-id` IRC tag, Kick uses `reply_to_original_message_id` API field. `ChatMessage` has `reply_parent_display_name` and `reply_parent_text` fields for rendering reply context.
+**Reply threading**: Twitch uses `@reply-parent-msg-id` IRC tag, Kick uses `reply_to_original_message_id` API field.
 
 **Per-channel badge caching**: `_badge_url_map` is `dict[str, dict[str, tuple[str, str]]]` (channel_key → badge_id → (url, title)). Badge images are cached per-channel to avoid showing wrong channel's sub badges.
 
-**Scroll pause**: `_trim_paused` flag on `ChatMessageModel` defers buffer trimming when user has scrolled up. Flush on scroll-to-bottom. Auto-resumes after 5 minutes.
+**Banners**: `DismissibleBanner` in `chat_widget.py` uses overlay X button pattern (button as child widget, NOT in layout, repositioned in `resizeEvent`). Used for title banner, socials banner. Hype Chat banner is a simpler inline widget.
 
-**Recent messages**: robotty.de API loads ~50 recent messages on Twitch channel join, parsed through the same IRC message handler.
-
-**Spellcheck**: hunspell-based via `spellchecker` library, custom dictionary stored in data dir. Correction popup via `SpellCompleter`.
-
-**Channel Socials Banner**: Displays clickable social links (Discord, Twitter, etc.) below the stream title banner. Fetched via `SocialsFetchWorker` (QThread) when chat opens.
-
-- **Twitch**: GraphQL query for `channel.socialMedias` array (returns name + URL directly)
-- **YouTube**: Scrapes `/about` page HTML, extracts `ytInitialData` JSON, navigates to `aboutChannelViewModel.links`. URL format varies by channel ID type:
-  - `UC...` IDs → `https://www.youtube.com/channel/UC.../about`
-  - `@handle` → `https://www.youtube.com/@handle/about`
-  - External links use YouTube redirect with `q=` param containing actual URL
-  - Internal YouTube links (e.g., second channel) have direct URLs without redirect
-- **Kick**: REST API `GET /api/v2/channels/{id}`, extracts social usernames from `user` object, constructs full URLs
-
-### Dismissible Banner Pattern
-
-For any banner with a dismiss/close button, use the **overlay X button** approach:
-
-```python
-class DismissibleBanner(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self._label = QLabel()
-        self._label.setWordWrap(True)
-        layout.addWidget(self._label, 1)
-
-        # Close button as overlay (NOT in layout)
-        self._close_btn = QPushButton("×", self)
-        self._close_btn.setFixedSize(20, 20)
-        self._close_btn.clicked.connect(self.hide)
-        self._close_btn.raise_()
-
-    def resizeEvent(self, event) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        # Position in top-right corner
-        self._close_btn.move(self.width() - 24, 4)
-```
-
-**Key points:**
-- Button is a child of the banner but NOT added to the layout
-- Use `resizeEvent` to reposition button when banner resizes
-- Add right padding to label (`padding: 6px 28px 6px 8px`) to avoid text overlap
-- Style button with semi-transparent background: `background-color: rgba(0, 0, 0, 0.3); border-radius: 10px;`
-- This avoids layout issues where the button column shows the wrong background color
+**Socials Banner**: Fetched via `SocialsFetchWorker`. Twitch uses GraphQL, YouTube scrapes `/about` page (note: `UC...` IDs need `/channel/UC.../about` format), Kick uses REST API.
 
 ### Key Files
+
+Core architecture files (most other files follow patterns established in these):
 
 | File | Purpose |
 |------|---------|
 | `src/livestream_list/gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
 | `src/livestream_list/gui/main_window.py` | QMainWindow, StreamRow widget, all dialogs |
-| `src/livestream_list/gui/tray.py` | QSystemTrayIcon for system tray |
-| `src/livestream_list/gui/chat/chat_window.py` | Chat QMainWindow with tabbed channels, popout support |
-| `src/livestream_list/gui/chat/chat_widget.py` | Single-channel chat widget (message list + input) |
-| `src/livestream_list/gui/chat/message_delegate.py` | Custom delegate for rendering chat messages |
-| `src/livestream_list/chat/manager.py` | ChatManager - connection lifecycle, emote loading, message routing |
+| `src/livestream_list/gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
+| `src/livestream_list/gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
+| `src/livestream_list/gui/chat/message_model.py` | Chat message list model with deferred trim |
+| `src/livestream_list/chat/manager.py` | ChatManager - connection lifecycle, emote loading, EventSub, message routing |
 | `src/livestream_list/chat/connections/twitch.py` | Twitch IRC WebSocket connection |
-| `src/livestream_list/chat/connections/kick.py` | Kick Pusher WebSocket + public API message sending |
-| `src/livestream_list/chat/connections/youtube.py` | YouTube pytchat + InnerTube connection |
-| `src/livestream_list/chat/auth/kick_auth.py` | Kick OAuth 2.1 + PKCE flow |
 | `src/livestream_list/chat/models.py` | ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses |
-| `src/livestream_list/chat/emotes/cache.py` | Shared emote/badge pixmap cache |
-| `src/livestream_list/api/oauth_server.py` | Local HTTP server for OAuth callbacks (both implicit + code flows) |
 | `src/livestream_list/core/monitor.py` | StreamMonitor - channel tracking, refresh logic |
+| `src/livestream_list/core/models.py` | Channel, Livestream, StreamPlatform data classes |
 | `src/livestream_list/core/settings.py` | Settings persistence (JSON) |
 | `src/livestream_list/api/twitch.py` | Twitch Helix + GraphQL client |
-| `src/livestream_list/api/base.py` | Abstract base class for API clients with retry logic |
-| `src/livestream_list/notifications/notifier.py` | Desktop notifications with Watch button |
-| `src/livestream_list/core/chat.py` | Chat launcher for opening stream chat in browser |
-| `src/livestream_list/__version__.py` | Single source of truth for version |
-| `src/livestream_list/core/models.py` | Data classes: Channel, Livestream, StreamPlatform |
-| `src/livestream_list/core/streamlink.py` | Stream launch via streamlink or yt-dlp |
-| `src/livestream_list/chat/whisper_store.py` | Whisper conversation persistence |
-| `src/livestream_list/gui/chat/spell_completer.py` | Spellcheck correction popup |
-| `src/livestream_list/gui/chat/mention_completer.py` | @mention autocomplete |
-| `src/livestream_list/chat/spellcheck/checker.py` | Spellcheck engine |
-| `src/livestream_list/gui/chat/message_model.py` | Chat message list model with deferred trim |
 
 ### Versioning
 

@@ -205,6 +205,8 @@ Planned features for future releases:
 - [ ] Chat log export — save chat history to a text file
 - [ ] Timestamp format option — 12h vs 24h toggle
 - [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
+- [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
+- [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
 - [ ] Discover Channels — find new streamers to watch with browsable categories:
   - Top Streamers (highest viewer counts across platforms)
   - New Streamers (recently started streaming / rising channels)
