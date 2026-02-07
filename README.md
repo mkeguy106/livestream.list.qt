@@ -205,6 +205,14 @@ Planned features for future releases:
 - [ ] Chat log export — save chat history to a text file
 - [ ] Timestamp format option — 12h vs 24h toggle
 - [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
+- [ ] Discover Channels — find new streamers to watch with browsable categories:
+  - Top Streamers (highest viewer counts across platforms)
+  - New Streamers (recently started streaming / rising channels)
+  - Trending (channels with unusual viewer growth or spikes)
+  - By Game/Category (browse streamers by what they're playing)
+  - Recommended (based on channels you already follow)
+  - Just Went Live (channels that started streaming in the last few minutes)
+  - Rising Stars (small streamers with growing audiences)
 
 ## License
 
