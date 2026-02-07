@@ -207,6 +207,26 @@ Planned features for future releases:
 - [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 - [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
 - [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
+- [ ] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
+- [ ] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
+- [ ] Deleted message options — configurable handling of deleted messages: strikethrough, truncated, or fully hidden
+- [ ] Slow mode countdown — show countdown timer in input box indicating when you can send your next message
+- [ ] Link tooltip previews — hover over links to see rich previews (YouTube thumbnails, Twitter embeds, etc.)
+- [ ] Zero-width emotes — support 7TV/BTTV overlay emotes that stack on top of other emotes (e.g., slide, rainbow)
+- [ ] Smooth scrolling — animated scroll on new messages instead of jumping
+- [ ] Streamer mode — auto-detect OBS/streaming software and hide usernames/whispers for privacy
+- [ ] Reply thread popup — open full reply threads in a dedicated popup window
+- [ ] User nicknames — assign custom local display names to other users
+- [ ] User notes — attach notes to users, visible on their user card
+- [ ] Multiple accounts — quick account switcher popup for managing multiple logins per platform
+- [ ] Configurable mod timeout buttons — quick mod-action buttons with customizable durations
+- [ ] Previous message cycling — up/down arrows to cycle through previously sent messages
+- [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
+- [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
+- [ ] Lua plugin system — extensibility via Lua scripts for custom commands and behavior
+- [ ] Pronouns display — show user pronouns on user cards
+- [ ] Always-on-top / overlay mode — transparent overlay window for use with OBS or other apps
+- [ ] Prediction badge details — show picked outcome in prediction badges
 - [ ] Discover Channels — find new streamers to watch with browsable categories:
   - Top Streamers (highest viewer counts across platforms)
   - New Streamers (recently started streaming / rising channels)
