@@ -281,8 +281,41 @@ class TwitchChatConnection(BaseChatConnection):
         self._reset_backoff()  # Reset backoff on successful connection
         self._last_flush = time.monotonic()
 
+        # Load recent chat history before starting the live message loop
+        await self._load_recent_messages(channel)
+
         # Message loop
         await self._read_loop()
+
+    async def _load_recent_messages(self, channel: str) -> None:
+        """Fetch recent chat history from the recent-messages API."""
+        url = f"https://recent-messages.robotty.de/api/v2/recent-messages/{channel}?limit=50"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status != 200:
+                        return
+                    data = await resp.json()
+
+            raw_messages = data.get("messages", [])
+            if not raw_messages:
+                return
+
+            for raw in raw_messages:
+                parsed = parse_irc_message(raw)
+                if parsed["command"] == "PRIVMSG":
+                    self._handle_privmsg(parsed)
+
+            if self._message_batch:
+                logger.info(
+                    f"Loaded {len(self._message_batch)} recent messages for #{channel}"
+                )
+                self._flush_batch()
+
+        except Exception as e:
+            logger.debug(f"Failed to load recent messages for #{channel}: {e}")
 
     async def disconnect(self) -> None:
         """Disconnect from the channel."""

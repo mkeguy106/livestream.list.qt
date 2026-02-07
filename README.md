@@ -177,6 +177,21 @@ rm -rf ~/.config/livestream-list-qt
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
+## Roadmap
+
+Planned features for future releases:
+
+- [ ] User ignore list — right-click to hide a user's messages
+- [ ] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
+- [ ] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
+- [ ] Message character counter — show remaining characters near the input
+- [ ] User card popup — click a username to see account age, follow date, channel history
+- [ ] Split view — view two chats side by side in the same window
+- [ ] Chat log export — save chat history to a text file
+- [ ] Raid/host banner — visual notification when a raid arrives
+- [ ] Timestamp format option — 12h vs 24h toggle
+- [ ] Auto-complete recent emotes first — sort emote suggestions by usage frequency
+
 ## License
 
 GPL-2.0 - See [LICENSE](LICENSE) for details.
