@@ -138,7 +138,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **YouTube chat**: Uses pytchat library for reading chat messages. Message sending uses InnerTube API with SAPISIDHASH authentication (requires YouTube cookies: SID, HSID, SSID, APISID, SAPISID). Supports SuperChat tier detection and membership badge rendering.
 
-**Emotes**: Supports Twitch, Kick native, 7TV, BTTV, FFZ. Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
+**Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
 **Emote Caching**:
 - **Image cache**: Two-tier (memory LRU 2000 entries + disk 500MB max) in `~/.local/share/livestream-list-qt/emote_cache/`
@@ -247,8 +247,8 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 
 ### Key Data Structures
 
-- **Channel**: `channel_id`, `platform` (enum), `display_name`, `favorite`, `dont_notify`
-- **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `start_time`, `last_live_time`
+- **Channel**: `channel_id`, `platform` (enum), `display_name`, `favorite`, `dont_notify`, `added_at`, `imported_by`
+- **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `start_time`, `last_live_time`, `video_id` (YouTube), `chatroom_id` (Kick), `thumbnail_url`
 - **unique_key**: `"{platform}:{channel_id}"` - used as dict key throughout
 
 ## Known Pitfalls
@@ -256,7 +256,7 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | Issue | Solution |
 |-------|----------|
 | QThread destroyed while running | Always pass `parent=self` to AsyncWorker |
-| aiohttp session attached to different loop | Set `_session = None` before creating new event loop in thread |
+| aiohttp session attached to different loop | Call `monitor.reset_all_sessions()` before creating new event loop in thread |
 | Notification Watch button does nothing | Use Qt Signal to marshal callback to main thread |
 | Port 65432 already in use (OAuth) | `ReuseAddrHTTPServer` with `allow_reuse_address = True` |
 | offset-naive/offset-aware datetime mismatch | Use `datetime.now(timezone.utc)` |
@@ -344,3 +344,39 @@ Never include in commit messages:
 - "Generated with Claude Code"
 - "Co-Authored-By: Claude"
 - Any reference to AI, Claude, or automated generation
+
+## Wiki Maintenance
+
+When adding new features, shortcuts, settings, or making architecture changes, keep the wiki up to date.
+
+### When to Update
+
+- New features or settings added
+- Keyboard shortcuts added or changed
+- Architecture changes (new files, renamed modules, new patterns)
+- API client changes (new endpoints, auth flow changes)
+- Known pitfalls discovered
+
+### How to Update
+
+```bash
+# Clone the wiki repo
+git clone https://github.com/mkeguy106/livestream.list.qt.wiki.git /tmp/wiki
+cd /tmp/wiki
+
+# Edit relevant pages, then commit and push
+git add -A && git commit -m "Update wiki for <feature>" && git push origin master
+```
+
+### Key Wiki Pages
+
+| Page | Covers |
+|------|--------|
+| `Features.md` | Feature list and descriptions |
+| `Preferences.md` | Settings tables and configuration |
+| `Keyboard-Shortcuts.md` | All keyboard shortcuts |
+| `Chat-System.md` | Chat architecture and data models |
+| `API-Clients.md` | Platform API endpoints and patterns |
+| `Contributing.md` | Project structure, pitfalls, dev guide |
+| `FAQ.md` | Common user questions |
+| `Streamlink.md` | Playback configuration |
