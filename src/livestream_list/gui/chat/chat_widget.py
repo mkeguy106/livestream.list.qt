@@ -181,6 +181,26 @@ class ChatInput(QLineEdit):
         self._check_timer.setSingleShot(True)
         self._check_timer.setInterval(150)
         self._check_timer.timeout.connect(self._run_check)
+        # Message history for up/down arrow cycling
+        self._message_history: list[str] = []
+        self._history_index: int = -1
+        self._draft: str = ""
+        self._max_history: int = 100
+
+    def add_to_history(self, text: str) -> None:
+        """Add a sent message to the history buffer."""
+        if not text:
+            return
+        # Avoid consecutive duplicates
+        if self._message_history and self._message_history[0] == text:
+            self._history_index = -1
+            self._draft = ""
+            return
+        self._message_history.insert(0, text)
+        if len(self._message_history) > self._max_history:
+            self._message_history.pop()
+        self._history_index = -1
+        self._draft = ""
 
     def add_completer(self, completer) -> None:
         """Add a completer to the chain."""
@@ -233,6 +253,23 @@ class ChatInput(QLineEdit):
                 parent = parent.parent()
             if parent and parent._reply_to_msg is not None:
                 parent._cancel_reply()
+                return
+        # Up/Down arrow: cycle through message history
+        if event.key() == Qt.Key.Key_Up and self._message_history:
+            if self._history_index == -1:
+                self._draft = self.text()
+            if self._history_index < len(self._message_history) - 1:
+                self._history_index += 1
+                self.setText(self._message_history[self._history_index])
+            return
+        if event.key() == Qt.Key.Key_Down:
+            if self._history_index > 0:
+                self._history_index -= 1
+                self.setText(self._message_history[self._history_index])
+                return
+            if self._history_index == 0:
+                self._history_index = -1
+                self.setText(self._draft)
                 return
         # Dismiss spell popup on Space (user moved on to next word)
         if event.key() == Qt.Key.Key_Space and self._spell_completer:
@@ -919,6 +956,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Handle send button/enter key."""
         text = self._input.text().strip()
         if text:
+            self._input.add_to_history(text)
             reply_id = self._reply_to_msg.id if self._reply_to_msg else ""
             self.message_sent.emit(self.channel_key, text, reply_id)
             self._input.clear()
