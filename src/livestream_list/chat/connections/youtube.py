@@ -150,7 +150,7 @@ class YouTubeChatConnection(BaseChatConnection):
         self._should_stop = True
         self._cleanup_pytchat()
 
-    async def send_message(self, text: str) -> bool:
+    async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
         """Send a message to YouTube chat via InnerTube API."""
         if not self._send_params or not self._innertube_api_key:
             if self._chat_restriction:

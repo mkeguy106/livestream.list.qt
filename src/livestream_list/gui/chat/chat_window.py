@@ -911,9 +911,23 @@ class ChatWindow(QMainWindow):
 
         process_batch()
 
-    def _on_message_sent(self, channel_key: str, text: str) -> None:
+    def _on_message_sent(self, channel_key: str, text: str, reply_to_msg_id: str) -> None:
         """Handle a message being sent from a chat widget."""
-        self.chat_manager.send_message(channel_key, text)
+        # Look up reply context for local echo
+        reply_parent_display_name = ""
+        reply_parent_text = ""
+        if reply_to_msg_id:
+            widget = self._widgets.get(channel_key)
+            if widget and widget._reply_to_msg:
+                reply_parent_display_name = widget._reply_to_msg.user.display_name
+                reply_parent_text = widget._reply_to_msg.text
+        self.chat_manager.send_message(
+            channel_key,
+            text,
+            reply_to_msg_id=reply_to_msg_id,
+            reply_parent_display_name=reply_parent_display_name,
+            reply_parent_text=reply_parent_text,
+        )
 
     def _on_font_size_changed(self, new_size: int) -> None:
         """Persist font size change and relayout active widget."""
@@ -1097,7 +1111,7 @@ class ChatWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
-    def _on_dm_message_sent(self, channel_key: str, text: str) -> None:
+    def _on_dm_message_sent(self, channel_key: str, text: str, reply_to_msg_id: str) -> None:
         """Handle a message sent from a DM tab — send as whisper."""
         widget = self._widgets.get(channel_key)
         if not widget or not widget._is_dm:

@@ -1104,13 +1104,14 @@ class ChatManager(QObject):
         self._user_emotes_fetched_at: float = 0.0
         self._channel_emotes_fetched_at: dict[str, float] = {}
 
-        # Badge URL mapping from Twitch API: "name/version" -> image_url
-        self._badge_url_map: dict[str, str] = {}
-        self._badge_image_sets: dict[str, ImageSet] = {}
+        # Badge URL mapping from Twitch API, per-channel: channel_key -> {badge_id -> url}
+        # Channel-specific because subscriber/bits badges differ per channel
+        self._badge_url_map: dict[str, dict[str, str]] = {}
+        self._badge_image_sets: dict[str, dict[str, ImageSet]] = {}
         self._badges_fetched_at: dict[str, float] = {}
 
-        # Track which badge URLs we've already queued for download
-        self._queued_badge_urls: set[str] = set()
+        # Track which badge URLs we've already queued for download, per-channel
+        self._queued_badge_urls: dict[str, set[str]] = {}
 
         # Debounce emote cache updates to reduce UI churn
         self._emote_update_pending = False
@@ -1462,7 +1463,14 @@ class ChatManager(QObject):
         if worker and worker.isRunning():
             worker.wait(1000)
 
-    def send_message(self, channel_key: str, text: str) -> None:
+    def send_message(
+        self,
+        channel_key: str,
+        text: str,
+        reply_to_msg_id: str = "",
+        reply_parent_display_name: str = "",
+        reply_parent_text: str = "",
+    ) -> None:
         """Send a message to a channel's chat."""
         connection = self._connections.get(channel_key)
         if not connection or not connection.is_connected:
@@ -1471,7 +1479,9 @@ class ChatManager(QObject):
 
         worker = self._workers.get(channel_key)
         if worker and worker._loop:
-            asyncio.run_coroutine_threadsafe(connection.send_message(text), worker._loop)
+            asyncio.run_coroutine_threadsafe(
+                connection.send_message(text, reply_to_msg_id), worker._loop
+            )
 
             # Local echo: Twitch IRC doesn't echo your own messages back.
             # Kick echoes via Pusher websocket, YouTube echoes via pytchat poll.
@@ -1501,6 +1511,8 @@ class ChatManager(QObject):
                     text=text,
                     timestamp=datetime.now(timezone.utc),
                     platform=livestream.channel.platform,
+                    reply_parent_display_name=reply_parent_display_name,
+                    reply_parent_text=reply_parent_text,
                 )
                 # Route through _on_messages_received for emote matching
                 self._on_messages_received(channel_key, [local_msg])
@@ -1726,26 +1738,33 @@ class ChatManager(QObject):
             emote.image_set = bound
         return emote.image_set
 
-    def _ensure_badge_image_set(self, badge: ChatBadge) -> ImageSet | None:
-        """Ensure a badge has an ImageSet bound to the shared cache."""
+    def _ensure_badge_image_set(self, badge: ChatBadge, channel_key: str) -> ImageSet | None:
+        """Ensure a badge has an ImageSet bound to the shared cache.
+
+        Badge maps are per-channel because subscriber/bits badges differ per channel.
+        """
         if badge.image_set:
             return badge.image_set
-        url = self._badge_url_map.get(badge.id) or badge.image_url
+        channel_badges = self._badge_url_map.get(channel_key, {})
+        url = channel_badges.get(badge.id) or badge.image_url
         if not url:
-            self._queued_badge_urls.add(badge.id)
+            self._queued_badge_urls.setdefault(channel_key, set()).add(badge.id)
             return None
-        image_set = self._badge_image_sets.get(badge.id)
+        channel_sets = self._badge_image_sets.setdefault(channel_key, {})
+        image_set = channel_sets.get(badge.id)
         if image_set is None:
+            # Use channel-scoped cache key so subscriber badges don't collide
+            cache_key = f"badge:{channel_key}:{badge.id}"
             specs = {
                 scale: ImageSpec(
                     scale=scale,
-                    key=f"badge:{badge.id}@{scale}x",
+                    key=f"{cache_key}@{scale}x",
                     url=url,
                 )
                 for scale in (1, 2, 3)
             }
             image_set = ImageSet(specs).bind(self._emote_cache)
-            self._badge_image_sets[badge.id] = image_set
+            channel_sets[badge.id] = image_set
         badge.image_set = image_set
         return image_set
 
@@ -1793,7 +1812,7 @@ class ChatManager(QObject):
         for msg in messages:
             # Queue badge image downloads
             for badge in msg.user.badges:
-                badge_set = self._ensure_badge_image_set(badge)
+                badge_set = self._ensure_badge_image_set(badge, channel_key)
                 if badge_set:
                     badge_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
@@ -2015,31 +2034,37 @@ class ChatManager(QObject):
 
     def _on_badges_fetched(self, channel_key: str, badge_map: dict) -> None:
         """Handle fetched badge URL data from Twitch API."""
-        self._badge_url_map.update(badge_map)
+        channel_badges = self._badge_url_map.setdefault(channel_key, {})
+        channel_badges.update(badge_map)
         self._badges_fetched_at[channel_key] = time.monotonic()
-        logger.info(f"Badge URL map updated: {len(self._badge_url_map)} entries")
+        logger.info(
+            f"Badge URL map updated for {channel_key}: {len(channel_badges)} entries"
+        )
 
-        # Build or update badge image sets
+        # Build or update badge image sets for this channel
+        channel_sets = self._badge_image_sets.setdefault(channel_key, {})
         for badge_id, url in badge_map.items():
-            if badge_id not in self._badge_image_sets:
+            if badge_id not in channel_sets:
+                cache_key = f"badge:{channel_key}:{badge_id}"
                 specs = {
                     scale: ImageSpec(
                         scale=scale,
-                        key=f"badge:{badge_id}@{scale}x",
+                        key=f"{cache_key}@{scale}x",
                         url=url,
                     )
                     for scale in (1, 2, 3)
                 }
-                self._badge_image_sets[badge_id] = ImageSet(specs).bind(self._emote_cache)
+                channel_sets[badge_id] = ImageSet(specs).bind(self._emote_cache)
 
         # Re-queue badges that were attempted before the map was ready
         requeue_count = 0
-        for badge_id in list(self._queued_badge_urls):
+        queued = self._queued_badge_urls.get(channel_key, set())
+        for badge_id in list(queued):
             cleaned_id = badge_id.removeprefix("badge:")
-            image_set = self._badge_image_sets.get(cleaned_id)
+            image_set = channel_sets.get(cleaned_id)
             if image_set:
                 image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
-                self._queued_badge_urls.discard(badge_id)
+                queued.discard(badge_id)
                 requeue_count += 1
 
         if requeue_count:

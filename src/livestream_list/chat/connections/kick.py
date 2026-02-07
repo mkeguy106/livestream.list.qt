@@ -129,7 +129,7 @@ class KickChatConnection(BaseChatConnection):
         if self._ws and not self._ws.closed:
             await self._ws.close()
 
-    async def send_message(self, text: str) -> bool:
+    async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
         """Send a message to the connected Kick channel.
 
         Uses the official Kick public API with OAuth bearer token.
@@ -144,12 +144,12 @@ class KickChatConnection(BaseChatConnection):
             self._emit_error("Unknown broadcaster ID")
             return False
 
-        result = await self._do_send(text)
+        result = await self._do_send(text, reply_to_msg_id)
         if result is None:
             # 401 - try refreshing token under lock to prevent concurrent refreshes
             async with self._refresh_lock:
                 if await self._refresh_auth_token():
-                    result = await self._do_send(text)
+                    result = await self._do_send(text, reply_to_msg_id)
                     if result is None:
                         self._emit_error("Send failed after token refresh (401)")
                         return False
@@ -159,7 +159,7 @@ class KickChatConnection(BaseChatConnection):
                     return False
         return result
 
-    async def _do_send(self, text: str) -> bool | None:
+    async def _do_send(self, text: str, reply_to_msg_id: str = "") -> bool | None:
         """Attempt to send a message. Returns None on 401 (needs refresh)."""
         try:
             url = "https://api.kick.com/public/v1/chat"
@@ -173,6 +173,8 @@ class KickChatConnection(BaseChatConnection):
                 "content": text,
                 "type": "user",
             }
+            if reply_to_msg_id:
+                payload["reply_to_original_message_id"] = int(reply_to_msg_id)
             logger.debug(f"Kick send_message payload: {payload}")
 
             async with self._session.post(url, json=payload, headers=headers) as resp:

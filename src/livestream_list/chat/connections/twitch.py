@@ -289,7 +289,7 @@ class TwitchChatConnection(BaseChatConnection):
         self._should_stop = True
         await self._cleanup()
 
-    async def send_message(self, text: str) -> bool:
+    async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
         """Send a message to the connected channel."""
         if not self._ws or self._ws.closed or not self._channel_id:
             return False
@@ -301,7 +301,13 @@ class TwitchChatConnection(BaseChatConnection):
             return False
 
         try:
-            await self._ws.send_str(f"PRIVMSG #{self._channel_id} :{text}")
+            if reply_to_msg_id:
+                await self._ws.send_str(
+                    f"@reply-parent-msg-id={reply_to_msg_id} "
+                    f"PRIVMSG #{self._channel_id} :{text}"
+                )
+            else:
+                await self._ws.send_str(f"PRIVMSG #{self._channel_id} :{text}")
             return True
         except Exception as e:
             self._emit_error(f"Failed to send message: {e}")

@@ -66,11 +66,12 @@ class BaseChatConnection(QObject):
         """Disconnect from the current channel."""
 
     @abstractmethod
-    async def send_message(self, text: str) -> bool:
+    async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
         """Send a message to the connected channel.
 
         Args:
             text: The message text to send.
+            reply_to_msg_id: Optional message ID to reply to.
 
         Returns:
             True if the message was sent successfully.

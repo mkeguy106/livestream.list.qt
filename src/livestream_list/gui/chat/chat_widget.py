@@ -226,6 +226,14 @@ class ChatInput(QLineEdit):
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Route navigation keys to completers first."""
+        # Escape cancels reply mode on the parent ChatWidget
+        if event.key() == Qt.Key.Key_Escape:
+            parent = self.parent()
+            while parent and not isinstance(parent, ChatWidget):
+                parent = parent.parent()
+            if parent and parent._reply_to_msg is not None:
+                parent._cancel_reply()
+                return
         # Dismiss spell popup on Space (user moved on to next word)
         if event.key() == Qt.Key.Key_Space and self._spell_completer:
             self._spell_completer._dismiss()
@@ -327,7 +335,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
     Uses ChatSearchMixin for search functionality.
     """
 
-    message_sent = Signal(str, str)  # channel_key, text
+    message_sent = Signal(str, str, str)  # channel_key, text, reply_to_msg_id
     popout_requested = Signal(str)  # channel_key
     settings_clicked = Signal()
     font_size_changed = Signal(int)  # new font size
@@ -363,6 +371,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
+        self._reply_to_msg: ChatMessage | None = None  # Message being replied to
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -513,6 +522,23 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._new_msg_button.hide()
         self._new_msg_button.clicked.connect(self._scroll_to_bottom)
         layout.addWidget(self._new_msg_button)
+
+        # Reply indicator (hidden by default)
+        self._reply_widget = QWidget()
+        self._reply_widget.setObjectName("chat_reply_widget")
+        reply_layout = QHBoxLayout(self._reply_widget)
+        reply_layout.setContentsMargins(8, 4, 4, 4)
+        reply_layout.setSpacing(6)
+        self._reply_label = QLabel()
+        self._reply_label.setObjectName("chat_reply_label")
+        reply_layout.addWidget(self._reply_label, 1)
+        reply_close = QPushButton("\u2715")
+        reply_close.setObjectName("chat_reply_close")
+        reply_close.setFixedSize(20, 20)
+        reply_close.clicked.connect(self._cancel_reply)
+        reply_layout.addWidget(reply_close)
+        self._reply_widget.hide()
+        layout.addWidget(self._reply_widget)
 
         # Input area
         input_layout = QHBoxLayout()
@@ -889,8 +915,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Handle send button/enter key."""
         text = self._input.text().strip()
         if text:
-            self.message_sent.emit(self.channel_key, text)
+            reply_id = self._reply_to_msg.id if self._reply_to_msg else ""
+            self.message_sent.emit(self.channel_key, text, reply_id)
             self._input.clear()
+            self._cancel_reply()
 
     def _is_at_bottom(self) -> bool:
         """Check if the view is scrolled to the bottom."""
@@ -952,6 +980,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 for action in user_menu.actions():
                     menu.addAction(action)
 
+                # "Reply" option (requires auth, not for system messages)
+                if self._authenticated and not message.is_system:
+                    menu.addSeparator()
+                    reply_action = menu.addAction(
+                        f"Reply to @{message.user.display_name}"
+                    )
+                    reply_action.triggered.connect(
+                        lambda checked=False, m=message: self._start_reply(m)
+                    )
+
                 # "Send Whisper" option for Twitch users (not our own messages)
                 if message.user.platform == StreamPlatform.TWITCH and message.user.id != "self":
                     menu.addSeparator()
@@ -1001,6 +1039,18 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""
         self._hype_banner.hide()
+
+    def _start_reply(self, message: ChatMessage) -> None:
+        """Enter reply mode for the given message."""
+        self._reply_to_msg = message
+        self._reply_label.setText(f"Replying to @{message.user.display_name}")
+        self._reply_widget.show()
+        self._input.setFocus()
+
+    def _cancel_reply(self) -> None:
+        """Exit reply mode."""
+        self._reply_to_msg = None
+        self._reply_widget.hide()
 
     def _update_banner_style(self) -> None:
         """Apply banner colors from settings (theme-aware)."""
@@ -1201,6 +1251,27 @@ class ChatWidget(QWidget, ChatSearchMixin):
             }}
             #chat_new_msg:hover {{
                 background-color: {theme.accent_hover};
+            }}
+
+            /* Reply indicator bar */
+            #chat_reply_widget {{
+                background-color: {theme.chat_input_bg};
+                border-left: 3px solid {theme.accent};
+                border-bottom: 1px solid {theme.border_light};
+            }}
+            #chat_reply_label {{
+                color: {theme.text_muted};
+                font-size: 11px;
+                background: transparent;
+            }}
+            #chat_reply_close {{
+                background: transparent;
+                color: {theme.text_muted};
+                border: none;
+                font-size: 12px;
+            }}
+            #chat_reply_close:hover {{
+                color: {theme.text_primary};
             }}
 
             /* Chat input field */
