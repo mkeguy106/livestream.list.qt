@@ -66,11 +66,19 @@ class NotificationSettings:
     """Notification-related settings."""
 
     enabled: bool = True
-    sound_enabled: bool = True
+    sound_enabled: bool = False
     show_game: bool = True
     show_title: bool = True
     excluded_channels: list[str] = field(default_factory=list)
     backend: str = "auto"  # auto, dbus, notify-send
+    custom_sound_path: str = ""  # empty = system default
+    urgency: str = "normal"  # low, normal, critical
+    timeout_seconds: int = 0  # 0 = system default
+    platform_filter: list[str] = field(default_factory=lambda: ["twitch", "youtube", "kick"])
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: str = "22:00"  # HH:MM 24h
+    quiet_hours_end: str = "08:00"
+    raid_notifications_enabled: bool = True
 
 
 @dataclass
@@ -211,6 +219,17 @@ class BuiltinChatSettings:
 
 
 @dataclass
+class ChatLoggingSettings:
+    """Chat logging and history settings."""
+
+    enabled: bool = False  # Off by default
+    max_disk_mb: int = 100
+    log_format: str = "jsonl"  # "jsonl" or "text"
+    load_history_on_open: bool = True
+    history_lines: int = 100
+
+
+@dataclass
 class ChatSettings:
     """Chat-related settings."""
 
@@ -222,6 +241,7 @@ class ChatSettings:
     new_window: bool = True  # Open chat in new window instead of tab
     recent_channels: list[str] = field(default_factory=list)  # recent chat channel keys
     builtin: BuiltinChatSettings = field(default_factory=BuiltinChatSettings)
+    logging: ChatLoggingSettings = field(default_factory=ChatLoggingSettings)
 
 
 @dataclass
@@ -509,11 +529,21 @@ class Settings:
             n = data["notifications"]
             settings.notifications = NotificationSettings(
                 enabled=n.get("enabled", True),
-                sound_enabled=n.get("sound_enabled", True),
+                sound_enabled=n.get("sound_enabled", False),
                 show_game=n.get("show_game", True),
                 show_title=n.get("show_title", True),
                 excluded_channels=n.get("excluded_channels", []),
                 backend=n.get("backend", "auto"),
+                custom_sound_path=n.get("custom_sound_path", ""),
+                urgency=n.get("urgency", "normal"),
+                timeout_seconds=cls._validate_int(
+                    n.get("timeout_seconds"), 0, min_val=0, max_val=60
+                ),
+                platform_filter=n.get("platform_filter", ["twitch", "youtube", "kick"]),
+                quiet_hours_enabled=n.get("quiet_hours_enabled", False),
+                quiet_hours_start=n.get("quiet_hours_start", "22:00"),
+                quiet_hours_end=n.get("quiet_hours_end", "08:00"),
+                raid_notifications_enabled=n.get("raid_notifications_enabled", True),
             )
 
         # Window (with validation for reasonable dimensions)
@@ -642,9 +672,7 @@ class Settings:
                 blocked_user_names=builtin_data.get("blocked_user_names", {}),
                 highlight_keywords=builtin_data.get("highlight_keywords", []),
                 user_nicknames=builtin_data.get("user_nicknames", {}),
-                user_nickname_display_names=builtin_data.get(
-                    "user_nickname_display_names", {}
-                ),
+                user_nickname_display_names=builtin_data.get("user_nickname_display_names", {}),
                 user_notes=builtin_data.get("user_notes", {}),
                 user_note_display_names=builtin_data.get("user_note_display_names", {}),
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
@@ -660,6 +688,19 @@ class Settings:
                 dark_colors=dark_colors,
                 light_colors=light_colors,
             )
+            # Chat logging settings
+            log_data = c.get("logging", {})
+            chat_logging = ChatLoggingSettings(
+                enabled=log_data.get("enabled", False),
+                max_disk_mb=cls._validate_int(
+                    log_data.get("max_disk_mb"), 100, min_val=10, max_val=5000
+                ),
+                log_format=log_data.get("log_format", "jsonl"),
+                load_history_on_open=log_data.get("load_history_on_open", True),
+                history_lines=cls._validate_int(
+                    log_data.get("history_lines"), 100, min_val=10, max_val=1000
+                ),
+            )
             settings.chat = ChatSettings(
                 enabled=c.get("enabled", True),
                 mode=c.get("mode", "builtin"),
@@ -669,6 +710,7 @@ class Settings:
                 new_window=c.get("new_window", True),
                 recent_channels=c.get("recent_channels", []),
                 builtin=builtin,
+                logging=chat_logging,
             )
 
         # Channel info
@@ -775,6 +817,14 @@ class Settings:
                 "show_title": self.notifications.show_title,
                 "excluded_channels": self.notifications.excluded_channels,
                 "backend": self.notifications.backend,
+                "custom_sound_path": self.notifications.custom_sound_path,
+                "urgency": self.notifications.urgency,
+                "timeout_seconds": self.notifications.timeout_seconds,
+                "platform_filter": self.notifications.platform_filter,
+                "quiet_hours_enabled": self.notifications.quiet_hours_enabled,
+                "quiet_hours_start": self.notifications.quiet_hours_start,
+                "quiet_hours_end": self.notifications.quiet_hours_end,
+                "raid_notifications_enabled": self.notifications.raid_notifications_enabled,
             },
             "window": {
                 "width": self.window.width,
@@ -847,6 +897,13 @@ class Settings:
                         "x": self.chat.builtin.window.x,
                         "y": self.chat.builtin.window.y,
                     },
+                },
+                "logging": {
+                    "enabled": self.chat.logging.enabled,
+                    "max_disk_mb": self.chat.logging.max_disk_mb,
+                    "log_format": self.chat.logging.log_format,
+                    "load_history_on_open": self.chat.logging.load_history_on_open,
+                    "history_lines": self.chat.logging.history_lines,
                 },
             },
             "channel_info": {

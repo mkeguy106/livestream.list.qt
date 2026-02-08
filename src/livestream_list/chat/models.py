@@ -67,6 +67,8 @@ class ChatMessage:
     reply_parent_text: str = ""  # Text of replied-to message
     is_whisper: bool = False  # Twitch whisper / DM
     whisper_target: str | None = None  # Display name of whisper recipient (for sent whispers)
+    is_raid: bool = False  # Twitch raid event
+    raid_viewer_count: int = 0  # Number of viewers in the raid
 
 
 @dataclass

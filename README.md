@@ -20,6 +20,12 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Paste URLs to auto-detect platform (e.g., `https://twitch.tv/username`)
   - Clipboard auto-paste when opening add dialog
 - **Desktop Notifications** - Get notified when streams go live (smart notifications - no flurry on startup)
+  - Custom notification sound (WAV/OGG/MP3/FLAC)
+  - Urgency levels (low/normal/critical)
+  - Configurable timeout
+  - Per-platform filter (Twitch, YouTube, Kick)
+  - Quiet hours scheduling (e.g., 22:00 to 08:00)
+  - Raid notifications for open chat channels
 - **System Tray Icon** - Minimize to tray, click to restore, right-click menu
   - Works on KDE, XFCE, Cinnamon, Budgie, LXQt, MATE, and GNOME (with AppIndicator extension)
 - **Run in Background** - Keep running when window is closed to receive notifications
@@ -65,6 +71,12 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Zero-width emotes — 7TV overlay emotes that stack on other emotes
   - User card on hover — hover username to see profile image, bio, followers, follow age, pronouns
   - User card text selectable and copyable (Ctrl+C or right-click)
+  - Hype Train banner — purple-themed progress bar with level, goal, and countdown timer
+  - Raid banner — orange-themed banner with raider name and viewer count, auto-hides after 15s
+  - Chat logging — persistent JSONL/text per-channel logs with disk rotation
+  - Chat history — load recent messages from disk logs when opening a channel
+  - Always on Top toggle in gear menu (persisted, works on Wayland via KWin scripting)
+- **Always on Top** - Keep main window above other windows (View menu toggle, persisted)
 - **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
@@ -220,7 +232,7 @@ Planned features for future releases:
 - [x] Chat log export — save chat history to a text file
 - [x] Timestamp format option — 12h vs 24h toggle
 - [x] Auto-complete recent emotes first — sort emote suggestions by usage frequency
-- [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
+- [x] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read.hype_train` scope, GraphQL is unofficial but works for any channel)
 - [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
 - [x] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
 - [x] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
@@ -239,7 +251,7 @@ Planned features for future releases:
 - [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
 - [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
 - [x] Pronouns display — show user pronouns on user cards
-- [ ] Always-on-top / overlay mode — transparent overlay window for use with OBS or other apps
+- [x] Always-on-top — separate toggles for main window (View menu) and chat window (gear menu), with KWin scripting on KDE Plasma for Wayland compatibility
 - [x] Prediction badge details — show picked outcome in prediction badges
 - [ ] Discover Channels — find new streamers to watch with browsable categories:
   - Top Streamers (highest viewer counts across platforms)
@@ -250,6 +262,9 @@ Planned features for future releases:
   - Just Went Live (channels that started streaming in the last few minutes)
   - Rising Stars (small streamers with growing audiences)
 - [ ] VOD chat replay — play back chat messages from recorded Twitch VODs synced to the video timeline
+- [x] Raid notifications — desktop notification + in-chat orange banner when a Twitch channel is raided (requires chat open)
+- [x] Chat logging — persistent JSONL/text per-channel logging with configurable disk rotation and history loading on chat open
+- [x] Notification improvements — custom sound, urgency, timeout, per-platform filter, and quiet hours scheduling
 
 ## License
 

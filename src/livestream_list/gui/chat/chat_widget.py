@@ -635,9 +635,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         ht_outer.addWidget(self._hype_train_progress)
         # Countdown label
         self._hype_train_countdown = QLabel()
-        self._hype_train_countdown.setStyleSheet(
-            "color: #8b7ab8; font-size: 10px; border: none;"
-        )
+        self._hype_train_countdown.setStyleSheet("color: #8b7ab8; font-size: 10px; border: none;")
         ht_outer.addWidget(self._hype_train_countdown)
         self._hype_train_banner.hide()
         layout.addWidget(self._hype_train_banner)
@@ -647,6 +645,41 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_train_timer.timeout.connect(self._hype_train_tick)
         self._hype_train_expires_at: str = ""
         self._hype_train_auto_hide_timer: QTimer | None = None
+
+        # Raid banner (hidden by default)
+        self._raid_banner = QWidget()
+        self._raid_banner.setStyleSheet("""
+            QWidget {
+                background-color: #3a1500;
+                border: 1px solid #cc5500;
+                border-radius: 4px;
+            }
+        """)
+        raid_layout = QHBoxLayout(self._raid_banner)
+        raid_layout.setContentsMargins(8, 4, 4, 4)
+        raid_layout.setSpacing(6)
+        self._raid_label = QLabel()
+        self._raid_label.setStyleSheet(
+            "color: #ff8c00; font-size: 11px; font-weight: bold; border: none;"
+        )
+        self._raid_label.setWordWrap(True)
+        raid_layout.addWidget(self._raid_label, 1)
+        raid_dismiss = QPushButton("\u2715")
+        raid_dismiss.setFixedSize(20, 20)
+        raid_dismiss.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #aaa;
+                border: none;
+                font-size: 12px;
+            }
+            QPushButton:hover { color: #fff; }
+        """)
+        raid_dismiss.clicked.connect(self._dismiss_raid_banner)
+        raid_layout.addWidget(raid_dismiss)
+        self._raid_banner.hide()
+        layout.addWidget(self._raid_banner)
+        self._raid_auto_hide_timer: QTimer | None = None
 
         # New messages indicator (hidden by default)
         self._new_msg_button = QPushButton("New messages")
@@ -707,9 +740,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._char_counter.setObjectName("chat_char_counter")
         self._char_counter.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
         self._char_counter.setFixedWidth(32)
-        self._char_counter.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        self._char_counter.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self._char_counter.hide()
         input_layout.addWidget(self._char_counter)
 
@@ -914,6 +945,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
             for dialog in list(self._history_dialogs):
                 dialog.apply_moderation(event)
 
+    def load_disk_history(self, chat_log_writer) -> None:
+        """Load recent messages from disk chat logs into the message list."""
+        settings = chat_log_writer.settings
+        if not settings.enabled or not settings.load_history_on_open:
+            return
+        messages = chat_log_writer.load_recent_history(self._channel_key, settings.history_lines)
+        if messages:
+            self._model.add_messages(messages)
+
     def set_connected(self) -> None:
         """Hide the connecting indicator and show the message list."""
         self._connecting_label.hide()
@@ -957,9 +997,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _update_reconnect_label(self) -> None:
         """Update the reconnect label with the current countdown."""
-        self._connecting_label.setText(
-            f"Reconnecting in {self._reconnect_remaining}s\u2026"
-        )
+        self._connecting_label.setText(f"Reconnecting in {self._reconnect_remaining}s\u2026")
 
     def set_authenticated(self, state: bool) -> None:
         """Enable or disable the input based on authentication state."""
@@ -1302,9 +1340,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 # "Reply" option (requires auth, not for system messages)
                 if self._authenticated and not message.is_system:
                     menu.addSeparator()
-                    reply_action = menu.addAction(
-                        f"Reply to @{message.user.display_name}"
-                    )
+                    reply_action = menu.addAction(f"Reply to @{message.user.display_name}")
                     reply_action.triggered.connect(
                         lambda checked=False, m=message: self._start_reply(m)
                     )
@@ -1418,9 +1454,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         lines.append(".system{color:#888;font-style:italic;}")
         lines.append(".badge{color:#999;font-size:0.85em;}")
         lines.append(".reply{color:#777;font-size:0.9em;margin-left:20px;}")
-        lines.append(
-            ".hype{background:#4a3000;border-left:3px solid #ffb300;padding:2px 6px;}"
-        )
+        lines.append(".hype{background:#4a3000;border-left:3px solid #ffb300;padding:2px 6px;}")
         lines.append("</style></head><body>")
         lines.append(f"<h2>Chat Log — {html.escape(channel_name)}</h2>")
 
@@ -1453,9 +1487,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             badge_str = ""
             if msg.user.badges:
                 badge_names = [html.escape(b.name) for b in msg.user.badges]
-                badge_str = (
-                    "<span class='badge'>[" + "][".join(badge_names) + "]</span> "
-                )
+                badge_str = "<span class='badge'>[" + "][".join(badge_names) + "]</span> "
 
             # Username color
             color = msg.user.color or "#aaa"
@@ -1497,9 +1529,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     "name": msg.user.name,
                     "display_name": msg.user.display_name,
                     "color": msg.user.color,
-                    "badges": [
-                        {"id": b.id, "name": b.name} for b in msg.user.badges
-                    ],
+                    "badges": [{"id": b.id, "name": b.name} for b in msg.user.badges],
                 },
                 "text": msg.text,
                 "emotes": [
@@ -1590,9 +1620,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._hype_train_auto_hide_timer.stop()
 
         if event.type in ("begin", "progress"):
-            self._hype_train_level_label.setText(
-                f"Hype Train \u2014 Level {event.level}"
-            )
+            self._hype_train_level_label.setText(f"Hype Train \u2014 Level {event.level}")
             self._hype_train_progress.setMaximum(max(event.goal, 1))
             self._hype_train_progress.setValue(min(event.total, event.goal))
             self._hype_train_expires_at = event.expires_at
@@ -1601,9 +1629,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._hype_train_banner.show()
         elif event.type == "end":
             self._hype_train_timer.stop()
-            self._hype_train_level_label.setText(
-                f"Hype Train Complete! Level {event.level}"
-            )
+            self._hype_train_level_label.setText(f"Hype Train Complete! Level {event.level}")
             self._hype_train_progress.setMaximum(1)
             self._hype_train_progress.setValue(1)
             self._hype_train_countdown.setText("")
@@ -1623,9 +1649,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         from datetime import datetime, timezone
 
         try:
-            expires = datetime.fromisoformat(
-                self._hype_train_expires_at.replace("Z", "+00:00")
-            )
+            expires = datetime.fromisoformat(self._hype_train_expires_at.replace("Z", "+00:00"))
             remaining = (expires - datetime.now(timezone.utc)).total_seconds()
             if remaining <= 0:
                 self._hype_train_countdown.setText("Expiring...")
@@ -1646,6 +1670,27 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _auto_hide_hype_train(self) -> None:
         """Auto-hide the hype train banner after train ends."""
         self._hype_train_banner.hide()
+
+    def show_raid_banner(self, raid_msg: ChatMessage) -> None:
+        """Show the raid banner with raider info and auto-hide after 15s."""
+        raider = raid_msg.user.display_name or raid_msg.user.name
+        count = raid_msg.raid_viewer_count
+        self._raid_label.setText(f"\U0001f6a8 {raider} is raiding with {count:,} viewers!")
+        self._raid_banner.show()
+        # Auto-hide after 15 seconds
+        if self._raid_auto_hide_timer:
+            self._raid_auto_hide_timer.stop()
+        self._raid_auto_hide_timer = QTimer(self)
+        self._raid_auto_hide_timer.setSingleShot(True)
+        self._raid_auto_hide_timer.setInterval(15000)
+        self._raid_auto_hide_timer.timeout.connect(self._dismiss_raid_banner)
+        self._raid_auto_hide_timer.start()
+
+    def _dismiss_raid_banner(self) -> None:
+        """Dismiss the raid banner."""
+        self._raid_banner.hide()
+        if self._raid_auto_hide_timer:
+            self._raid_auto_hide_timer.stop()
 
     def _start_reply(self, message: ChatMessage) -> None:
         """Enter reply mode for the given message."""
@@ -2180,9 +2225,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                             event.pos(), option, message
                         )
                         if mention:
-                            self._show_conversation(
-                                message.user.display_name, mention
-                            )
+                            self._show_conversation(message.user.display_name, mention)
                             return True
                         reply_rect = self._delegate._get_reply_context_rect(option, message)
                         if reply_rect.isValid() and reply_rect.contains(event.pos()):
@@ -2217,9 +2260,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False
-                    mention = self._delegate._get_mention_at_position(
-                        event.pos(), option, message
-                    )
+                    mention = self._delegate._get_mention_at_position(event.pos(), option, message)
                     if mention:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False
@@ -2429,7 +2470,6 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if user.platform == StreamPlatform.TWITCH:
             self._fetch_user_card_info(card, user.name)
 
-
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
         """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
         import asyncio
@@ -2459,17 +2499,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
                         self._login, self._channel_login
                     )
                     pronouns_coro = UserCardFetchWorker.fetch_pronouns(self._login)
-                    results = loop.run_until_complete(
-                        asyncio.gather(user_info_coro, pronouns_coro)
-                    )
+                    results = loop.run_until_complete(asyncio.gather(user_info_coro, pronouns_coro))
                     self.result = results[0]
                     self.pronouns = results[1]
                     # Fetch avatar if we got a URL
                     if self.result and self.result.get("profile_image_url"):
                         self.avatar_data = loop.run_until_complete(
-                            UserCardFetchWorker.fetch_avatar(
-                                self.result["profile_image_url"]
-                            )
+                            UserCardFetchWorker.fetch_avatar(self.result["profile_image_url"])
                         )
                 except Exception as e:
                     logger.debug(f"User card fetch error for {self._login}: {e}")
@@ -3048,9 +3084,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
         self._model.add_messages(convo_msgs)
 
         count = self._model.rowCount()
-        self._header.setText(
-            f"  {self._user_a_name} & {self._user_b_name} \u2014 {count} messages"
-        )
+        self._header.setText(f"  {self._user_a_name} & {self._user_b_name} \u2014 {count} messages")
 
         if was_at_bottom:
             self._list_view.scrollToBottom()
@@ -3201,9 +3235,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
         layout.setSpacing(0)
 
         # Header
-        self._header = QLabel(
-            f"  Reply thread \u2014 {len(thread_messages)} messages"
-        )
+        self._header = QLabel(f"  Reply thread \u2014 {len(thread_messages)} messages")
         layout.addWidget(self._header)
 
         # Search bar (hidden by default)
@@ -3252,12 +3284,8 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
         self._list_view.setModel(self._model)
         self._list_view.setItemDelegate(self._delegate)
         self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
-        self._list_view.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._list_view.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
+        self._list_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._list_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
         self._list_view.setWordWrap(True)
         self._list_view.setUniformItemSizes(False)
@@ -3280,9 +3308,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
         self.apply_theme()
 
     @staticmethod
-    def _collect_thread_ids(
-        root_id: str, messages: list[ChatMessage]
-    ) -> set[str]:
+    def _collect_thread_ids(root_id: str, messages: list[ChatMessage]) -> set[str]:
         """Collect the root message and all descendants in the reply chain."""
         thread_ids = {root_id}
         changed = True
@@ -3296,10 +3322,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
 
     def _matches_thread(self, msg: ChatMessage) -> bool:
         """Check if a message belongs to this thread."""
-        return (
-            msg.id == self._root_msg_id
-            or msg.reply_parent_msg_id == self._root_msg_id
-        )
+        return msg.id == self._root_msg_id or msg.reply_parent_msg_id == self._root_msg_id
 
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add new messages that belong to this thread."""
@@ -3382,8 +3405,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
             QLineEdit:focus {{ border-color: {theme.accent}; }}
         """)
         self._search_count_label.setStyleSheet(
-            f"color: {theme.text_muted}; font-size: 11px;"
-            " background: transparent; min-width: 50px;"
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; min-width: 50px;"
         )
         search_btn_style = f"""
             QPushButton {{
@@ -3447,9 +3469,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                     self._model.layoutChanged.emit()
                 return True
 
-        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(
-            event, QMouseEvent
-        ):
+        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
             if event.button() == Qt.MouseButton.LeftButton:
                 index = self._list_view.indexAt(event.pos())
                 if index.isValid():
@@ -3458,9 +3478,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
                         option.rect = self._list_view.visualRect(index)
-                        url = self._delegate._get_url_at_position(
-                            event.pos(), option, message
-                        )
+                        url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
                                 webbrowser.open(url)
@@ -3477,9 +3495,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
                     option.rect = self._list_view.visualRect(index)
-                    url = self._delegate._get_url_at_position(
-                        event.pos(), option, message
-                    )
+                    url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False

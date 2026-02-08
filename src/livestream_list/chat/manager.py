@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from ..core.models import Livestream, StreamPlatform
 from ..core.settings import Settings
+from .chat_log_store import ChatLogWriter
 from .connections.base import BaseChatConnection
 from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW, EmoteCache
 from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
@@ -1069,9 +1070,7 @@ class WhisperEventSubWorker(QThread):
                         # Fetch properly-cased display_name from /helix/users
                         display_name = login
                         if user_id:
-                            display_name = await self._fetch_display_name(
-                                session, user_id
-                            ) or login
+                            display_name = await self._fetch_display_name(session, user_id) or login
                         if display_name and display_name != "?":
                             self.authenticated_as.emit(display_name)
                         return user_id
@@ -1158,9 +1157,7 @@ class HypeTrainEventSubWorker(QThread):
                 except Exception as e:
                     if self._should_stop:
                         return
-                    logger.warning(
-                        f"HypeTrainEventSub connection error: {e}, reconnecting in 5s"
-                    )
+                    logger.warning(f"HypeTrainEventSub connection error: {e}, reconnecting in 5s")
                     await asyncio.sleep(5)
 
     async def _connect_and_listen(self, session):
@@ -1175,9 +1172,7 @@ class HypeTrainEventSubWorker(QThread):
                 return
 
             session_id = welcome["payload"]["session"]["id"]
-            keepalive_timeout = welcome["payload"]["session"].get(
-                "keepalive_timeout_seconds", 30
-            )
+            keepalive_timeout = welcome["payload"]["session"].get("keepalive_timeout_seconds", 30)
             logger.info(f"HypeTrainEventSub connected, session={session_id}")
 
             # Subscribe all currently tracked channels
@@ -1225,9 +1220,7 @@ class HypeTrainEventSubWorker(QThread):
                         return
                     elif msg_type == "revocation":
                         reason = (
-                            data.get("payload", {})
-                            .get("subscription", {})
-                            .get("status", "unknown")
+                            data.get("payload", {}).get("subscription", {}).get("status", "unknown")
                         )
                         logger.warning(f"HypeTrainEventSub: subscription revoked: {reason}")
 
@@ -1237,9 +1230,7 @@ class HypeTrainEventSubWorker(QThread):
                 ):
                     return
 
-    async def _subscribe_channel(
-        self, session, session_id: str, broadcaster_id: str
-    ) -> None:
+    async def _subscribe_channel(self, session, session_id: str, broadcaster_id: str) -> None:
         """Subscribe to all 3 hype train event types for a broadcaster."""
         event_types = [
             ("channel.hype_train.begin", "1"),
@@ -1366,6 +1357,8 @@ class ChatManager(QObject):
     chat_reconnect_failed = Signal(str)
     # Emitted on hype train events (channel_key, HypeTrainEvent)
     hype_train_event = Signal(str, object)
+    # Emitted on raid events (channel_key, ChatMessage)
+    raid_received = Signal(str, object)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1436,6 +1429,20 @@ class ChatManager(QObject):
         self._hype_train_worker: HypeTrainEventSubWorker | None = None
         # channel_key -> broadcaster numeric ID (from ROOMSTATE room-id)
         self._twitch_broadcaster_ids: dict[str, str] = {}
+
+        # Chat log writer
+        self._chat_log_writer = ChatLogWriter(settings.chat.logging)
+        self._chat_log_flush_timer = QTimer(self)
+        self._chat_log_flush_timer.setInterval(5000)
+        self._chat_log_flush_timer.timeout.connect(self._flush_chat_logs)
+        if settings.chat.logging.enabled:
+            self._chat_log_flush_timer.start()
+        # Periodic disk limit enforcement
+        self._chat_log_enforce_timer = QTimer(self)
+        self._chat_log_enforce_timer.setInterval(60000)
+        self._chat_log_enforce_timer.timeout.connect(self._enforce_chat_log_limits)
+        if settings.chat.logging.enabled:
+            self._chat_log_enforce_timer.start()
 
         # Kick off global/user emote fetch in background
         self._ensure_global_emotes()
@@ -1551,9 +1558,7 @@ class ChatManager(QObject):
         )
         connection.error.connect(lambda msg, key=channel_key: (self._on_connection_error(key, msg)))
         connection.connected.connect(lambda key=channel_key: self.chat_connected.emit(key))
-        connection.disconnected.connect(
-            lambda key=channel_key: self.chat_disconnected.emit(key)
-        )
+        connection.disconnected.connect(lambda key=channel_key: self.chat_disconnected.emit(key))
         connection.room_state_changed.connect(
             lambda state, key=channel_key: self.room_state_changed.emit(key, state)
         )
@@ -2089,6 +2094,10 @@ class ChatManager(QObject):
         self._message_flush_timer.stop()
         self._stop_whisper_listener()
         self._stop_hype_train_listener()
+        # Flush chat logs on shutdown
+        self._chat_log_writer.flush_all()
+        self._chat_log_flush_timer.stop()
+        self._chat_log_enforce_timer.stop()
 
         # Clean up global emote/badge state when all chats are closed
         # This prevents unbounded memory growth in long-running sessions
@@ -2198,6 +2207,12 @@ class ChatManager(QObject):
             processed = self._process_messages(channel_key, batch)
             if processed:
                 self.messages_received.emit(channel_key, processed)
+                # Log to disk
+                self._chat_log_writer.append(channel_key, processed)
+                # Emit raid signal for any raid messages
+                for msg in processed:
+                    if msg.is_raid:
+                        self.raid_received.emit(channel_key, msg)
 
         if not self._pending_messages:
             self._message_flush_timer.stop()
@@ -2244,6 +2259,32 @@ class ChatManager(QObject):
                             break
 
         return messages
+
+    def _flush_chat_logs(self) -> None:
+        """Periodic timer callback to flush chat log buffers to disk."""
+        if self._chat_log_writer.should_flush():
+            self._chat_log_writer.flush_all()
+
+    def _enforce_chat_log_limits(self) -> None:
+        """Periodic timer callback to enforce disk limits on chat logs."""
+        self._chat_log_writer.enforce_disk_limit()
+
+    @property
+    def chat_log_writer(self) -> ChatLogWriter:
+        """Expose the chat log writer for external use (e.g., loading history)."""
+        return self._chat_log_writer
+
+    def update_chat_logging_settings(self, settings) -> None:
+        """Update chat logging settings and start/stop timers accordingly."""
+        self._chat_log_writer.settings = settings
+        if settings.enabled:
+            if not self._chat_log_flush_timer.isActive():
+                self._chat_log_flush_timer.start()
+            if not self._chat_log_enforce_timer.isActive():
+                self._chat_log_enforce_timer.start()
+        else:
+            self._chat_log_flush_timer.stop()
+            self._chat_log_enforce_timer.stop()
 
     def _get_our_nick(self, channel_key: str) -> str | None:
         """Get the authenticated user's display name for the given channel's connection."""
@@ -2449,9 +2490,7 @@ class ChatManager(QObject):
         channel_badges = self._badge_url_map.setdefault(channel_key, {})
         channel_badges.update(badge_map)
         self._badges_fetched_at[channel_key] = time.monotonic()
-        logger.info(
-            f"Badge URL map updated for {channel_key}: {len(channel_badges)} entries"
-        )
+        logger.info(f"Badge URL map updated for {channel_key}: {len(channel_badges)} entries")
 
         # Build or update badge image sets for this channel
         channel_sets = self._badge_image_sets.setdefault(channel_key, {})

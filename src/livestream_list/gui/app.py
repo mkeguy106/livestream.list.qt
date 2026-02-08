@@ -245,6 +245,7 @@ class Application(QApplication):
         self.chat_manager = ChatManager(self.settings, monitor=self.monitor, parent=self)
         self.refresh_complete.connect(self.chat_manager.on_refresh_complete)
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
+        self.chat_manager.raid_received.connect(self._on_raid_received)
 
         # Set up monitor callbacks
         self.monitor.on_stream_online(self._on_stream_online)
@@ -484,6 +485,24 @@ class Application(QApplication):
             sender = message.user.display_name
             sender_id = message.user.id
             self.main_window.show_whisper_banner(sender, sender_id)
+
+    def _on_raid_received(self, channel_key: str, message) -> None:
+        """Handle raid event — send desktop notification."""
+        if not self.notifier:
+            return
+        from ..chat.models import ChatMessage as ChatMsg
+
+        if isinstance(message, ChatMsg) and message.is_raid:
+            # Get the channel display name from the livestream
+            channel_name = channel_key
+            if self.chat_manager:
+                ls = self.chat_manager._livestreams.get(channel_key)
+                if ls:
+                    channel_name = ls.display_name or ls.channel.channel_id
+            raider_name = message.user.display_name or message.user.name
+            self.notifier.send_raid_notification_sync(
+                channel_name, raider_name, message.raid_viewer_count
+            )
 
     def open_new_whisper_dialog(self) -> None:
         """Open the New Whisper dialog, ensuring chat window exists."""

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QTabWidget,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -211,6 +213,92 @@ class PreferencesDialog(QDialog):
                 break
         self.notif_backend_combo.currentIndexChanged.connect(self._on_notif_backend_changed)
         notif_layout.addRow("Backend:", self.notif_backend_combo)
+
+        # Custom sound
+        self.notif_sound_path = QLineEdit()
+        self.notif_sound_path.setPlaceholderText("System default")
+        self.notif_sound_path.setText(self.app.settings.notifications.custom_sound_path)
+        self.notif_sound_path.textChanged.connect(self._on_notif_changed)
+        sound_browse_btn = QPushButton("Browse...")
+        sound_browse_btn.clicked.connect(self._on_browse_notification_sound)
+        sound_row = QHBoxLayout()
+        sound_row.addWidget(self.notif_sound_path)
+        sound_row.addWidget(sound_browse_btn)
+        notif_layout.addRow("Custom sound:", sound_row)
+
+        # Urgency
+        self.notif_urgency_combo = QComboBox()
+        self.notif_urgency_combo.addItem("Low", "low")
+        self.notif_urgency_combo.addItem("Normal", "normal")
+        self.notif_urgency_combo.addItem("Critical", "critical")
+        current_urgency = self.app.settings.notifications.urgency
+        for i in range(self.notif_urgency_combo.count()):
+            if self.notif_urgency_combo.itemData(i) == current_urgency:
+                self.notif_urgency_combo.setCurrentIndex(i)
+                break
+        self.notif_urgency_combo.currentIndexChanged.connect(self._on_notif_changed)
+        notif_layout.addRow("Urgency:", self.notif_urgency_combo)
+
+        # Timeout
+        self.notif_timeout_spin = QSpinBox()
+        self.notif_timeout_spin.setRange(0, 60)
+        self.notif_timeout_spin.setSuffix(" sec")
+        self.notif_timeout_spin.setSpecialValueText("System default")
+        self.notif_timeout_spin.setValue(self.app.settings.notifications.timeout_seconds)
+        self.notif_timeout_spin.valueChanged.connect(self._on_notif_changed)
+        notif_layout.addRow("Timeout:", self.notif_timeout_spin)
+
+        # Platform filter
+        pf = self.app.settings.notifications.platform_filter
+        self.notif_twitch_cb = QCheckBox("Twitch")
+        self.notif_twitch_cb.setChecked("twitch" in pf)
+        self.notif_twitch_cb.stateChanged.connect(self._on_notif_changed)
+        self.notif_youtube_cb = QCheckBox("YouTube")
+        self.notif_youtube_cb.setChecked("youtube" in pf)
+        self.notif_youtube_cb.stateChanged.connect(self._on_notif_changed)
+        self.notif_kick_cb = QCheckBox("Kick")
+        self.notif_kick_cb.setChecked("kick" in pf)
+        self.notif_kick_cb.stateChanged.connect(self._on_notif_changed)
+        platform_row = QHBoxLayout()
+        platform_row.addWidget(self.notif_twitch_cb)
+        platform_row.addWidget(self.notif_youtube_cb)
+        platform_row.addWidget(self.notif_kick_cb)
+        platform_row.addStretch()
+        notif_layout.addRow("Platforms:", platform_row)
+
+        # Quiet hours
+        self.notif_quiet_cb = QCheckBox("Enable quiet hours")
+        self.notif_quiet_cb.setChecked(self.app.settings.notifications.quiet_hours_enabled)
+        self.notif_quiet_cb.stateChanged.connect(self._on_notif_changed)
+        notif_layout.addRow(self.notif_quiet_cb)
+
+        from PySide6.QtCore import QTime
+
+        self.notif_quiet_start = QTimeEdit()
+        self.notif_quiet_start.setDisplayFormat("HH:mm")
+        start_parts = self.app.settings.notifications.quiet_hours_start.split(":")
+        self.notif_quiet_start.setTime(QTime(int(start_parts[0]), int(start_parts[1])))
+        self.notif_quiet_start.timeChanged.connect(self._on_notif_changed)
+
+        self.notif_quiet_end = QTimeEdit()
+        self.notif_quiet_end.setDisplayFormat("HH:mm")
+        end_parts = self.app.settings.notifications.quiet_hours_end.split(":")
+        self.notif_quiet_end.setTime(QTime(int(end_parts[0]), int(end_parts[1])))
+        self.notif_quiet_end.timeChanged.connect(self._on_notif_changed)
+
+        quiet_row = QHBoxLayout()
+        quiet_row.addWidget(QLabel("From:"))
+        quiet_row.addWidget(self.notif_quiet_start)
+        quiet_row.addWidget(QLabel("To:"))
+        quiet_row.addWidget(self.notif_quiet_end)
+        quiet_row.addStretch()
+        notif_layout.addRow("Quiet hours:", quiet_row)
+
+        # Raid notifications
+        self.notif_raid_cb = QCheckBox("Raid notifications (chat channels)")
+        self.notif_raid_cb.setChecked(self.app.settings.notifications.raid_notifications_enabled)
+        self.notif_raid_cb.stateChanged.connect(self._on_notif_changed)
+        notif_layout.addRow(self.notif_raid_cb)
 
         # Test notification button
         self.test_notif_btn = QPushButton("Test Notification")
@@ -551,9 +639,7 @@ class PreferencesDialog(QDialog):
         builtin_layout.addRow(self.chat_spellcheck_cb)
 
         self.chat_user_card_hover_cb = QCheckBox("Show user card on hover")
-        self.chat_user_card_hover_cb.setChecked(
-            self.app.settings.chat.builtin.user_card_hover
-        )
+        self.chat_user_card_hover_cb.setChecked(self.app.settings.chat.builtin.user_card_hover)
         self.chat_user_card_hover_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_user_card_hover_cb)
 
@@ -864,9 +950,7 @@ class PreferencesDialog(QDialog):
         self.bl_search.textChanged.connect(self._refresh_blocked_list)
         bl_filter_row.addWidget(self.bl_search)
         self.bl_platform_filter = self._create_platform_filter_combo()
-        self.bl_platform_filter.currentIndexChanged.connect(
-            lambda: self._refresh_blocked_list()
-        )
+        self.bl_platform_filter.currentIndexChanged.connect(lambda: self._refresh_blocked_list())
         bl_filter_row.addWidget(self.bl_platform_filter)
         bl_layout.addLayout(bl_filter_row)
         self.blocked_list = QListWidget()
@@ -895,9 +979,7 @@ class PreferencesDialog(QDialog):
         self.nn_search.textChanged.connect(self._refresh_nicknames_list)
         nn_filter_row.addWidget(self.nn_search)
         self.nn_platform_filter = self._create_platform_filter_combo()
-        self.nn_platform_filter.currentIndexChanged.connect(
-            lambda: self._refresh_nicknames_list()
-        )
+        self.nn_platform_filter.currentIndexChanged.connect(lambda: self._refresh_nicknames_list())
         nn_filter_row.addWidget(self.nn_platform_filter)
         nn_layout.addLayout(nn_filter_row)
         self.nicknames_list = QListWidget()
@@ -929,9 +1011,7 @@ class PreferencesDialog(QDialog):
         self.nt_search.textChanged.connect(self._refresh_notes_list)
         nt_filter_row.addWidget(self.nt_search)
         self.nt_platform_filter = self._create_platform_filter_combo()
-        self.nt_platform_filter.currentIndexChanged.connect(
-            lambda: self._refresh_notes_list()
-        )
+        self.nt_platform_filter.currentIndexChanged.connect(lambda: self._refresh_notes_list())
         nt_filter_row.addWidget(self.nt_platform_filter)
         nt_layout.addLayout(nt_filter_row)
         self.notes_list = QListWidget()
@@ -953,6 +1033,52 @@ class PreferencesDialog(QDialog):
         self._refresh_notes_list()
         layout.addWidget(self.notes_group)
 
+        # Chat Logging group
+        self.logging_group = QGroupBox("Chat Logging")
+        log_layout = QFormLayout(self.logging_group)
+        log_settings = self.app.settings.chat.logging
+
+        self.log_enabled_cb = QCheckBox("Enable chat logging to disk")
+        self.log_enabled_cb.setChecked(log_settings.enabled)
+        self.log_enabled_cb.stateChanged.connect(self._on_chat_logging_changed)
+        log_layout.addRow(self.log_enabled_cb)
+
+        self.log_disk_spin = QSpinBox()
+        self.log_disk_spin.setRange(10, 5000)
+        self.log_disk_spin.setSuffix(" MB")
+        self.log_disk_spin.setValue(log_settings.max_disk_mb)
+        self.log_disk_spin.valueChanged.connect(self._on_chat_logging_changed)
+        log_layout.addRow("Max disk usage:", self.log_disk_spin)
+
+        self.log_format_combo = QComboBox()
+        self.log_format_combo.addItem("JSONL (supports history loading)", "jsonl")
+        self.log_format_combo.addItem("Plain text", "text")
+        for i in range(self.log_format_combo.count()):
+            if self.log_format_combo.itemData(i) == log_settings.log_format:
+                self.log_format_combo.setCurrentIndex(i)
+                break
+        self.log_format_combo.currentIndexChanged.connect(self._on_chat_logging_changed)
+        log_layout.addRow("Format:", self.log_format_combo)
+
+        self.log_history_cb = QCheckBox("Load history on chat open")
+        self.log_history_cb.setChecked(log_settings.load_history_on_open)
+        self.log_history_cb.stateChanged.connect(self._on_chat_logging_changed)
+        log_layout.addRow(self.log_history_cb)
+
+        self.log_history_spin = QSpinBox()
+        self.log_history_spin.setRange(10, 1000)
+        self.log_history_spin.setSuffix(" messages")
+        self.log_history_spin.setValue(log_settings.history_lines)
+        self.log_history_spin.valueChanged.connect(self._on_chat_logging_changed)
+        log_layout.addRow("History lines:", self.log_history_spin)
+
+        # Current disk usage label
+        self.log_disk_usage_label = QLabel()
+        self._update_log_disk_usage_label()
+        log_layout.addRow("Current usage:", self.log_disk_usage_label)
+
+        layout.addWidget(self.logging_group)
+
         # Set initial visibility based on current mode
         show_browser = current_mode == "browser"
         self.browser_label.setVisible(show_browser)
@@ -963,6 +1089,7 @@ class PreferencesDialog(QDialog):
         self.blocked_group.setVisible(not show_browser)
         self.nicknames_group.setVisible(not show_browser)
         self.notes_group.setVisible(not show_browser)
+        self.logging_group.setVisible(not show_browser)
 
         reset_btn = QPushButton("Reset to Defaults")
         reset_btn.clicked.connect(lambda: self._reset_tab_defaults("Chat"))
@@ -1158,8 +1285,28 @@ class PreferencesDialog(QDialog):
         self.app.save_settings()
 
     def _on_notif_changed(self):
-        self.app.settings.notifications.enabled = self.notif_enabled_cb.isChecked()
-        self.app.settings.notifications.sound_enabled = self.notif_sound_cb.isChecked()
+        if self._loading:
+            return
+        notif = self.app.settings.notifications
+        notif.enabled = self.notif_enabled_cb.isChecked()
+        notif.sound_enabled = self.notif_sound_cb.isChecked()
+        notif.custom_sound_path = self.notif_sound_path.text().strip()
+        notif.urgency = self.notif_urgency_combo.currentData()
+        notif.timeout_seconds = self.notif_timeout_spin.value()
+        # Platform filter
+        pf = []
+        if self.notif_twitch_cb.isChecked():
+            pf.append("twitch")
+        if self.notif_youtube_cb.isChecked():
+            pf.append("youtube")
+        if self.notif_kick_cb.isChecked():
+            pf.append("kick")
+        notif.platform_filter = pf
+        # Quiet hours
+        notif.quiet_hours_enabled = self.notif_quiet_cb.isChecked()
+        notif.quiet_hours_start = self.notif_quiet_start.time().toString("HH:mm")
+        notif.quiet_hours_end = self.notif_quiet_end.time().toString("HH:mm")
+        notif.raid_notifications_enabled = self.notif_raid_cb.isChecked()
         self.app.save_settings()
 
     def _on_style_changed(self, index):
@@ -1168,6 +1315,16 @@ class PreferencesDialog(QDialog):
         # Refresh the stream list to apply the new style
         if self.parent():
             self.parent().refresh_stream_list()
+
+    def _on_browse_notification_sound(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Notification Sound",
+            "",
+            "Audio Files (*.wav *.ogg *.mp3 *.flac *.opus);;All Files (*)",
+        )
+        if path:
+            self.notif_sound_path.setText(path)
 
     def _on_notif_backend_changed(self, index):
         self.app.settings.notifications.backend = self.notif_backend_combo.currentData()
@@ -1253,6 +1410,7 @@ class PreferencesDialog(QDialog):
         self.blocked_group.setVisible(not show_browser)
         self.nicknames_group.setVisible(not show_browser)
         self.notes_group.setVisible(not show_browser)
+        self.logging_group.setVisible(not show_browser)
         self._on_chat_changed()
 
     def _on_chat_changed(self):
@@ -1267,9 +1425,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.line_spacing = self.chat_spacing_spin.value()
         self.app.settings.chat.builtin.max_messages = self.scrollback_spin.value()
         self.app.settings.chat.builtin.show_timestamps = self.chat_timestamps_cb.isChecked()
-        self.app.settings.chat.builtin.timestamp_format = (
-            self.chat_ts_format_combo.currentData()
-        )
+        self.app.settings.chat.builtin.timestamp_format = self.chat_ts_format_combo.currentData()
         self.app.settings.chat.builtin.show_badges = self.chat_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_mod_badges = self.chat_mod_badges_cb.isChecked()
         self.app.settings.chat.builtin.show_emotes = self.chat_emotes_cb.isChecked()
@@ -1277,9 +1433,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
         self.app.settings.chat.builtin.show_metrics = self.chat_metrics_cb.isChecked()
         self.app.settings.chat.builtin.spellcheck_enabled = self.chat_spellcheck_cb.isChecked()
-        self.app.settings.chat.builtin.user_card_hover = (
-            self.chat_user_card_hover_cb.isChecked()
-        )
+        self.app.settings.chat.builtin.user_card_hover = self.chat_user_card_hover_cb.isChecked()
         self.app.settings.chat.builtin.moderated_message_display = (
             self.moderated_display_combo.currentData()
         )
@@ -1326,6 +1480,35 @@ class PreferencesDialog(QDialog):
             self.app._chat_window.update_banner_settings()
             self.app._chat_window.update_metrics_bar()
             self.app._chat_window.update_spellcheck()
+
+    def _on_chat_logging_changed(self):
+        """Handle chat logging settings change."""
+        log = self.app.settings.chat.logging
+        log.enabled = self.log_enabled_cb.isChecked()
+        log.max_disk_mb = self.log_disk_spin.value()
+        log.log_format = self.log_format_combo.currentData()
+        log.load_history_on_open = self.log_history_cb.isChecked()
+        log.history_lines = self.log_history_spin.value()
+        self.app.save_settings()
+        # Update chat manager timers
+        if self.app.chat_manager:
+            self.app.chat_manager.update_chat_logging_settings(log)
+        self._update_log_disk_usage_label()
+
+    def _update_log_disk_usage_label(self):
+        """Update the disk usage display for chat logs."""
+        if self.app.chat_manager:
+            usage = self.app.chat_manager.chat_log_writer.get_total_disk_usage()
+        else:
+            from ...chat.chat_log_store import ChatLogWriter
+
+            writer = ChatLogWriter(self.app.settings.chat.logging)
+            usage = writer.get_total_disk_usage()
+        if usage < 1024 * 1024:
+            text = f"{usage / 1024:.1f} KB"
+        else:
+            text = f"{usage / (1024 * 1024):.1f} MB"
+        self.log_disk_usage_label.setText(text)
 
     def _on_color_theme_changed(self) -> None:
         """Reload color pickers when switching between dark/light mode editing."""
@@ -1504,6 +1687,23 @@ class PreferencesDialog(QDialog):
                 if self.notif_backend_combo.itemData(i) == notif_defaults.backend:
                     self.notif_backend_combo.setCurrentIndex(i)
                     break
+            self.notif_sound_path.setText(notif_defaults.custom_sound_path)
+            for i in range(self.notif_urgency_combo.count()):
+                if self.notif_urgency_combo.itemData(i) == notif_defaults.urgency:
+                    self.notif_urgency_combo.setCurrentIndex(i)
+                    break
+            self.notif_timeout_spin.setValue(notif_defaults.timeout_seconds)
+            self.notif_twitch_cb.setChecked("twitch" in notif_defaults.platform_filter)
+            self.notif_youtube_cb.setChecked("youtube" in notif_defaults.platform_filter)
+            self.notif_kick_cb.setChecked("kick" in notif_defaults.platform_filter)
+            self.notif_quiet_cb.setChecked(notif_defaults.quiet_hours_enabled)
+            from PySide6.QtCore import QTime
+
+            q_start = notif_defaults.quiet_hours_start.split(":")
+            self.notif_quiet_start.setTime(QTime(int(q_start[0]), int(q_start[1])))
+            q_end = notif_defaults.quiet_hours_end.split(":")
+            self.notif_quiet_end.setTime(QTime(int(q_end[0]), int(q_end[1])))
+            self.notif_raid_cb.setChecked(notif_defaults.raid_notifications_enabled)
             # Appearance
             self.style_combo.setCurrentIndex(defaults.ui_style)
             self.platform_colors_cb.setChecked(defaults.platform_colors)
@@ -1558,9 +1758,7 @@ class PreferencesDialog(QDialog):
             self.emote_bttv_cb.setChecked("bttv" in builtin.emote_providers)
             self.emote_ffz_cb.setChecked("ffz" in builtin.emote_providers)
             self.chat_timestamps_cb.setChecked(builtin.show_timestamps)
-            self.chat_ts_format_combo.setCurrentIndex(
-                0 if builtin.timestamp_format == "24h" else 1
-            )
+            self.chat_ts_format_combo.setCurrentIndex(0 if builtin.timestamp_format == "24h" else 1)
             self.chat_badges_cb.setChecked(builtin.show_badges)
             self.chat_mod_badges_cb.setChecked(builtin.show_mod_badges)
             self.chat_emotes_cb.setChecked(builtin.show_emotes)
@@ -1586,6 +1784,18 @@ class PreferencesDialog(QDialog):
             self.show_socials_cb.setChecked(builtin.show_socials_banner)
             self.banner_bg_edit.setText(colors.banner_bg_color)
             self.banner_text_edit.setText(colors.banner_text_color)
+            # Logging defaults
+            from ...core.settings import ChatLoggingSettings
+
+            log_defaults = ChatLoggingSettings()
+            self.log_enabled_cb.setChecked(log_defaults.enabled)
+            self.log_disk_spin.setValue(log_defaults.max_disk_mb)
+            for i in range(self.log_format_combo.count()):
+                if self.log_format_combo.itemData(i) == log_defaults.log_format:
+                    self.log_format_combo.setCurrentIndex(i)
+                    break
+            self.log_history_cb.setChecked(log_defaults.load_history_on_open)
+            self.log_history_spin.setValue(log_defaults.history_lines)
             self._on_chat_changed()
 
     def _on_twitch_login(self):
@@ -2042,9 +2252,7 @@ class PreferencesDialog(QDialog):
         builtin = self.app.settings.chat.builtin
         current = builtin.user_notes.get(user_key, "")
         display = builtin.user_note_display_names.get(user_key, user_key)
-        text, ok = QInputDialog.getText(
-            self, "Edit Note", f"Note for {display}:", text=current
-        )
+        text, ok = QInputDialog.getText(self, "Edit Note", f"Note for {display}:", text=current)
         if ok and text.strip():
             builtin.user_notes[user_key] = text.strip()
             self.app.save_settings()

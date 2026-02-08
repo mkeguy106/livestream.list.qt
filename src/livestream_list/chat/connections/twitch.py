@@ -296,9 +296,7 @@ class TwitchChatConnection(BaseChatConnection):
         url = f"https://recent-messages.robotty.de/api/v2/recent-messages/{channel}?limit=50&hideModeratedMessages=true"
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status != 200:
                         return
                     data = await resp.json()
@@ -313,9 +311,7 @@ class TwitchChatConnection(BaseChatConnection):
                     self._handle_privmsg(parsed)
 
             if self._message_batch:
-                logger.info(
-                    f"Loaded {len(self._message_batch)} recent messages for #{channel}"
-                )
+                logger.info(f"Loaded {len(self._message_batch)} recent messages for #{channel}")
                 self._flush_batch()
 
         except Exception as e:
@@ -340,8 +336,7 @@ class TwitchChatConnection(BaseChatConnection):
         try:
             if reply_to_msg_id:
                 await self._ws.send_str(
-                    f"@reply-parent-msg-id={reply_to_msg_id} "
-                    f"PRIVMSG #{self._channel_id} :{text}"
+                    f"@reply-parent-msg-id={reply_to_msg_id} PRIVMSG #{self._channel_id} :{text}"
                 )
             else:
                 await self._ws.send_str(f"PRIVMSG #{self._channel_id} :{text}")
@@ -617,6 +612,16 @@ class TwitchChatConnection(BaseChatConnection):
         else:
             timestamp = datetime.now(timezone.utc)
 
+        # Detect raid events
+        msg_id = tags.get("msg-id", "")
+        is_raid = msg_id == "raid"
+        raid_viewer_count = 0
+        if is_raid:
+            try:
+                raid_viewer_count = int(tags.get("msg-param-viewerCount", "0"))
+            except (ValueError, TypeError):
+                raid_viewer_count = 0
+
         message = ChatMessage(
             id=tags.get("id", str(uuid.uuid4())),
             user=user,
@@ -626,6 +631,8 @@ class TwitchChatConnection(BaseChatConnection):
             emote_positions=emote_positions,
             is_system=True,
             system_text=system_msg,
+            is_raid=is_raid,
+            raid_viewer_count=raid_viewer_count,
         )
 
         self._message_batch.append(message)

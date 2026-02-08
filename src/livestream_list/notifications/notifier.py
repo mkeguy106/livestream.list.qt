@@ -83,6 +83,61 @@ class Notifier:
             self.settings.backend = "auto"
             self._init_backend()
 
+    def _is_quiet_hours(self) -> bool:
+        """Check if current time falls within quiet hours."""
+        if not self.settings.quiet_hours_enabled:
+            return False
+        try:
+            now = datetime.now().strftime("%H:%M")
+            start = self.settings.quiet_hours_start
+            end = self.settings.quiet_hours_end
+            if start <= end:
+                # Same-day range (e.g., 09:00 to 17:00)
+                return start <= now < end
+            else:
+                # Crosses midnight (e.g., 22:00 to 08:00)
+                return now >= start or now < end
+        except Exception:
+            return False
+
+    def _play_sound(self, sound_path: str | None = None) -> None:
+        """Play a notification sound file.
+
+        Args:
+            sound_path: Path to a sound file, or None to play the system default.
+        """
+        try:
+            if sound_path and os.path.isfile(sound_path):
+                # Custom sound file — play directly
+                for player_cmd in [
+                    ["paplay", sound_path],
+                    ["aplay", sound_path],
+                    ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", sound_path],
+                ]:
+                    if shutil.which(player_cmd[0]):
+                        subprocess.Popen(
+                            player_cmd,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        return
+            else:
+                # Default sound — play freedesktop sound file directly via paplay
+                # (canberra-gtk-play returns success but produces no audio from Qt)
+                for path in [
+                    "/usr/share/sounds/freedesktop/stereo/message-new-instant.oga",
+                    "/usr/share/sounds/freedesktop/stereo/message.oga",
+                ]:
+                    if os.path.isfile(path) and shutil.which("paplay"):
+                        subprocess.Popen(
+                            ["paplay", path],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        return
+        except Exception as e:
+            logger.warning(f"Failed to play notification sound: {e}")
+
     def update_settings(self, settings: NotificationSettings) -> None:
         """Update settings and reinitialize backend if needed."""
         old_backend = self.settings.backend
@@ -98,6 +153,15 @@ class Notifier:
         # Check if channel is excluded
         channel_key = livestream.channel.unique_key
         if channel_key in self.settings.excluded_channels:
+            return
+
+        # Check platform filter
+        platform_str = livestream.channel.platform.value
+        if platform_str not in self.settings.platform_filter:
+            return
+
+        # Check quiet hours
+        if self._is_quiet_hours():
             return
 
         # Build notification content
@@ -147,13 +211,26 @@ class Notifier:
                         )
                     )
 
+                # Map urgency setting
+                urgency_map = {
+                    "low": Urgency.Low,
+                    "normal": Urgency.Normal,
+                    "critical": Urgency.Critical,
+                }
+                urgency = urgency_map.get(self.settings.urgency, Urgency.Normal)
+
                 await self._notifier.send(
                     title=title,
                     message=body,
-                    urgency=Urgency.Normal,
+                    urgency=urgency,
                     buttons=buttons,  # Pass empty list, not None
                     sound=Sound(name="default") if self.settings.sound_enabled else None,
                 )
+
+                # Play custom sound if set
+                if self.settings.custom_sound_path:
+                    self._play_sound(self.settings.custom_sound_path)
+
                 return True
 
             elif self._backend == "notify-send":
@@ -201,6 +278,16 @@ class Notifier:
         if not is_test and channel_key in self.settings.excluded_channels:
             return
 
+        # Check platform filter (skip for test)
+        if not is_test:
+            platform_str = livestream.channel.platform.value
+            if platform_str not in self.settings.platform_filter:
+                return
+
+        # Check quiet hours (skip for test)
+        if not is_test and self._is_quiet_hours():
+            return
+
         # Store for Watch button callback
         self._pending_streams[channel_key] = livestream
 
@@ -233,9 +320,13 @@ class Notifier:
         else:
             return
 
-        if self.settings.sound_enabled:
-            # Use string hint for sound-name (freedesktop notification spec)
-            cmd.extend(["--hint", "string:sound-name:message-new-instant"])
+        # Urgency (only add when non-default)
+        if self.settings.urgency in ("low", "critical"):
+            cmd.extend(["--urgency", self.settings.urgency])
+
+        # Timeout (notify-send uses milliseconds)
+        if self.settings.timeout_seconds > 0:
+            cmd.extend(["--expire-time", str(self.settings.timeout_seconds * 1000)])
 
         subprocess.Popen(
             cmd,
@@ -243,8 +334,61 @@ class Notifier:
             stderr=subprocess.DEVNULL,
         )
 
+        # Play sound directly (notify-send hints don't work on all DEs)
+        if self.settings.sound_enabled:
+            self._play_sound(self.settings.custom_sound_path or None)
+
         if not is_test:
             self._log_notification(livestream)
+
+    def send_raid_notification_sync(
+        self, channel_name: str, raider_name: str, viewer_count: int
+    ) -> None:
+        """Send a raid notification synchronously.
+
+        Args:
+            channel_name: Display name of the channel being raided.
+            raider_name: Display name of the raider.
+            viewer_count: Number of viewers in the raid.
+        """
+        if not self.settings.raid_notifications_enabled:
+            return
+
+        if self._is_quiet_hours():
+            return
+
+        title = f"Raid on {channel_name}!"
+        body = f"{raider_name} raided with {viewer_count:,} viewers"
+
+        is_flatpak = os.path.exists("/.flatpak-info")
+        if is_flatpak:
+            cmd = [
+                "flatpak-spawn",
+                "--host",
+                "notify-send",
+                title,
+                body,
+                "--app-name=Livestream List (Qt)",
+            ]
+        elif shutil.which("notify-send"):
+            cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
+        else:
+            return
+
+        if self.settings.urgency in ("low", "critical"):
+            cmd.extend(["--urgency", self.settings.urgency])
+
+        if self.settings.timeout_seconds > 0:
+            cmd.extend(["--expire-time", str(self.settings.timeout_seconds * 1000)])
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        if self.settings.sound_enabled:
+            self._play_sound(self.settings.custom_sound_path or None)
 
     def _log_notification(self, livestream: Livestream) -> None:
         """Record a notification in the in-memory log (max 50 entries)."""

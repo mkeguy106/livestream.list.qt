@@ -743,6 +743,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
         self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
+        self.chat_manager.raid_received.connect(self._on_raid_received)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -810,6 +811,9 @@ class ChatWindow(QMainWindow):
             self.chat_manager.get_channel_emote_names(channel_key),
             self.chat_manager.get_user_emote_names(),
         )
+
+        # Load disk history if chat logging is enabled
+        widget.load_disk_history(self.chat_manager.chat_log_writer)
 
         # Apply current theme colors to the new widget
         widget.apply_theme()
@@ -891,6 +895,19 @@ class ChatWindow(QMainWindow):
         popout = self._popout_windows.get(channel_key)
         if popout and popout._widget:
             popout._widget.update_hype_train(event)
+
+    def _on_raid_received(self, channel_key: str, message: object) -> None:
+        """Route raid events to the correct chat widget."""
+        from ...chat.models import ChatMessage
+
+        if not isinstance(message, ChatMessage):
+            return
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.show_raid_banner(message)
+        popout = self._popout_windows.get(channel_key)
+        if popout and popout._widget:
+            popout._widget.show_raid_banner(message)
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - debounce repaint requests."""
