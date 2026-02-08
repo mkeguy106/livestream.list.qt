@@ -44,6 +44,7 @@ from .dialogs import (
 )
 from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
 from .theme import ThemeManager, get_app_stylesheet, get_theme
+from .window_utils import apply_always_on_top
 
 if TYPE_CHECKING:
     from .app import Application
@@ -413,6 +414,14 @@ class MainWindow(QMainWindow):
         prefs_action.setShortcut("Ctrl+,")
         prefs_action.triggered.connect(self.show_preferences_dialog)
 
+        # View menu
+        view_menu = menubar.addMenu("&View")
+
+        self._always_on_top_action = view_menu.addAction("Always on &Top")
+        self._always_on_top_action.setCheckable(True)
+        self._always_on_top_action.setChecked(self.app.settings.window.always_on_top)
+        self._always_on_top_action.toggled.connect(self._toggle_always_on_top)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -539,6 +548,9 @@ class MainWindow(QMainWindow):
             self._stream_delegate.invalidate_size_cache()
         # Apply theme
         self._apply_theme()
+        # Apply always-on-top (deferred so the window is fully mapped first)
+        if self.app.settings.window.always_on_top:
+            QTimer.singleShot(100, lambda: apply_always_on_top([self], True))
 
     def set_loading_complete(self):
         """Switch from loading view to appropriate content view."""
@@ -1232,7 +1244,12 @@ class MainWindow(QMainWindow):
                 imported_settings["twitch"] = current.get("twitch", {})
                 imported_settings["youtube"] = current.get("youtube", {})
                 imported_settings["kick"] = current.get("kick", {})
-                imported_settings["window"] = current.get("window", {})
+                # Merge window: keep current geometry but import preferences
+                current_window = current.get("window", {})
+                imported_window = imported_settings.get("window", {})
+                if "always_on_top" in imported_window:
+                    current_window["always_on_top"] = imported_window["always_on_top"]
+                imported_settings["window"] = current_window
                 # Also preserve close_to_tray_asked state
                 imported_settings["close_to_tray_asked"] = self.app.settings.close_to_tray_asked
                 # Apply imported settings
@@ -1398,6 +1415,12 @@ class MainWindow(QMainWindow):
         if dialog.restored_any:
             self.app.refresh(on_complete=lambda: self.set_status("Ready"))
             self.refresh_stream_list()
+
+    def _toggle_always_on_top(self, checked: bool) -> None:
+        """Toggle always-on-top for the main window."""
+        self.app.settings.window.always_on_top = checked
+        self.app.save_settings()
+        apply_always_on_top([self], checked)
 
     def _quit_app(self):
         """Quit the application (bypasses minimize-to-tray)."""

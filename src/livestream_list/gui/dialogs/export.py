@@ -91,9 +91,12 @@ class ExportDialog(QDialog):
                     settings_dict["youtube"] = {}  # Don't export API key
                 if "kick" in settings_dict:
                     settings_dict["kick"] = {}  # Don't export tokens
-                # Remove window geometry (machine-specific)
+                # Remove window geometry (machine-specific) but keep preferences
                 if "window" in settings_dict:
-                    del settings_dict["window"]
+                    window_prefs = {
+                        "always_on_top": settings_dict["window"].get("always_on_top", False),
+                    }
+                    settings_dict["window"] = window_prefs
                 data["settings"] = settings_dict
 
             with open(file_path, "w") as f:

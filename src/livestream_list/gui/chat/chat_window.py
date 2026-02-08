@@ -20,11 +20,17 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.manager import ChatManager
-from ...chat.models import ModerationEvent
+from ...chat.models import HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
 from ..theme import PLATFORM_COLORS as THEME_PLATFORM_COLORS
 from ..theme import ThemeManager, get_theme
+from ..window_utils import (
+    apply_always_on_top,
+    apply_always_on_top_qt,
+    is_kde_plasma,
+    kwin_set_keep_above,
+)
 from .chat_widget import ChatWidget
 
 logger = logging.getLogger(__name__)
@@ -565,6 +571,10 @@ class ChatWindow(QMainWindow):
         tab_bar = self._tab_widget.tabBar()
         tab_bar.context_menu_requested.connect(self._on_tab_context_menu)
 
+        # Apply always-on-top from saved settings (deferred so window is mapped first)
+        if self.settings.chat.builtin.always_on_top:
+            QTimer.singleShot(100, lambda: self._on_always_on_top_changed(True))
+
         # Apply theme styling (sets tab colors from theme)
         self.apply_theme()
 
@@ -732,6 +742,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
         self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
+        self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -789,6 +800,7 @@ class ChatWindow(QMainWindow):
         widget.font_size_changed.connect(self._on_font_size_changed)
         widget.settings_changed.connect(self._on_settings_changed)
         widget.whisper_requested.connect(self._on_whisper_request_from_chat)
+        widget.always_on_top_changed.connect(self._on_always_on_top_changed)
 
         # Set shared image store and emote map on the widget
         widget.set_image_store(self.chat_manager.emote_cache)
@@ -867,6 +879,18 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget and isinstance(state, ChatRoomState):
             widget.update_room_state(state)
+
+    def _on_hype_train_event(self, channel_key: str, event: object) -> None:
+        """Route hype train events to the correct chat widget."""
+        if not isinstance(event, HypeTrainEvent):
+            return
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.update_hype_train(event)
+        # Also route to popout if applicable
+        popout = self._popout_windows.get(channel_key)
+        if popout and popout._widget:
+            popout._widget.update_hype_train(event)
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - debounce repaint requests."""
@@ -1298,6 +1322,11 @@ class ChatWindow(QMainWindow):
         popout.closed.connect(lambda key=channel_key: self._on_popout_closed(key))
         self._popout_windows[channel_key] = popout
         popout.show()
+        if self.settings.chat.builtin.always_on_top:
+            if is_kde_plasma():
+                QTimer.singleShot(100, lambda p=popout: kwin_set_keep_above([p], True))
+            else:
+                apply_always_on_top_qt(popout, True)
 
     def _on_popin_requested(self, channel_key: str) -> None:
         """Re-dock a popped-out chat widget."""
@@ -1326,6 +1355,11 @@ class ChatWindow(QMainWindow):
         """Handle popout window being closed (disconnect chat)."""
         self._popout_windows.pop(channel_key, None)
         self.close_chat(channel_key)
+
+    def _on_always_on_top_changed(self, on_top: bool) -> None:
+        """Apply always-on-top to the main chat window and all popouts."""
+        windows = [self] + list(self._popout_windows.values())
+        apply_always_on_top(windows, on_top)
 
     def save_window_state(self) -> None:
         """Save window position and size to settings."""

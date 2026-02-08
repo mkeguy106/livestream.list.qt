@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
+    QProgressBar,
     QPushButton,
     QStyle,
     QStyleOptionFrame,
@@ -35,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.emotes.cache import EmoteCache
-from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, ModerationEvent
+from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
@@ -381,6 +382,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
     font_size_changed = Signal(int)  # new font size
     settings_changed = Signal()  # any chat setting toggled
     whisper_requested = Signal(str, str)  # partner_display_name, partner_user_id
+    always_on_top_changed = Signal(bool)
 
     def __init__(
         self,
@@ -580,6 +582,71 @@ class ChatWidget(QWidget, ChatSearchMixin):
         hype_layout.addWidget(hype_dismiss)
         self._hype_banner.hide()
         layout.addWidget(self._hype_banner)
+
+        # Hype Train progress banner (hidden by default)
+        self._hype_train_banner = QWidget()
+        self._hype_train_banner.setStyleSheet("""
+            QWidget {
+                background-color: #2d1b69;
+                border: 1px solid #6441a5;
+                border-radius: 4px;
+            }
+        """)
+        ht_outer = QVBoxLayout(self._hype_train_banner)
+        ht_outer.setContentsMargins(8, 4, 4, 4)
+        ht_outer.setSpacing(3)
+        # Top row: level label + dismiss button
+        ht_top = QHBoxLayout()
+        ht_top.setSpacing(4)
+        self._hype_train_level_label = QLabel()
+        self._hype_train_level_label.setStyleSheet(
+            "color: #b9a3e3; font-size: 11px; font-weight: bold; border: none;"
+        )
+        ht_top.addWidget(self._hype_train_level_label, 1)
+        ht_dismiss = QPushButton("\u2715")
+        ht_dismiss.setFixedSize(20, 20)
+        ht_dismiss.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #aaa;
+                border: none;
+                font-size: 12px;
+            }
+            QPushButton:hover { color: #fff; }
+        """)
+        ht_dismiss.clicked.connect(self._dismiss_hype_train_banner)
+        ht_top.addWidget(ht_dismiss)
+        ht_outer.addLayout(ht_top)
+        # Progress bar
+        self._hype_train_progress = QProgressBar()
+        self._hype_train_progress.setFixedHeight(10)
+        self._hype_train_progress.setTextVisible(False)
+        self._hype_train_progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #1a0f3d;
+                border: none;
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                background-color: #9146ff;
+                border-radius: 4px;
+            }
+        """)
+        ht_outer.addWidget(self._hype_train_progress)
+        # Countdown label
+        self._hype_train_countdown = QLabel()
+        self._hype_train_countdown.setStyleSheet(
+            "color: #8b7ab8; font-size: 10px; border: none;"
+        )
+        ht_outer.addWidget(self._hype_train_countdown)
+        self._hype_train_banner.hide()
+        layout.addWidget(self._hype_train_banner)
+        # Timer for hype train countdown
+        self._hype_train_timer = QTimer(self)
+        self._hype_train_timer.setInterval(1000)
+        self._hype_train_timer.timeout.connect(self._hype_train_tick)
+        self._hype_train_expires_at: str = ""
+        self._hype_train_auto_hide_timer: QTimer | None = None
 
         # New messages indicator (hidden by default)
         self._new_msg_button = QPushButton("New messages")
@@ -1516,6 +1583,70 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Dismiss the hype chat pinned banner."""
         self._hype_banner.hide()
 
+    def update_hype_train(self, event: HypeTrainEvent) -> None:
+        """Update the hype train banner based on an EventSub event."""
+        # Cancel any pending auto-hide
+        if self._hype_train_auto_hide_timer:
+            self._hype_train_auto_hide_timer.stop()
+
+        if event.type in ("begin", "progress"):
+            self._hype_train_level_label.setText(
+                f"Hype Train \u2014 Level {event.level}"
+            )
+            self._hype_train_progress.setMaximum(max(event.goal, 1))
+            self._hype_train_progress.setValue(min(event.total, event.goal))
+            self._hype_train_expires_at = event.expires_at
+            self._hype_train_tick()  # Update countdown immediately
+            self._hype_train_timer.start()
+            self._hype_train_banner.show()
+        elif event.type == "end":
+            self._hype_train_timer.stop()
+            self._hype_train_level_label.setText(
+                f"Hype Train Complete! Level {event.level}"
+            )
+            self._hype_train_progress.setMaximum(1)
+            self._hype_train_progress.setValue(1)
+            self._hype_train_countdown.setText("")
+            self._hype_train_banner.show()
+            # Auto-hide after 10 seconds
+            self._hype_train_auto_hide_timer = QTimer(self)
+            self._hype_train_auto_hide_timer.setSingleShot(True)
+            self._hype_train_auto_hide_timer.setInterval(10000)
+            self._hype_train_auto_hide_timer.timeout.connect(self._auto_hide_hype_train)
+            self._hype_train_auto_hide_timer.start()
+
+    def _hype_train_tick(self) -> None:
+        """Update hype train countdown each second."""
+        if not self._hype_train_expires_at:
+            self._hype_train_countdown.setText("")
+            return
+        from datetime import datetime, timezone
+
+        try:
+            expires = datetime.fromisoformat(
+                self._hype_train_expires_at.replace("Z", "+00:00")
+            )
+            remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                self._hype_train_countdown.setText("Expiring...")
+                self._hype_train_timer.stop()
+            else:
+                mins, secs = divmod(int(remaining), 60)
+                self._hype_train_countdown.setText(f"{mins}:{secs:02d} remaining")
+        except (ValueError, TypeError):
+            self._hype_train_countdown.setText("")
+
+    def _dismiss_hype_train_banner(self) -> None:
+        """Dismiss the hype train banner."""
+        self._hype_train_timer.stop()
+        self._hype_train_banner.hide()
+        if self._hype_train_auto_hide_timer:
+            self._hype_train_auto_hide_timer.stop()
+
+    def _auto_hide_hype_train(self) -> None:
+        """Auto-hide the hype train banner after train ends."""
+        self._hype_train_banner.hide()
+
     def _start_reply(self, message: ChatMessage) -> None:
         """Enter reply mode for the given message."""
         self._reply_to_msg = message
@@ -1935,6 +2066,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         hover_action.setChecked(self.settings.user_card_hover)
         hover_action.toggled.connect(self._toggle_user_card_hover)
 
+        # Always on top toggle
+        aot_action = menu.addAction("Always on Top")
+        aot_action.setCheckable(True)
+        aot_action.setChecked(self.settings.always_on_top)
+        aot_action.toggled.connect(self._toggle_always_on_top)
+
         menu.addSeparator()
 
         more_action = menu.addAction("More Settings...")
@@ -1988,6 +2125,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if not checked:
             self._card_hover_timer.stop()
             self._card_hover_user = None
+        self.settings_changed.emit()
+
+    def _toggle_always_on_top(self, checked: bool) -> None:
+        """Toggle always on top."""
+        self.settings.always_on_top = checked
+        self.always_on_top_changed.emit(checked)
         self.settings_changed.emit()
 
     def eventFilter(self, obj, event):  # noqa: N802

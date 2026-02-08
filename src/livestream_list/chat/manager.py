@@ -17,7 +17,7 @@ from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW, EmoteCa
 from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
 from .emotes.matcher import find_third_party_emotes
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
-from .models import ChatBadge, ChatEmote, ChatMessage, ChatUser
+from .models import ChatBadge, ChatEmote, ChatMessage, ChatUser, HypeTrainEvent
 
 logger = logging.getLogger(__name__)
 
@@ -1102,6 +1102,230 @@ class WhisperEventSubWorker(QThread):
         return None
 
 
+class HypeTrainEventSubWorker(QThread):
+    """Worker thread that connects to Twitch EventSub WebSocket for hype train events.
+
+    Supports dynamic subscribe/unsubscribe per channel via thread-safe methods.
+    Subscribes to channel.hype_train.begin, .progress, and .end.
+    """
+
+    hype_train_event = Signal(str, object)  # channel_key, HypeTrainEvent
+
+    def __init__(self, oauth_token: str, client_id: str, parent=None):
+        super().__init__(parent)
+        self.oauth_token = oauth_token
+        self.client_id = client_id
+        self._should_stop = False
+        # channel_key -> broadcaster_id
+        self._channels: dict[str, str] = {}
+        self._pending_subscribe: list[tuple[str, str]] = []  # (channel_key, broadcaster_id)
+        self._pending_unsubscribe: list[str] = []  # channel_keys
+        import threading
+
+        self._lock = threading.Lock()
+
+    def subscribe_channel(self, channel_key: str, broadcaster_id: str) -> None:
+        """Thread-safe request to subscribe to hype train events for a channel."""
+        with self._lock:
+            self._pending_subscribe.append((channel_key, broadcaster_id))
+
+    def unsubscribe_channel(self, channel_key: str) -> None:
+        """Thread-safe request to unsubscribe from a channel's hype train events."""
+        with self._lock:
+            self._pending_unsubscribe.append(channel_key)
+
+    def stop(self):
+        self._should_stop = True
+
+    def run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._run_eventsub())
+        except Exception as e:
+            if not self._should_stop:
+                logger.error(f"HypeTrainEventSub error: {e}")
+        finally:
+            loop.close()
+
+    async def _run_eventsub(self):
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            while not self._should_stop:
+                try:
+                    await self._connect_and_listen(session)
+                except Exception as e:
+                    if self._should_stop:
+                        return
+                    logger.warning(
+                        f"HypeTrainEventSub connection error: {e}, reconnecting in 5s"
+                    )
+                    await asyncio.sleep(5)
+
+    async def _connect_and_listen(self, session):
+        import aiohttp
+
+        async with session.ws_connect(
+            EVENTSUB_WS_URL, timeout=aiohttp.ClientTimeout(total=30)
+        ) as ws:
+            welcome = await asyncio.wait_for(ws.receive_json(), timeout=15)
+            if welcome.get("metadata", {}).get("message_type") != "session_welcome":
+                logger.warning(f"HypeTrainEventSub: unexpected first message: {welcome}")
+                return
+
+            session_id = welcome["payload"]["session"]["id"]
+            keepalive_timeout = welcome["payload"]["session"].get(
+                "keepalive_timeout_seconds", 30
+            )
+            logger.info(f"HypeTrainEventSub connected, session={session_id}")
+
+            # Subscribe all currently tracked channels
+            with self._lock:
+                for channel_key, broadcaster_id in self._channels.items():
+                    await self._subscribe_channel(session, session_id, broadcaster_id)
+                self._pending_subscribe.clear()
+                self._pending_unsubscribe.clear()
+
+            while not self._should_stop:
+                # Process pending subscribe/unsubscribe requests
+                with self._lock:
+                    subs = list(self._pending_subscribe)
+                    self._pending_subscribe.clear()
+                    unsubs = list(self._pending_unsubscribe)
+                    self._pending_unsubscribe.clear()
+
+                for channel_key, broadcaster_id in subs:
+                    self._channels[channel_key] = broadcaster_id
+                    await self._subscribe_channel(session, session_id, broadcaster_id)
+
+                for channel_key in unsubs:
+                    self._channels.pop(channel_key, None)
+
+                try:
+                    msg = await asyncio.wait_for(
+                        ws.receive(), timeout=min(keepalive_timeout + 10, 5)
+                    )
+                except asyncio.TimeoutError:
+                    # Check for pending operations on timeout
+                    continue
+
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    import json
+
+                    data = json.loads(msg.data)
+                    msg_type = data.get("metadata", {}).get("message_type", "")
+
+                    if msg_type == "notification":
+                        self._handle_notification(data)
+                    elif msg_type == "session_keepalive":
+                        pass
+                    elif msg_type == "session_reconnect":
+                        logger.info("HypeTrainEventSub: reconnect requested")
+                        return
+                    elif msg_type == "revocation":
+                        reason = (
+                            data.get("payload", {})
+                            .get("subscription", {})
+                            .get("status", "unknown")
+                        )
+                        logger.warning(f"HypeTrainEventSub: subscription revoked: {reason}")
+
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSED,
+                    aiohttp.WSMsgType.ERROR,
+                ):
+                    return
+
+    async def _subscribe_channel(
+        self, session, session_id: str, broadcaster_id: str
+    ) -> None:
+        """Subscribe to all 3 hype train event types for a broadcaster."""
+        event_types = [
+            ("channel.hype_train.begin", "1"),
+            ("channel.hype_train.progress", "1"),
+            ("channel.hype_train.end", "1"),
+        ]
+        headers = {
+            "Authorization": f"Bearer {self.oauth_token}",
+            "Client-Id": self.client_id,
+            "Content-Type": "application/json",
+        }
+        for event_type, version in event_types:
+            payload = {
+                "type": event_type,
+                "version": version,
+                "condition": {"broadcaster_user_id": broadcaster_id},
+                "transport": {"method": "websocket", "session_id": session_id},
+            }
+            try:
+                async with session.post(
+                    "https://api.twitch.tv/helix/eventsub/subscriptions",
+                    json=payload,
+                    headers=headers,
+                    timeout=__import__("aiohttp").ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status in (200, 202):
+                        logger.debug(
+                            f"HypeTrainEventSub: subscribed to {event_type} "
+                            f"for broadcaster {broadcaster_id}"
+                        )
+                    else:
+                        body = await resp.text()
+                        logger.warning(
+                            f"HypeTrainEventSub: subscribe failed for {event_type} "
+                            f"(HTTP {resp.status}): {body}"
+                        )
+            except Exception as e:
+                logger.warning(f"HypeTrainEventSub: subscribe error for {event_type}: {e}")
+
+    def _handle_notification(self, data: dict) -> None:
+        """Parse an EventSub hype train notification into a HypeTrainEvent."""
+        sub_type = data.get("payload", {}).get("subscription", {}).get("type", "")
+        event = data.get("payload", {}).get("event", {})
+        broadcaster_id = event.get("broadcaster_user_id", "")
+
+        # Find channel_key for this broadcaster_id
+        channel_key = ""
+        with self._lock:
+            for key, bid in self._channels.items():
+                if bid == broadcaster_id:
+                    channel_key = key
+                    break
+
+        if not channel_key:
+            logger.debug(
+                f"HypeTrainEventSub: notification for unknown broadcaster {broadcaster_id}"
+            )
+            return
+
+        # Determine event type
+        if sub_type == "channel.hype_train.begin":
+            ht_type = "begin"
+        elif sub_type == "channel.hype_train.progress":
+            ht_type = "progress"
+        elif sub_type == "channel.hype_train.end":
+            ht_type = "end"
+        else:
+            return
+
+        ht_event = HypeTrainEvent(
+            type=ht_type,
+            level=event.get("level", 1),
+            total=event.get("total", 0),
+            goal=event.get("goal", 0),
+            started_at=event.get("started_at", ""),
+            expires_at=event.get("expires_at", ""),
+            ended_at=event.get("ended_at", ""),
+        )
+
+        logger.info(
+            f"HypeTrainEventSub: {ht_type} for {channel_key} "
+            f"level={ht_event.level} total={ht_event.total}/{ht_event.goal}"
+        )
+        self.hype_train_event.emit(channel_key, ht_event)
+
+
 class ChatManager(QObject):
     """Manages chat connections and coordinates with the UI.
 
@@ -1140,6 +1364,8 @@ class ChatManager(QObject):
     chat_reconnecting = Signal(str, float)
     # Emitted when reconnection attempts are exhausted (channel_key)
     chat_reconnect_failed = Signal(str)
+    # Emitted on hype train events (channel_key, HypeTrainEvent)
+    hype_train_event = Signal(str, object)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1205,6 +1431,11 @@ class ChatManager(QObject):
 
         # Whisper EventSub worker (receives Twitch whispers via EventSub WebSocket)
         self._whisper_worker: WhisperEventSubWorker | None = None
+
+        # Hype Train EventSub worker
+        self._hype_train_worker: HypeTrainEventSubWorker | None = None
+        # channel_key -> broadcaster numeric ID (from ROOMSTATE room-id)
+        self._twitch_broadcaster_ids: dict[str, str] = {}
 
         # Kick off global/user emote fetch in background
         self._ensure_global_emotes()
@@ -1326,6 +1557,11 @@ class ChatManager(QObject):
         connection.room_state_changed.connect(
             lambda state, key=channel_key: self.room_state_changed.emit(key, state)
         )
+        # Track broadcaster ID for Twitch hype train subscriptions
+        if livestream.channel.platform == StreamPlatform.TWITCH:
+            connection.broadcaster_id_resolved.connect(
+                lambda bid, key=channel_key: self._on_broadcaster_id_resolved(key, bid)
+            )
 
         self._connections[channel_key] = connection
 
@@ -1450,6 +1686,11 @@ class ChatManager(QObject):
         self._disconnect_connection_signals(channel_key)
 
         self._livestreams.pop(channel_key, None)
+
+        # Unsubscribe from hype train events
+        self._twitch_broadcaster_ids.pop(channel_key, None)
+        if self._hype_train_worker:
+            self._hype_train_worker.unsubscribe_channel(channel_key)
 
         # Clean up emote fetch worker and clear emote cache timestamps
         # so reopening the chat fetches fresh emotes
@@ -1804,6 +2045,42 @@ class ChatManager(QObject):
             self._whisper_worker.wait(2000)
             self._whisper_worker = None
 
+    def _on_broadcaster_id_resolved(self, channel_key: str, broadcaster_id: str) -> None:
+        """Handle broadcaster ID resolved from ROOMSTATE room-id tag."""
+        if channel_key in self._twitch_broadcaster_ids:
+            return  # Already known
+        self._twitch_broadcaster_ids[channel_key] = broadcaster_id
+        logger.debug(f"Broadcaster ID for {channel_key}: {broadcaster_id}")
+        self._ensure_hype_train_listener()
+        if self._hype_train_worker:
+            self._hype_train_worker.subscribe_channel(channel_key, broadcaster_id)
+
+    def _ensure_hype_train_listener(self) -> None:
+        """Start the hype train EventSub listener if Twitch auth is available."""
+        if not self.settings.twitch.access_token:
+            return
+        if self._hype_train_worker and self._hype_train_worker.isRunning():
+            return
+        client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
+        self._hype_train_worker = HypeTrainEventSubWorker(
+            oauth_token=self.settings.twitch.access_token,
+            client_id=client_id,
+            parent=self,
+        )
+        self._hype_train_worker.hype_train_event.connect(
+            lambda key, evt: self.hype_train_event.emit(key, evt)
+        )
+        self._hype_train_worker.start()
+        logger.info("Started HypeTrainEventSub listener")
+
+    def _stop_hype_train_listener(self) -> None:
+        """Stop the hype train EventSub listener."""
+        if self._hype_train_worker:
+            self._hype_train_worker.stop()
+            self._hype_train_worker.wait(2000)
+            self._hype_train_worker = None
+        self._twitch_broadcaster_ids.clear()
+
     def disconnect_all(self) -> None:
         """Disconnect all active chat connections."""
         for key in list(self._workers.keys()):
@@ -1811,6 +2088,7 @@ class ChatManager(QObject):
         self._prefetch_timer.stop()
         self._message_flush_timer.stop()
         self._stop_whisper_listener()
+        self._stop_hype_train_listener()
 
         # Clean up global emote/badge state when all chats are closed
         # This prevents unbounded memory growth in long-running sessions

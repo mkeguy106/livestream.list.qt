@@ -81,6 +81,19 @@ class ChatRoomState:
 
 
 @dataclass
+class HypeTrainEvent:
+    """Represents a Twitch Hype Train event."""
+
+    type: str  # "begin", "progress", "end"
+    level: int = 1
+    total: int = 0
+    goal: int = 0
+    started_at: str = ""
+    expires_at: str = ""
+    ended_at: str = ""
+
+
+@dataclass
 class ModerationEvent:
     """Represents a moderation action (ban, timeout, delete)."""
 

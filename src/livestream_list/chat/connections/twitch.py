@@ -564,6 +564,10 @@ class TwitchChatConnection(BaseChatConnection):
     def _handle_roomstate(self, parsed: dict) -> None:
         """Handle ROOMSTATE (chat mode changes)."""
         tags = parsed["tags"]
+        # Emit broadcaster ID from room-id tag (present on initial join)
+        room_id = tags.get("room-id", "")
+        if room_id:
+            self.broadcaster_id_resolved.emit(room_id)
         state = ChatRoomState(
             slow=int(tags.get("slow", "0")),
             subs_only=tags.get("subs-only", "0") == "1",

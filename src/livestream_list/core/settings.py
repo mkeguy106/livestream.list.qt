@@ -113,6 +113,7 @@ class WindowSettings:
     x: int | None = None
     y: int | None = None
     maximized: bool = False
+    always_on_top: bool = False
 
 
 @dataclass
@@ -181,6 +182,7 @@ class BuiltinChatSettings:
     spellcheck_enabled: bool = True
     moderated_message_display: str = "strikethrough"  # strikethrough, truncated, hidden
     user_card_hover: bool = True
+    always_on_top: bool = False
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
     # Theme-specific color settings
     dark_colors: ChatColorSettings = field(default_factory=ChatColorSettings)
@@ -523,6 +525,7 @@ class Settings:
                 x=w.get("x"),
                 y=w.get("y"),
                 maximized=bool(w.get("maximized", False)),
+                always_on_top=bool(w.get("always_on_top", False)),
             )
 
         # Chat
@@ -649,6 +652,7 @@ class Settings:
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 user_card_hover=builtin_data.get("user_card_hover", True),
+                always_on_top=builtin_data.get("always_on_top", False),
                 moderated_message_display=builtin_data.get(
                     "moderated_message_display", "strikethrough"
                 ),
@@ -778,6 +782,7 @@ class Settings:
                 "x": self.window.x,
                 "y": self.window.y,
                 "maximized": self.window.maximized,
+                "always_on_top": self.window.always_on_top,
             },
             "chat": {
                 "enabled": self.chat.enabled,
@@ -812,6 +817,7 @@ class Settings:
                     "show_socials_banner": self.chat.builtin.show_socials_banner,
                     "spellcheck_enabled": self.chat.builtin.spellcheck_enabled,
                     "user_card_hover": self.chat.builtin.user_card_hover,
+                    "always_on_top": self.chat.builtin.always_on_top,
                     "moderated_message_display": self.chat.builtin.moderated_message_display,
                     "dark_colors": {
                         "alt_row_color_even": self.chat.builtin.dark_colors.alt_row_color_even,

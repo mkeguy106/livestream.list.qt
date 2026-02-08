@@ -35,6 +35,8 @@ class BaseChatConnection(QObject):
     connected = Signal()
     disconnected = Signal()
     error = Signal(str)
+    # Emitted when broadcaster user ID is resolved (e.g., from ROOMSTATE room-id)
+    broadcaster_id_resolved = Signal(str)
 
     def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
