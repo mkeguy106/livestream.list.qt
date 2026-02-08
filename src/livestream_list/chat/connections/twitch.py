@@ -293,7 +293,7 @@ class TwitchChatConnection(BaseChatConnection):
 
     async def _load_recent_messages(self, channel: str) -> None:
         """Fetch recent chat history from the recent-messages API."""
-        url = f"https://recent-messages.robotty.de/api/v2/recent-messages/{channel}?limit=50"
+        url = f"https://recent-messages.robotty.de/api/v2/recent-messages/{channel}?limit=50&hideModeratedMessages=true"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
@@ -435,6 +435,11 @@ class TwitchChatConnection(BaseChatConnection):
         """Handle a PRIVMSG (chat message)."""
         tags = parsed["tags"]
         text = parsed["trailing"]
+
+        # Fallback: single-word messages may omit the ":" trailing prefix
+        # e.g. "PRIVMSG #channel word" instead of "PRIVMSG #channel :word"
+        if not text and len(parsed["params"]) > 1:
+            text = parsed["params"][-1]
 
         # Check for /me action
         is_action = False
