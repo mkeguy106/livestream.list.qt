@@ -58,10 +58,13 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Deleted message options (strikethrough, truncated, or hidden)
   - Chat log export to text file
   - Emote autocomplete prioritizes recently used emotes
-  - Emote picker popup (Ctrl+E) — searchable grid of emotes by provider
+  - Emote picker popup (Ctrl+E) — searchable grid organized by provider, channel emotes first with separator
+  - Sub-only channel emotes greyed out with "Subscribe to use" tooltip
   - In-chat search with predicates (Ctrl+F) — from:user, has:link, is:sub, is:mod
   - Link tooltip previews — hover URLs to see page title
   - Zero-width emotes — 7TV overlay emotes that stack on other emotes
+  - User card on hover — hover username to see profile image, bio, followers, follow age, pronouns
+  - User card text selectable and copyable (Ctrl+C or right-click)
 - **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox

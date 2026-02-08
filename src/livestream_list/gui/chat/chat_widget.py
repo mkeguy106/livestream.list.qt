@@ -425,6 +425,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._slow_mode_timer.setInterval(1000)
         self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
         self._emotes_by_provider: dict[str, list] = {}
+        self._channel_emote_names: set[str] = set()
+        self._locked_emote_names: set[str] = set()
         self._link_preview_cache = LinkPreviewCache()
         # User card hover state
         self._card_hover_timer = QTimer(self)
@@ -951,15 +953,36 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._delegate.set_image_store(store)
         self._emote_completer.set_image_store(store)
 
-    def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
+    def set_emote_map(
+        self,
+        emote_map: dict[str, ChatEmote],
+        channel_emote_names: set[str] | None = None,
+        user_emote_names: set[str] | None = None,
+    ) -> None:
         """Set the emote map for autocomplete and emote picker."""
         self._emote_completer.set_emotes(emote_map)
         if self._spell_checker:
             self._spell_checker.dictionary.set_emote_names(set(emote_map.keys()))
-        # Group emotes by provider for the emote picker
+        # Group emotes by provider, channel-specific first in each group
+        self._channel_emote_names = channel_emote_names or set()
+        user_names = user_emote_names or set()
+        # Determine locked emotes: platform channel emotes user can't use
+        self._locked_emote_names: set[str] = set()
+        for name in self._channel_emote_names:
+            emote = emote_map.get(name)
+            if emote and emote.provider in ("twitch", "kick") and name not in user_names:
+                self._locked_emote_names.add(name)
         by_provider: dict[str, list[ChatEmote]] = {}
         for emote in emote_map.values():
             by_provider.setdefault(emote.provider, []).append(emote)
+        # Sort each provider: channel emotes first, then alphabetical
+        for provider in by_provider:
+            by_provider[provider].sort(
+                key=lambda e: (
+                    0 if e.name in self._channel_emote_names else 1,
+                    e.name.lower(),
+                )
+            )
         self._emotes_by_provider = by_provider
 
     def _current_scale(self) -> float:
@@ -2214,11 +2237,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if not self._card_hover_user:
             return
         # Skip if the card for this exact user is already showing
-        if (
-            self._active_user_card
-            and self._active_user_card._user.id == self._card_hover_user.id
-        ):
-            return
+        try:
+            if (
+                self._active_user_card
+                and self._active_user_card.isVisible()
+                and self._active_user_card._user.id == self._card_hover_user.id
+            ):
+                return
+        except RuntimeError:
+            # C++ object deleted
+            self._active_user_card = None
         self._show_user_card(self._card_hover_user, self._card_hover_pos)
 
     def _show_user_card(self, user, pos) -> None:
@@ -2230,7 +2258,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Close any existing user card
         if self._active_user_card:
-            self._active_user_card.close()
+            try:
+                self._active_user_card.close()
+            except RuntimeError:
+                pass  # C++ object already deleted
             self._active_user_card = None
 
         # Count messages from this user
@@ -2250,16 +2281,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
         card.history_requested.connect(lambda u=user: self._show_user_history(u))
         card.show_at(pos)
         self._active_user_card = card
-        card.destroyed.connect(lambda: self._clear_active_card(card))
 
         # Async fetch for Twitch users
         if user.platform == StreamPlatform.TWITCH:
             self._fetch_user_card_info(card, user.name)
 
-    def _clear_active_card(self, card) -> None:
-        """Clear the active card reference when it's destroyed."""
-        if self._active_user_card is card:
-            self._active_user_card = None
 
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
         """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
@@ -2328,7 +2354,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _show_emote_picker(self) -> None:
         """Show the emote picker popup above the emote button."""
         if self._emotes_by_provider:
-            self._emote_picker.set_emotes(self._emotes_by_provider)
+            self._emote_picker.set_emotes(
+                self._emotes_by_provider,
+                self._channel_emote_names,
+                self._locked_emote_names,
+            )
         if self._image_store:
             self._emote_picker.set_image_store(self._image_store)
         # Refresh any buttons that were created before their images loaded

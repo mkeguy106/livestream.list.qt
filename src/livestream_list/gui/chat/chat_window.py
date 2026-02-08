@@ -793,7 +793,11 @@ class ChatWindow(QMainWindow):
         # Set shared image store and emote map on the widget
         widget.set_image_store(self.chat_manager.emote_cache)
         widget.set_gif_timer(self.chat_manager.gif_timer)
-        widget.set_emote_map(self.chat_manager.get_emote_map(channel_key))
+        widget.set_emote_map(
+            self.chat_manager.get_emote_map(channel_key),
+            self.chat_manager.get_channel_emote_names(channel_key),
+            self.chat_manager.get_user_emote_names(),
+        )
 
         # Apply current theme colors to the new widget
         widget.apply_theme()
@@ -875,8 +879,13 @@ class ChatWindow(QMainWindow):
         if not self._emote_repaint_pending:
             return
         self._emote_repaint_pending = False
+        user_emote_names = self.chat_manager.get_user_emote_names()
         for widget in self._widgets.values():
-            widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
+            widget.set_emote_map(
+                self.chat_manager.get_emote_map(widget.channel_key),
+                self.chat_manager.get_channel_emote_names(widget.channel_key),
+                user_emote_names,
+            )
             widget.repaint_messages()
             # Refresh emote picker icons if it's currently visible
             if widget._emote_picker.isVisible():
@@ -973,7 +982,11 @@ class ChatWindow(QMainWindow):
         widget = self._tab_widget.widget(index)
         if isinstance(widget, ChatWidget):
             # Update emote map and repaint when tab becomes active
-            widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
+            widget.set_emote_map(
+                self.chat_manager.get_emote_map(widget.channel_key),
+                self.chat_manager.get_channel_emote_names(widget.channel_key),
+                self.chat_manager.get_user_emote_names(),
+            )
             widget.repaint_messages()
 
     def _on_tab_close(self, index: int) -> None:

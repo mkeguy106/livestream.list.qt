@@ -1272,6 +1272,14 @@ class ChatManager(QObject):
             return self._resolved_emote_maps[channel_key]
         return self._rebuild_emote_map(channel_key)
 
+    def get_channel_emote_names(self, channel_key: str) -> set[str]:
+        """Get names of channel-specific emotes (not global)."""
+        return set(self._channel_emote_maps.get(channel_key, {}).keys())
+
+    def get_user_emote_names(self) -> set[str]:
+        """Get names of emotes the authenticated user can use (subscriptions etc)."""
+        return set(self._user_emotes.keys())
+
     def open_chat(self, livestream: Livestream) -> None:
         """Open a chat connection for a livestream."""
         channel_key = livestream.channel.unique_key
@@ -1443,10 +1451,14 @@ class ChatManager(QObject):
 
         self._livestreams.pop(channel_key, None)
 
-        # Clean up emote fetch worker
+        # Clean up emote fetch worker and clear emote cache timestamps
+        # so reopening the chat fetches fresh emotes
         fetch_worker = self._emote_fetch_workers.pop(channel_key, None)
         if fetch_worker and fetch_worker.isRunning():
             fetch_worker.wait(500)
+        self._channel_emotes_fetched_at.pop(channel_key, None)
+        self._channel_emote_maps.pop(channel_key, None)
+        self._resolved_emote_maps.pop(channel_key, None)
 
         self.chat_closed.emit(channel_key)
         self._update_prefetch_targets()
