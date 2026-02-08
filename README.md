@@ -32,7 +32,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Emote support: Twitch, Kick native, 7TV, BTTV, FFZ
   - Tab-completion for emotes (press Tab while typing)
   - Tooltips on emotes and badges (shows name and provider)
-  - Click username to view user's chat history
+  - User card popup — click username to see account age, badges, notes, and history
   - Right-click for user actions (block, open channel)
   - Sub/resub/raid/gift alerts (USERNOTICE) with themed styling
   - Hype Chat (paid pinned messages) with dismissable banner
@@ -58,6 +58,10 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Deleted message options (strikethrough, truncated, or hidden)
   - Chat log export to text file
   - Emote autocomplete prioritizes recently used emotes
+  - Emote picker popup (Ctrl+E) — searchable grid of emotes by provider
+  - In-chat search with predicates (Ctrl+F) — from:user, has:link, is:sub, is:mod
+  - Link tooltip previews — hover URLs to see page title
+  - Zero-width emotes — 7TV overlay emotes that stack on other emotes
 - **Browser Chat** - Open stream chat in browser (Twitch, Kick, YouTube)
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
@@ -208,19 +212,19 @@ Planned features for future releases:
 - [x] Custom highlight keywords — trigger mention-style highlights for specific words/phrases
 - [x] Chat mode indicators — show sub-only, emote-only, slow mode, followers-only status
 - [x] Message character counter — show remaining characters near the input
-- [ ] User card popup — click a username to see account age, follow date, channel history
+- [x] User card popup — click a username to see account age, follow date, channel history
 - [ ] Split view — view two chats side by side in the same window
 - [x] Chat log export — save chat history to a text file
 - [x] Timestamp format option — 12h vs 24h toggle
 - [x] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 - [ ] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read:hype_train` scope, GraphQL is unofficial but works for any channel)
 - [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
-- [ ] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
-- [ ] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
+- [x] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
+- [x] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
 - [x] Deleted message options — configurable handling of deleted messages: strikethrough, truncated, or fully hidden
 - [x] Slow mode countdown — show countdown timer in input box indicating when you can send your next message
-- [ ] Link tooltip previews — hover over links to see rich previews (YouTube thumbnails, Twitter embeds, etc.)
-- [ ] Zero-width emotes — support 7TV/BTTV overlay emotes that stack on top of other emotes (e.g., slide, rainbow)
+- [x] Link tooltip previews — hover over links to see rich previews (YouTube thumbnails, Twitter embeds, etc.)
+- [x] Zero-width emotes — support 7TV/BTTV overlay emotes that stack on top of other emotes (e.g., slide, rainbow)
 - [ ] Smooth scrolling — animated scroll on new messages instead of jumping
 - [ ] Streamer mode — auto-detect OBS/streaming software and hide usernames/whispers for privacy
 - [ ] Reply thread popup — open full reply threads in a dedicated popup window

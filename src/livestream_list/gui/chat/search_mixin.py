@@ -11,11 +11,16 @@ and needs search capability. The host widget must provide:
 - _list_view: QAbstractItemView (the list view widget)
 """
 
+import re
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView
 
 from ...chat.models import ChatMessage
 from .message_model import MessageRole
+
+# Regex to extract key:value predicates from a search query
+_PREDICATE_RE = re.compile(r"(from|has|is):(\S+)")
 
 
 class ChatSearchMixin:
@@ -60,6 +65,68 @@ class ChatSearchMixin:
         self._search_current = -1
         self._search_count_label.setText("")
 
+    @staticmethod
+    def _parse_query(text: str) -> tuple[str, dict[str, str]]:
+        """Parse a search query into plain text and predicates.
+
+        Extracts key:value tokens like from:user, has:link, is:sub.
+        Returns (remaining_plain_text, {key: value}).
+        """
+        predicates: dict[str, str] = {}
+        for match in _PREDICATE_RE.finditer(text):
+            predicates[match.group(1).lower()] = match.group(2).lower()
+        plain = _PREDICATE_RE.sub("", text).strip()
+        return plain, predicates
+
+    @staticmethod
+    def _matches_query(msg: ChatMessage, plain_text: str, predicates: dict[str, str]) -> bool:
+        """Check if a message matches the parsed query (all predicates AND plain text)."""
+        # Check predicates
+        for key, value in predicates.items():
+            if key == "from":
+                if value not in msg.user.display_name.lower():
+                    return False
+            elif key == "has":
+                if value == "link":
+                    if "http://" not in msg.text and "https://" not in msg.text:
+                        return False
+                elif value == "emote":
+                    if not msg.emote_positions:
+                        return False
+                else:
+                    return False
+            elif key == "is":
+                if value == "sub":
+                    if not any("subscriber" in b.name.lower() for b in msg.user.badges):
+                        return False
+                elif value == "mod":
+                    if not any("moderator" in b.name.lower() for b in msg.user.badges):
+                        return False
+                elif value == "first":
+                    if not msg.is_first_message:
+                        return False
+                elif value == "system":
+                    if not msg.is_system:
+                        return False
+                elif value == "action":
+                    if not msg.is_action:
+                        return False
+                elif value == "hype":
+                    if not msg.is_hype_chat:
+                        return False
+                else:
+                    return False
+            else:
+                return False
+
+        # Check plain text (match against display name or message text)
+        if plain_text:
+            query = plain_text.lower()
+            if query not in msg.user.display_name.lower() and query not in msg.text.lower():
+                return False
+
+        return True
+
     def _on_search_text_changed(self, text: str) -> None:
         """Update search matches when query changes."""
         self._search_matches.clear()
@@ -69,13 +136,19 @@ class ChatSearchMixin:
             self._search_count_label.setText("")
             return
 
-        query = text.lower()
+        plain_text, predicates = self._parse_query(text)
+
+        # If no predicates and no plain text, nothing to search
+        if not plain_text and not predicates:
+            self._search_count_label.setText("")
+            return
+
         for row in range(self._model.rowCount()):
             index = self._model.index(row, 0)
             msg = index.data(MessageRole)
             if not msg or not isinstance(msg, ChatMessage):
                 continue
-            if query in msg.user.display_name.lower() or query in msg.text.lower():
+            if self._matches_query(msg, plain_text, predicates):
                 self._search_matches.append(row)
 
         if self._search_matches:

@@ -43,7 +43,8 @@ class EmotePickerWidget(QWidget):
     def _setup_ui(self) -> None:
         """Set up the picker UI."""
         self.setWindowFlags(Qt.WindowType.Popup)
-        self.setFixedSize(320, 350)
+        self.resize(320, 350)
+        self.setMinimumSize(200, 200)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)

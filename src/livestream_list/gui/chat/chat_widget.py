@@ -5,7 +5,7 @@ import re
 import time
 import webbrowser
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QHelpEvent,
@@ -40,11 +40,14 @@ from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
 from ..theme import ThemeManager, get_theme
 from .emote_completer import EmoteCompleter
+from .emote_picker import EmotePickerWidget
+from .link_preview import LinkPreviewCache
 from .mention_completer import MentionCompleter
 from .message_delegate import ChatMessageDelegate
 from .message_model import ChatMessageModel, MessageRole
 from .search_mixin import ChatSearchMixin
 from .spell_completer import SpellCompleter
+from .user_card import UserCardFetchWorker, UserCardPopup
 from .user_popup import UserContextMenu
 
 logger = logging.getLogger(__name__)
@@ -421,6 +424,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._slow_mode_timer = QTimer(self)
         self._slow_mode_timer.setInterval(1000)
         self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
+        self._emotes_by_provider: dict[str, list] = {}
+        self._link_preview_cache = LinkPreviewCache()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -463,7 +468,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         self._search_input = QLineEdit()
         self._search_input.setObjectName("chat_search_input")
-        self._search_input.setPlaceholderText("Search messages...")
+        self._search_input.setPlaceholderText("Search... (from:user has:link is:sub)")
         self._search_input.textChanged.connect(self._on_search_text_changed)
         self._search_input.returnPressed.connect(self._search_next)
         search_layout.addWidget(self._search_input)
@@ -636,6 +641,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._send_button.clicked.connect(self._on_send)
         input_layout.addWidget(self._send_button)
 
+        self._emote_button = QPushButton("\U0001f642")
+        self._emote_button.setObjectName("chat_emote_btn")
+        self._emote_button.setFixedSize(28, 28)
+        self._emote_button.setToolTip("Emote picker (Ctrl+E)")
+        self._emote_button.clicked.connect(self._show_emote_picker)
+        input_layout.addWidget(self._emote_button)
+
         self._settings_button = QPushButton("\u2699")
         self._settings_button.setObjectName("chat_settings_btn")
         self._settings_button.setFixedSize(28, 28)
@@ -644,6 +656,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         input_layout.addWidget(self._settings_button)
 
         layout.addLayout(input_layout)
+
+        # Emote picker popup (hidden until activated)
+        self._emote_picker = EmotePickerWidget(self)
+        self._emote_picker.emote_selected.connect(self._insert_emote)
 
         # Auth feedback banner (shown when not authenticated)
         theme = get_theme()
@@ -738,6 +754,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Find shortcut (Ctrl+F)
         find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         find_shortcut.activated.connect(self._toggle_search)
+
+        # Emote picker shortcut (Ctrl+E)
+        emote_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
+        emote_shortcut.activated.connect(self._show_emote_picker)
 
         # Note: apply_theme() is called by the parent ChatWindow after widget creation
         # to avoid duplicate theme application during construction
@@ -924,10 +944,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._emote_completer.set_image_store(store)
 
     def set_emote_map(self, emote_map: dict[str, ChatEmote]) -> None:
-        """Set the emote map for autocomplete."""
+        """Set the emote map for autocomplete and emote picker."""
         self._emote_completer.set_emotes(emote_map)
         if self._spell_checker:
             self._spell_checker.dictionary.set_emote_names(set(emote_map.keys()))
+        # Group emotes by provider for the emote picker
+        by_provider: dict[str, list[ChatEmote]] = {}
+        for emote in emote_map.values():
+            by_provider.setdefault(emote.provider, []).append(emote)
+        self._emotes_by_provider = by_provider
 
     def _current_scale(self) -> float:
         """Return the current device scale factor for image selection."""
@@ -1941,7 +1966,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     self.font_size_changed.emit(new_size)
                 return True
 
-        # Username click → show user's chat history; URL click → open browser
+        # Username click → show user card; URL click → open browser
         # @mention click → show conversation; reply context click → show conversation
         if event.type() == QEvent.Type.MouseButtonRelease and isinstance(event, QMouseEvent):
             if event.button() == Qt.MouseButton.LeftButton:
@@ -1954,7 +1979,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                         option.rect = self._list_view.visualRect(index)
                         name_rect = self._delegate._get_username_rect(option, message)
                         if name_rect.isValid() and name_rect.contains(event.pos()):
-                            self._show_user_history(message.user)
+                            self._show_user_card(message.user, event.globalPos())
                             return True
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
@@ -2045,6 +2070,21 @@ class ChatWidget(QWidget, ChatSearchMixin):
                                 viewport,
                             )
                             return True
+
+                    # Check URLs for link preview tooltips
+                    url = self._delegate._get_url_at_position(event.pos(), option, message)
+                    if url:
+                        from urllib.parse import urlparse
+
+                        domain = urlparse(url).netloc
+                        title = self._link_preview_cache.get_or_fetch(url, parent=self)
+                        if title is None:
+                            QToolTip.showText(tip_pos, f"{domain}\nLoading...", viewport)
+                        elif title:
+                            QToolTip.showText(tip_pos, f"{title}\n{domain}", viewport)
+                        else:
+                            QToolTip.showText(tip_pos, domain, viewport)
+                        return True
             QToolTip.hideText()
             return True
         return super().eventFilter(obj, event)
@@ -2121,6 +2161,116 @@ class ChatWidget(QWidget, ChatSearchMixin):
         dialog.destroyed.connect(lambda: self._history_dialogs.discard(dialog))
         self._history_dialogs.add(dialog)
         dialog.show()
+
+    def _show_user_card(self, user, pos) -> None:
+        """Show a user card popup at the given global position."""
+        from ...chat.models import ChatUser
+
+        if not isinstance(user, ChatUser):
+            return
+
+        # Count messages from this user
+        message_count = sum(
+            1
+            for msg in self._model._messages
+            if msg.user.id == user.id and msg.user.platform == user.platform
+        )
+
+        card = UserCardPopup(
+            user=user,
+            message_count=message_count,
+            settings=self.settings,
+            image_store=self._image_store,
+            parent=self,
+        )
+        card.history_requested.connect(lambda u=user: self._show_user_history(u))
+        card.show_at(pos)
+
+        # Async fetch for Twitch users
+        if user.platform == StreamPlatform.TWITCH:
+            self._fetch_user_card_info(card, user.name)
+
+    def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
+        """Fetch Twitch user card info asynchronously."""
+        import asyncio
+
+        from PySide6.QtCore import QThread
+
+        class _CardFetchThread(QThread):
+            def __init__(self, api_client, login, parent=None):
+                super().__init__(parent)
+                self._api_client = api_client
+                self._login = login
+                self.result: dict | None = None
+
+            def run(self):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self.result = loop.run_until_complete(
+                        UserCardFetchWorker.fetch_twitch_user_info(
+                            self._api_client, self._login
+                        )
+                    )
+                except Exception as e:
+                    logger.debug(f"User card fetch error: {e}")
+                finally:
+                    loop.close()
+
+        # Find the Twitch API client from the parent ChatWindow/ChatManager
+        api_client = self._find_twitch_api_client()
+        if not api_client:
+            card.update_created_at("")
+            return
+
+        thread = _CardFetchThread(api_client, login, parent=self)
+
+        def on_finished():
+            if thread.result:
+                card.update_created_at(thread.result.get("created_at", ""))
+            else:
+                card.update_created_at("")
+
+        thread.finished.connect(on_finished)
+        thread.start()
+
+    def _find_twitch_api_client(self):
+        """Walk up the widget tree to find a Twitch API client."""
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, "_chat_manager"):
+                mgr = parent._chat_manager
+                if hasattr(mgr, "_twitch_api") and mgr._twitch_api:
+                    return mgr._twitch_api
+            if hasattr(parent, "chat_manager"):
+                mgr = parent.chat_manager
+                if hasattr(mgr, "_twitch_api") and mgr._twitch_api:
+                    return mgr._twitch_api
+            parent = parent.parent() if hasattr(parent, "parent") else None
+        return None
+
+    def _show_emote_picker(self) -> None:
+        """Show the emote picker popup above the emote button."""
+        if self._emotes_by_provider:
+            self._emote_picker.set_emotes(self._emotes_by_provider)
+        if self._image_store:
+            self._emote_picker.set_image_store(self._image_store)
+        # Position above the emote button
+        btn_pos = self._emote_button.mapToGlobal(self._emote_button.rect().topLeft())
+        picker_pos = btn_pos - QPoint(0, self._emote_picker.height())
+        self._emote_picker.show_picker(picker_pos)
+
+    def _insert_emote(self, emote_name: str) -> None:
+        """Insert an emote name at the cursor position in the input."""
+        current = self._input.text()
+        cursor_pos = self._input.cursorPosition()
+        # Add space before if not at start and previous char isn't space
+        prefix = " " if current and cursor_pos > 0 and current[cursor_pos - 1] != " " else ""
+        suffix = " "
+        new_text = current[:cursor_pos] + prefix + emote_name + suffix + current[cursor_pos:]
+        self._input.setText(new_text)
+        self._input.setCursorPosition(cursor_pos + len(prefix) + len(emote_name) + len(suffix))
+        self._input.setFocus()
 
     # Search methods provided by ChatSearchMixin:
     # _toggle_search, _close_search, _on_search_text_changed,
