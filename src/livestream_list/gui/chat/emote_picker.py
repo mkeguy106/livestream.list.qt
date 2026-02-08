@@ -60,6 +60,7 @@ class EmotePickerWidget(QWidget):
         self._locked_emote_names: set[str] = set()  # Sub-only emotes user can't use
         self._image_store: EmoteCache | None = None
         self._all_buttons: list[tuple[QPushButton, ChatEmote]] = []
+        self._animated_buttons: list[tuple[QPushButton, ChatEmote, str]] = []  # btn, emote, key
         self._btn_style: str = ""  # Cached button stylesheet
         self._needs_rebuild: bool = False
         self._pending_tabs: list[tuple[str, list[ChatEmote]]] = []
@@ -67,6 +68,8 @@ class EmotePickerWidget(QWidget):
         self._build_timer.setSingleShot(True)
         self._build_timer.setInterval(0)
         self._build_timer.timeout.connect(self._build_next_tab)
+        self._gif_timer = None
+        self._animation_time_ms: int = 0
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -191,6 +194,10 @@ class EmotePickerWidget(QWidget):
         """Set the shared image store."""
         self._image_store = store
 
+    def set_gif_timer(self, timer) -> None:
+        """Set the shared GIF timer for animating emotes."""
+        self._gif_timer = timer
+
     def _current_scale(self) -> float:
         try:
             return float(self.devicePixelRatioF())
@@ -202,10 +209,22 @@ class EmotePickerWidget(QWidget):
         if self._needs_rebuild:
             self._needs_rebuild = False
             self._rebuild_tabs()
+        self._detect_animated_buttons()
         self.move(pos)
         self._search.clear()
         self._search.setFocus()
         self.show()
+        if self._gif_timer and self._animated_buttons:
+            self._gif_timer.tick.connect(self._on_gif_tick)
+
+    def hideEvent(self, event) -> None:  # noqa: N802
+        """Disconnect animation timer when picker closes."""
+        if self._gif_timer:
+            try:
+                self._gif_timer.tick.disconnect(self._on_gif_tick)
+            except Exception:
+                pass
+        super().hideEvent(event)
 
     def _sorted_providers(self) -> list[tuple[str, list[ChatEmote]]]:
         """Return providers sorted: platform first, then 3rd party alphabetically."""
@@ -285,9 +304,7 @@ class EmotePickerWidget(QWidget):
             if global_emotes:
                 sep = QFrame()
                 sep.setFrameShape(QFrame.Shape.HLine)
-                sep.setStyleSheet(
-                    f"color: {theme.border_light}; background: transparent;"
-                )
+                sep.setStyleSheet(f"color: {theme.border_light}; background: transparent;")
                 sep.setFixedHeight(1)
                 layout.addWidget(sep)
 
@@ -311,9 +328,7 @@ class EmotePickerWidget(QWidget):
         tab_name = _PROVIDER_NAMES.get(provider, provider)
         self._tabs.addTab(scroll, tab_name)
 
-    def _make_button(
-        self, emote: ChatEmote, scale: float, icon_size: QSize
-    ) -> QPushButton:
+    def _make_button(self, emote: ChatEmote, scale: float, icon_size: QSize) -> QPushButton:
         """Create a single emote button."""
         locked = emote.name in self._locked_emote_names
         btn = QPushButton()
@@ -337,9 +352,7 @@ class EmotePickerWidget(QWidget):
             btn.setText(emote.name[:3])
 
         if not locked:
-            btn.clicked.connect(
-                lambda checked=False, name=emote.name: self._on_emote_clicked(name)
-            )
+            btn.clicked.connect(lambda checked=False, name=emote.name: self._on_emote_clicked(name))
         return btn
 
     def _get_emote_pixmap(self, emote: ChatEmote, scale: float) -> QPixmap | None:
@@ -366,3 +379,77 @@ class EmotePickerWidget(QWidget):
         for btn, emote in self._all_buttons:
             visible = not search or search in emote.name.lower()
             btn.setVisible(visible)
+
+    def _detect_animated_buttons(self) -> None:
+        """Scan all buttons and identify which emotes have animation frames."""
+        self._animated_buttons.clear()
+        if not self._image_store:
+            return
+        cache = self._image_store
+        scale = self._current_scale()
+        for btn, emote in self._all_buttons:
+            if not emote.image_set:
+                continue
+            image_set = emote.image_set.bind(cache)
+            emote.image_set = image_set
+            image_ref = image_set.get_image_or_loaded(scale=scale)
+            if not image_ref:
+                continue
+            key = image_ref.key
+            if cache.has_animation_data(key):
+                if key not in cache.animated_dict:
+                    cache.request_animation_frames(key)
+                self._animated_buttons.append((btn, emote, key))
+
+    def _on_gif_tick(self, elapsed_ms: int) -> None:
+        """Advance animation frame for visible animated emote buttons."""
+        if not self._image_store or not self._animated_buttons:
+            return
+        self._animation_time_ms = elapsed_ms
+        cache = self._image_store
+        # Find the scroll area for the active tab
+        scroll = self._tabs.currentWidget()
+        if not scroll or not hasattr(scroll, "viewport"):
+            return
+        viewport = scroll.viewport()
+        if not viewport:
+            return
+        vp_rect = viewport.rect()
+        icon_size = QSize(EMOTE_BUTTON_SIZE - 4, EMOTE_BUTTON_SIZE - 4)
+        for btn, _emote, key in self._animated_buttons:
+            try:
+                if not btn.isVisible():
+                    continue
+            except RuntimeError:
+                continue
+            # Check if button is within the scroll viewport
+            btn_pos = btn.mapTo(viewport, btn.rect().topLeft())
+            if not vp_rect.intersects(btn.rect().translated(btn_pos)):
+                continue
+            frames = cache.get_frames(key)
+            if not frames:
+                continue
+            frame = self._pick_frame(frames, key)
+            if frame:
+                btn.setIcon(QIcon(frame))
+                btn.setIconSize(icon_size)
+                btn.setText("")
+
+    def _pick_frame(self, frames: list[QPixmap], key: str) -> QPixmap | None:
+        """Select the correct animation frame based on per-frame delays."""
+        if not frames:
+            return None
+        delays = self._image_store.get_frame_delays(key) if self._image_store else None
+        if delays and len(delays) == len(frames):
+            total = sum(delays)
+            if total > 0:
+                t = self._animation_time_ms % total
+                idx = 0
+                for delay in delays:
+                    if t < delay:
+                        break
+                    t -= delay
+                    idx += 1
+                return frames[idx % len(frames)]
+        idx = (self._animation_time_ms // 50) % len(frames)
+        return frames[idx]
