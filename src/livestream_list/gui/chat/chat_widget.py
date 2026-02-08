@@ -39,7 +39,7 @@ from ...chat.emotes.cache import EmoteCache
 from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
-from ..theme import ThemeManager, get_theme
+from ..theme import get_theme
 from .emote_completer import EmoteCompleter
 from .emote_picker import EmotePickerWidget
 from .link_preview import LinkPreviewCache
@@ -55,6 +55,9 @@ logger = logging.getLogger(__name__)
 
 # Regex to find !command patterns in stream titles
 COMMAND_PATTERN = re.compile(r"(!\w+)")
+
+# Number of rows above/below viewport to pre-fetch animation frames for
+ANIMATION_BUFFER_ROWS = 50
 
 
 class ClickableTitleLabel(QLabel):
@@ -418,6 +421,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._animation_time_ms = 0
         self._image_store: EmoteCache | None = None
         self._last_rehydrate_ts: float = 0.0
+        self._visible_has_animated: bool = False
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
@@ -1132,13 +1136,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if not self.isVisible():
             return
         self._rehydrate_visible_animated_emotes()
+        if not self._visible_has_animated:
+            return  # No animated emotes in or near viewport — skip repaint
         self._animation_time_ms = elapsed_ms
         self._delegate.set_animation_frame(self._animation_time_ms)
         self._list_view.viewport().update()
 
     def _rehydrate_visible_animated_emotes(self) -> None:
-        """Rehydrate animated emotes for visible messages if frames were evicted."""
+        """Rehydrate animated emotes for visible + buffer zone messages."""
         if not self._image_store or not self.settings.animate_emotes:
+            self._visible_has_animated = False
             return
 
         now = time.monotonic()
@@ -1148,19 +1155,27 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         viewport = self._list_view.viewport()
         if not viewport:
+            self._visible_has_animated = False
             return
 
         top_index = self._list_view.indexAt(viewport.rect().topLeft())
         bottom_index = self._list_view.indexAt(viewport.rect().bottomLeft())
 
         if not top_index.isValid():
+            self._visible_has_animated = False
             return
 
         start_row = top_index.row()
         end_row = bottom_index.row() if bottom_index.isValid() else start_row
 
+        # Expand to buffer zone for pre-fetching animation frames
+        row_count = self._model.rowCount()
+        buf_start = max(0, start_row - ANIMATION_BUFFER_ROWS)
+        buf_end = min(row_count - 1, end_row + ANIMATION_BUFFER_ROWS)
+
+        found_animated = False
         cache = self._image_store
-        for row in range(start_row, end_row + 1):
+        for row in range(buf_start, buf_end + 1):
             msg = self._model.get_message(row)
             if not msg or not msg.emote_positions:
                 continue
@@ -1170,13 +1185,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     continue
                 key = image_ref.key
                 if cache.has_animation_data(key):
+                    found_animated = True
                     if key in cache.animated_dict:
                         cache.touch_animated(key)
                     else:
                         cache.request_animation_frames(key)
+        self._visible_has_animated = found_animated
 
     def repaint_messages(self) -> None:
         """Trigger a repaint of visible messages (e.g. after emotes load)."""
+        self._last_rehydrate_ts = 0  # Force rehydrate on next tick
         self._list_view.viewport().update()
 
     def invalidate_message_layout(self) -> None:
@@ -1715,11 +1733,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._reply_widget.hide()
 
     def _update_banner_style(self) -> None:
-        """Apply banner colors from settings (theme-aware)."""
-        is_dark = ThemeManager.is_dark_mode()
-        colors = self.settings.get_colors(is_dark)
-        self._title_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
-        self._socials_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
+        """Apply banner colors from theme."""
+        theme = get_theme()
+        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
 
     def _update_stream_title(self) -> None:
         """Update the stream title banner from the livestream data."""
@@ -2042,11 +2059,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """)
 
         # Update banners AFTER main stylesheet to prevent cascade override
-        # Use settings colors (theme-aware) for banners
-        is_dark = ThemeManager.is_dark_mode()
-        colors = self.settings.get_colors(is_dark)
-        self._title_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
-        self._socials_banner.applyBannerStyle(colors.banner_bg_color, colors.banner_text_color)
+        self._title_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
+        self._socials_banner.applyBannerStyle(theme.chat_banner_bg, theme.chat_banner_text)
 
         # Update delegate theme and force repaint to show new colors
         self._delegate.apply_theme()
