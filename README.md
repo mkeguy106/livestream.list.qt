@@ -233,7 +233,7 @@ Planned features for future releases:
 - [x] Timestamp format option — 12h vs 24h toggle
 - [x] Auto-complete recent emotes first — sort emote suggestions by usage frequency
 - [x] Hype train banner — show active Twitch hype train progress in the chat banner area (requires EventSub or GraphQL; EventSub needs broadcaster auth with `channel:read.hype_train` scope, GraphQL is unofficial but works for any channel)
-- [ ] Higher resolution emotes — research fetching higher-res emote variants (2x/3x) from providers for sharper rendering on HiDPI displays
+- [x] Higher resolution emotes — HiDPI-aware emote rendering using 2x/3x variants from providers for sharp display on high-DPI screens
 - [x] In-chat search — Ctrl+F to search within a channel's messages, with predicates like `from:user`, `has:link`, `is:sub`
 - [x] Emote picker popup — resizable grid of available emotes with search, browsable by category/provider
 - [x] Deleted message options — configurable handling of deleted messages: strikethrough, truncated, or fully hidden

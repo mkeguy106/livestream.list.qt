@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-02-08
+
+### Added
+- HiDPI-aware emote rendering — emotes now render at native resolution on high-DPI displays using 2x/3x image variants from providers
+- Emote image scale selection prefers rounding up (e.g., 1.5x displays use 2x images instead of 1x)
+
+### Fixed
+- HypeTrainEventSub updated from v1 to v2 subscription types (Twitch deprecated v1 on January 22, 2026)
+
 ## [0.12.12] - 2026-01-27
 
 ### Fixed
