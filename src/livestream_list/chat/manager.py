@@ -1233,9 +1233,9 @@ class HypeTrainEventSubWorker(QThread):
     async def _subscribe_channel(self, session, session_id: str, broadcaster_id: str) -> None:
         """Subscribe to all 3 hype train event types for a broadcaster."""
         event_types = [
-            ("channel.hype_train.begin", "1"),
-            ("channel.hype_train.progress", "1"),
-            ("channel.hype_train.end", "1"),
+            ("channel.hype_train.begin", "2"),
+            ("channel.hype_train.progress", "2"),
+            ("channel.hype_train.end", "2"),
         ]
         headers = {
             "Authorization": f"Bearer {self.oauth_token}",
