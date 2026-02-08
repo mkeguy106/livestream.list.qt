@@ -481,14 +481,17 @@ class KickChatConnection(BaseChatConnection):
         text = "".join(text_parts)
 
         # Parse reply context from metadata
+        reply_parent_msg_id = ""
         reply_parent_display_name = ""
         reply_parent_text = ""
         metadata = data.get("metadata", {})
         if metadata:
+            original_message = metadata.get("original_message", {})
+            reply_parent_msg_id = str(original_message.get("id", "")) if original_message else ""
             original_sender = metadata.get("original_sender", {})
             if original_sender:
                 reply_parent_display_name = original_sender.get("username", "")
-            reply_parent_text = metadata.get("original_message", {}).get("content", "")
+            reply_parent_text = original_message.get("content", "")
 
         message = ChatMessage(
             id=str(data.get("id", uuid.uuid4())),
@@ -497,6 +500,7 @@ class KickChatConnection(BaseChatConnection):
             timestamp=timestamp,
             platform=StreamPlatform.KICK,
             emote_positions=emote_positions,
+            reply_parent_msg_id=reply_parent_msg_id,
             reply_parent_display_name=reply_parent_display_name,
             reply_parent_text=reply_parent_text,
         )

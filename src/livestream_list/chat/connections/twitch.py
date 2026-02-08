@@ -449,6 +449,15 @@ class TwitchChatConnection(BaseChatConnection):
         color = tags.get("color", None)
         badges = parse_badges(tags.get("badges", ""))
 
+        # Enrich prediction badge tooltips with outcome color
+        for badge in badges:
+            if badge.name == "predictions":
+                # Version format: "blue-1", "pink-2", etc.
+                parts = badge.id.split("/")
+                if len(parts) == 2:
+                    color_name = parts[1].rsplit("-", 1)[0]
+                    badge.title = f"Predicted: {color_name.title()}"
+
         user = ChatUser(
             id=user_id,
             name=username,
@@ -494,6 +503,7 @@ class TwitchChatConnection(BaseChatConnection):
                 hype_chat_amount = raw_amount
 
         # Parse reply context
+        reply_parent_msg_id = tags.get("reply-parent-msg-id", "")
         reply_parent_display_name = tags.get("reply-parent-display-name", "")
         reply_parent_text = tags.get("reply-parent-msg-body", "")
 
@@ -510,6 +520,7 @@ class TwitchChatConnection(BaseChatConnection):
             hype_chat_amount=hype_chat_amount,
             hype_chat_currency=hype_chat_currency,
             hype_chat_level=hype_chat_level,
+            reply_parent_msg_id=reply_parent_msg_id,
             reply_parent_display_name=reply_parent_display_name,
             reply_parent_text=reply_parent_text,
         )

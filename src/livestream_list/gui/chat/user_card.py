@@ -3,12 +3,15 @@
 import logging
 import webbrowser
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QFont
+import aiohttp
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QFont, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -21,6 +24,24 @@ from ...core.settings import BuiltinChatSettings
 from ..theme import get_theme
 
 logger = logging.getLogger(__name__)
+
+# Pronoun ID → display text mapping (from pronouns.alejo.io)
+PRONOUN_MAP: dict[str, str] = {
+    "hehim": "He/Him",
+    "sheher": "She/Her",
+    "theythem": "They/Them",
+    "hethem": "He/They",
+    "shethem": "She/They",
+    "aeaer": "Ae/Aer",
+    "itits": "It/Its",
+    "other": "Other",
+    "perper": "Per/Per",
+    "vever": "Ve/Ver",
+    "xexem": "Xe/Xem",
+    "ziehir": "Zie/Hir",
+    "heshe": "He/She",
+    "anyall": "Any/All",
+}
 
 CHANNEL_URLS = {
     StreamPlatform.TWITCH: "https://twitch.tv/{name}",
@@ -36,43 +57,155 @@ class UserCardFetchWorker:
     (ChatWidget already has an event loop pattern for async work).
     """
 
+    GQL_URL = "https://gql.twitch.tv/gql"
+    GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+
     @staticmethod
-    async def fetch_twitch_user_info(api_client, login: str) -> dict | None:
-        """Fetch Twitch user card info via GraphQL."""
-        query = """
-        query GetUserCard($login: String!) {
-            user(login: $login) {
-                id
-                login
-                displayName
-                createdAt
-                profileImageURL(width: 70)
-            }
-        }
+    async def fetch_twitch_user_info(
+        login: str, channel_login: str = ""
+    ) -> dict | None:
+        """Fetch Twitch user card info via GraphQL.
+
+        Uses its own aiohttp session and static GQL credentials so it can
+        run from any thread without depending on the main API client.
+        If channel_login is provided, also fetches follow age for that channel.
         """
+        headers = {
+            "Client-ID": UserCardFetchWorker.GQL_CLIENT_ID,
+            "Content-Type": "application/json",
+        }
         try:
-            async with api_client.session.post(
-                api_client.GQL_URL,
-                headers=api_client._get_gql_headers(),
-                json={
-                    "query": query,
-                    "variables": {"login": login},
-                },
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
+            async with aiohttp.ClientSession() as session:
+                # Step 1: Fetch user info (+ channel numeric ID if needed)
+                if channel_login and channel_login.lower() != login.lower():
+                    query = """
+                    query GetUserCard($login: String!, $channelLogin: String!) {
+                        user(login: $login) {
+                            id
+                            login
+                            displayName
+                            createdAt
+                            description
+                            profileImageURL(width: 70)
+                            followers { totalCount }
+                        }
+                        channel: user(login: $channelLogin) { id }
+                    }
+                    """
+                    variables = {"login": login, "channelLogin": channel_login}
+                else:
+                    query = """
+                    query GetUserCard($login: String!) {
+                        user(login: $login) {
+                            id
+                            login
+                            displayName
+                            createdAt
+                            description
+                            profileImageURL(width: 70)
+                            followers { totalCount }
+                        }
+                    }
+                    """
+                    variables = {"login": login}
+
+                async with session.post(
+                    UserCardFetchWorker.GQL_URL,
+                    headers=headers,
+                    json={"query": query, "variables": variables},
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+
                 user_data = data.get("data", {}).get("user")
                 if not user_data:
                     return None
-                return {
+
+                result = {
                     "created_at": user_data.get("createdAt", ""),
                     "profile_image_url": user_data.get("profileImageURL", ""),
                     "display_name": user_data.get("displayName", ""),
+                    "description": user_data.get("description") or "",
+                    "follower_count": (
+                        user_data.get("followers", {}).get("totalCount", 0)
+                    ),
+                    "followed_at": "",
                 }
+
+                # Step 2: Fetch follow relationship if we got the channel ID
+                channel_data = data.get("data", {}).get("channel")
+                if channel_data and channel_data.get("id"):
+                    channel_id = channel_data["id"]
+                    follow_query = """
+                    query GetFollowAge($login: String!, $targetId: ID!) {
+                        user(login: $login) {
+                            follow(targetID: $targetId) { followedAt }
+                        }
+                    }
+                    """
+                    async with session.post(
+                        UserCardFetchWorker.GQL_URL,
+                        headers=headers,
+                        json={
+                            "query": follow_query,
+                            "variables": {
+                                "login": login,
+                                "targetId": channel_id,
+                            },
+                        },
+                    ) as resp2:
+                        if resp2.status == 200:
+                            fdata = await resp2.json()
+                            follow = (
+                                fdata.get("data", {})
+                                .get("user", {})
+                                .get("follow")
+                            )
+                            if follow:
+                                result["followed_at"] = follow.get(
+                                    "followedAt", ""
+                                )
+
+                return result
         except Exception as e:
             logger.debug(f"Failed to fetch user card info: {e}")
             return None
+
+    @staticmethod
+    async def fetch_avatar(url: str) -> bytes:
+        """Download profile image bytes from URL."""
+        if not url:
+            return b""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=5)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+        except Exception as e:
+            logger.debug(f"Failed to fetch avatar: {e}")
+        return b""
+
+    @staticmethod
+    async def fetch_pronouns(login: str) -> str:
+        """Fetch user pronouns from pronouns.alejo.io API."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"https://pronouns.alejo.io/api/users/{login}",
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status != 200:
+                        return ""
+                    data = await resp.json()
+                    if data and isinstance(data, list) and len(data) > 0:
+                        pronoun_id = data[0].get("pronoun_id", "")
+                        return PRONOUN_MAP.get(pronoun_id, pronoun_id)
+        except Exception as e:
+            logger.debug(f"Failed to fetch pronouns for {login}: {e}")
+        return ""
 
 
 class UserCardPopup(QFrame):
@@ -96,6 +229,7 @@ class UserCardPopup(QFrame):
         self.setWindowFlags(Qt.WindowType.Popup)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setFixedWidth(280)
+        self._text_labels: list[QLabel] = []
 
         theme = get_theme()
         self.setStyleSheet(f"""
@@ -112,6 +246,24 @@ class UserCardPopup(QFrame):
 
         user_key = f"{user.platform.value}:{user.id}"
 
+        # Top row: profile image + name/badges
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(10)
+
+        # Profile image (loaded async, placeholder initially)
+        self._avatar_label = QLabel()
+        self._avatar_label.setFixedSize(50, 50)
+        self._avatar_label.setStyleSheet(
+            "background: transparent; border: none;"
+            " border-radius: 25px;"
+        )
+        self._avatar_label.hide()
+        top_layout.addWidget(self._avatar_label)
+
+        # Right side: name + platform + login
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
+
         # Header: display name + platform
         header_layout = QHBoxLayout()
         header_layout.setSpacing(6)
@@ -125,6 +277,10 @@ class UserCardPopup(QFrame):
         name_label.setStyleSheet(
             f"color: {user_color}; background: transparent; border: none;"
         )
+        name_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(name_label)
         header_layout.addWidget(name_label)
 
         # Nickname indicator
@@ -135,6 +291,10 @@ class UserCardPopup(QFrame):
                 f"color: {theme.text_muted}; font-style: italic;"
                 " background: transparent; border: none;"
             )
+            nick_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._text_labels.append(nick_label)
             header_layout.addWidget(nick_label)
 
         header_layout.addStretch()
@@ -149,8 +309,12 @@ class UserCardPopup(QFrame):
             f"color: {theme.text_muted}; font-size: 11px;"
             " background: transparent; border: none;"
         )
+        platform_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(platform_label)
         header_layout.addWidget(platform_label)
-        layout.addLayout(header_layout)
+        name_col.addLayout(header_layout)
 
         # @username (login name if different from display name)
         if user.name.lower() != user.display_name.lower():
@@ -159,7 +323,14 @@ class UserCardPopup(QFrame):
                 f"color: {theme.text_muted}; font-size: 11px;"
                 " background: transparent; border: none;"
             )
-            layout.addWidget(login_label)
+            login_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._text_labels.append(login_label)
+            name_col.addWidget(login_label)
+
+        top_layout.addLayout(name_col)
+        layout.addLayout(top_layout)
 
         # Badges row
         if user.badges:
@@ -192,6 +363,19 @@ class UserCardPopup(QFrame):
             badges_layout.addStretch()
             layout.addLayout(badges_layout)
 
+        # Pronouns (loaded async, initially hidden)
+        self._pronouns_label = QLabel()
+        self._pronouns_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: 11px;"
+            " background: transparent; border: none;"
+        )
+        self._pronouns_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(self._pronouns_label)
+        self._pronouns_label.hide()
+        layout.addWidget(self._pronouns_label)
+
         # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -205,17 +389,59 @@ class UserCardPopup(QFrame):
             " background: transparent; border: none;"
         )
 
+        # Bio/description (Twitch only, loaded async)
+        self._bio_label = QLabel()
+        self._bio_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: 11px; font-style: italic;"
+            " background: transparent; border: none;"
+        )
+        self._bio_label.setWordWrap(True)
+        self._bio_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(self._bio_label)
+        self._bio_label.hide()
+        layout.addWidget(self._bio_label)
+
         # Account created (Twitch only, loaded async)
         if user.platform == StreamPlatform.TWITCH:
             self._created_label = QLabel("Account created: Loading...")
             self._created_label.setStyleSheet(info_style)
+            self._created_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._text_labels.append(self._created_label)
             layout.addWidget(self._created_label)
         else:
             self._created_label = None
 
+        # Followers (Twitch only, loaded async)
+        self._followers_label = QLabel()
+        self._followers_label.setStyleSheet(info_style)
+        self._followers_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(self._followers_label)
+        self._followers_label.hide()
+        layout.addWidget(self._followers_label)
+
+        # Follow age (Twitch only, loaded async)
+        self._follow_age_label = QLabel()
+        self._follow_age_label.setStyleSheet(info_style)
+        self._follow_age_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(self._follow_age_label)
+        self._follow_age_label.hide()
+        layout.addWidget(self._follow_age_label)
+
         # Session message count
         count_label = QLabel(f"Session messages: {message_count}")
         count_label.setStyleSheet(info_style)
+        count_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self._text_labels.append(count_label)
         layout.addWidget(count_label)
 
         # Note
@@ -227,6 +453,10 @@ class UserCardPopup(QFrame):
                 " background: transparent; border: none;"
             )
             note_label.setWordWrap(True)
+            note_label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            self._text_labels.append(note_label)
             layout.addWidget(note_label)
 
         # Action buttons
@@ -260,6 +490,13 @@ class UserCardPopup(QFrame):
 
         layout.addLayout(btn_layout)
 
+    def update_pronouns(self, text: str) -> None:
+        """Update the pronouns label after async fetch."""
+        if text:
+            self._pronouns_label.setText(f"Pronouns: {text}")
+            self._pronouns_label.show()
+            self.adjustSize()
+
     def update_created_at(self, created_at_str: str) -> None:
         """Update the account creation date label after async fetch."""
         if self._created_label and created_at_str:
@@ -274,6 +511,73 @@ class UserCardPopup(QFrame):
                 self._created_label.setText(f"Account created: {created_at_str}")
         elif self._created_label:
             self._created_label.setText("Account created: Unknown")
+
+    def update_bio(self, description: str) -> None:
+        """Update the bio/description label."""
+        if description:
+            # Truncate long bios
+            text = description if len(description) <= 120 else description[:117] + "..."
+            self._bio_label.setText(f'"{text}"')
+            self._bio_label.show()
+            self.adjustSize()
+
+    def update_followers(self, count: int) -> None:
+        """Update the follower count label."""
+        if count > 0:
+            if count >= 1_000_000:
+                text = f"{count / 1_000_000:.1f}M"
+            elif count >= 1_000:
+                text = f"{count / 1_000:.1f}K"
+            else:
+                text = str(count)
+            self._followers_label.setText(f"Followers: {text}")
+            self._followers_label.show()
+            self.adjustSize()
+
+    def update_follow_age(self, followed_at_str: str) -> None:
+        """Update the follow age label."""
+        if followed_at_str:
+            try:
+                from datetime import datetime, timezone
+
+                dt = datetime.fromisoformat(
+                    followed_at_str.replace("Z", "+00:00")
+                )
+                now = datetime.now(timezone.utc)
+                delta = now - dt
+                days = delta.days
+                if days >= 365:
+                    years = days // 365
+                    months = (days % 365) // 30
+                    text = f"{years}y {months}mo" if months else f"{years}y"
+                elif days >= 30:
+                    months = days // 30
+                    text = f"{months}mo"
+                else:
+                    text = f"{days}d"
+                formatted_date = dt.astimezone().strftime("%b %d, %Y")
+                self._follow_age_label.setText(
+                    f"Following: {text} (since {formatted_date})"
+                )
+            except Exception:
+                self._follow_age_label.setText("Following: Yes")
+            self._follow_age_label.show()
+            self.adjustSize()
+
+    def update_avatar(self, image_data: bytes) -> None:
+        """Update the profile image from raw bytes."""
+        if not image_data:
+            return
+        pixmap = QPixmap()
+        if pixmap.loadFromData(image_data) and not pixmap.isNull():
+            scaled = pixmap.scaled(
+                QSize(50, 50),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._avatar_label.setPixmap(scaled)
+            self._avatar_label.show()
+            self.adjustSize()
 
     def show_at(self, pos: QPoint) -> None:
         """Show the popup near the given global position."""
@@ -306,3 +610,46 @@ class UserCardPopup(QFrame):
             except Exception as e:
                 logger.error(f"Failed to open channel URL: {e}")
         self.hide()
+
+    def _get_selected_text(self) -> str:
+        """Get selected text from any label, if any."""
+        for label in self._text_labels:
+            if label.hasSelectedText():
+                return label.selectedText()
+        return ""
+
+    def _get_all_text(self) -> str:
+        """Collect all visible text from the card."""
+        lines = []
+        for label in self._text_labels:
+            if label.isVisible() and label.text():
+                lines.append(label.text())
+        return "\n".join(lines)
+
+    def _copy_text(self) -> None:
+        """Copy selected text, or all card text if nothing selected."""
+        text = self._get_selected_text() or self._get_all_text()
+        if text:
+            clipboard = QApplication.clipboard()
+            if clipboard:
+                clipboard.setText(text)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Handle Ctrl+C to copy card text."""
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self._copy_text()
+            return
+        super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event) -> None:  # noqa: N802
+        """Show right-click context menu with copy options."""
+        menu = QMenu(self)
+        selected = self._get_selected_text()
+        if selected:
+            copy_sel = menu.addAction("Copy")
+            copy_sel.triggered.connect(
+                lambda: QApplication.clipboard().setText(selected)
+            )
+        copy_all = menu.addAction("Copy All")
+        copy_all.triggered.connect(self._copy_text)
+        menu.exec(event.globalPos())

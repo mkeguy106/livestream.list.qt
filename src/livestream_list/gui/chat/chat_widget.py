@@ -1998,10 +1998,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
                             return True
                         reply_rect = self._delegate._get_reply_context_rect(option, message)
                         if reply_rect.isValid() and reply_rect.contains(event.pos()):
-                            self._show_conversation(
-                                message.user.display_name,
-                                message.reply_parent_display_name,
-                            )
+                            # Open reply thread rooted at the parent message
+                            root_id = message.reply_parent_msg_id or message.id
+                            self._show_reply_thread(root_id)
                             return True
 
         # Cursor changes for clickable elements (URLs, usernames, @mentions, reply context)
@@ -2119,6 +2118,20 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._history_dialogs.add(dialog)
         dialog.show()
 
+    def _show_reply_thread(self, root_msg_id: str) -> None:
+        """Show a reply thread dialog for the given root message ID."""
+        dialog = ReplyThreadDialog(
+            root_msg_id=root_msg_id,
+            messages=list(self._model._messages),
+            settings=self.settings,
+            image_store=self._image_store,
+            parent=self,
+        )
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.destroyed.connect(lambda: self._history_dialogs.discard(dialog))
+        self._history_dialogs.add(dialog)
+        dialog.show()
+
     def _show_conversation(self, user_a_name: str, user_b_name: str) -> None:
         """Show a dialog with the conversation between two users.
 
@@ -2191,63 +2204,68 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._fetch_user_card_info(card, user.name)
 
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
-        """Fetch Twitch user card info asynchronously."""
+        """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
         import asyncio
 
         from PySide6.QtCore import QThread
 
+        # Extract channel login from channel_key (format: "twitch:channelname")
+        channel_login = ""
+        if ":" in self.channel_key:
+            channel_login = self.channel_key.split(":", 1)[-1]
+
         class _CardFetchThread(QThread):
-            def __init__(self, api_client, login, parent=None):
+            def __init__(self, login, channel_login, parent=None):
                 super().__init__(parent)
-                self._api_client = api_client
                 self._login = login
+                self._channel_login = channel_login
                 self.result: dict | None = None
+                self.pronouns: str = ""
+                self.avatar_data: bytes = b""
 
             def run(self):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    self.result = loop.run_until_complete(
-                        UserCardFetchWorker.fetch_twitch_user_info(
-                            self._api_client, self._login
-                        )
+                    # Fetch user info and pronouns in parallel
+                    user_info_coro = UserCardFetchWorker.fetch_twitch_user_info(
+                        self._login, self._channel_login
                     )
+                    pronouns_coro = UserCardFetchWorker.fetch_pronouns(self._login)
+                    results = loop.run_until_complete(
+                        asyncio.gather(user_info_coro, pronouns_coro)
+                    )
+                    self.result = results[0]
+                    self.pronouns = results[1]
+                    # Fetch avatar if we got a URL
+                    if self.result and self.result.get("profile_image_url"):
+                        self.avatar_data = loop.run_until_complete(
+                            UserCardFetchWorker.fetch_avatar(
+                                self.result["profile_image_url"]
+                            )
+                        )
                 except Exception as e:
-                    logger.debug(f"User card fetch error: {e}")
+                    logger.debug(f"User card fetch error for {self._login}: {e}")
                 finally:
                     loop.close()
 
-        # Find the Twitch API client from the parent ChatWindow/ChatManager
-        api_client = self._find_twitch_api_client()
-        if not api_client:
-            card.update_created_at("")
-            return
-
-        thread = _CardFetchThread(api_client, login, parent=self)
+        thread = _CardFetchThread(login, channel_login, parent=self)
 
         def on_finished():
             if thread.result:
                 card.update_created_at(thread.result.get("created_at", ""))
+                card.update_bio(thread.result.get("description", ""))
+                card.update_followers(thread.result.get("follower_count", 0))
+                card.update_follow_age(thread.result.get("followed_at", ""))
             else:
                 card.update_created_at("")
+            if thread.pronouns:
+                card.update_pronouns(thread.pronouns)
+            if thread.avatar_data:
+                card.update_avatar(thread.avatar_data)
 
         thread.finished.connect(on_finished)
         thread.start()
-
-    def _find_twitch_api_client(self):
-        """Walk up the widget tree to find a Twitch API client."""
-        parent = self.parent()
-        while parent:
-            if hasattr(parent, "_chat_manager"):
-                mgr = parent._chat_manager
-                if hasattr(mgr, "_twitch_api") and mgr._twitch_api:
-                    return mgr._twitch_api
-            if hasattr(parent, "chat_manager"):
-                mgr = parent.chat_manager
-                if hasattr(mgr, "_twitch_api") and mgr._twitch_api:
-                    return mgr._twitch_api
-            parent = parent.parent() if hasattr(parent, "parent") else None
-        return None
 
     def _show_emote_picker(self) -> None:
         """Show the emote picker popup above the emote button."""
@@ -2908,6 +2926,327 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                     self._list_view.initViewItemOption(option)
                     option.rect = self._list_view.visualRect(index)
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
+                    if url:
+                        viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        return False
+            viewport.setCursor(Qt.CursorShape.ArrowCursor)
+            return False
+
+        return super().eventFilter(obj, event)
+
+
+class ReplyThreadDialog(QDialog, ChatSearchMixin):
+    """Dialog showing a reply thread: the original message and all replies to it."""
+
+    def __init__(
+        self,
+        root_msg_id: str,
+        messages: list[ChatMessage],
+        settings: BuiltinChatSettings,
+        image_store: EmoteCache | None,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.WindowCloseButtonHint)
+        self._root_msg_id = root_msg_id
+        self._settings = settings
+
+        # Collect thread messages: root + all replies (direct and nested)
+        thread_ids = self._collect_thread_ids(root_msg_id, messages)
+        thread_messages = [m for m in messages if m.id in thread_ids]
+        thread_messages.sort(key=lambda m: m.timestamp)
+
+        # Find root message for title
+        root_msg = next((m for m in messages if m.id == root_msg_id), None)
+        root_name = root_msg.user.display_name if root_msg else "Unknown"
+        self.setWindowTitle(f"Reply Thread \u2014 @{root_name}")
+        self.setMinimumSize(400, 300)
+        self.resize(450, 400)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # Header
+        self._header = QLabel(
+            f"  Reply thread \u2014 {len(thread_messages)} messages"
+        )
+        layout.addWidget(self._header)
+
+        # Search bar (hidden by default)
+        self._search_widget = QWidget()
+        search_layout = QHBoxLayout(self._search_widget)
+        search_layout.setContentsMargins(6, 4, 6, 4)
+        search_layout.setSpacing(4)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Search messages...")
+        self._search_input.textChanged.connect(self._on_search_text_changed)
+        self._search_input.returnPressed.connect(self._search_next)
+        search_layout.addWidget(self._search_input)
+
+        self._search_count_label = QLabel("")
+        search_layout.addWidget(self._search_count_label)
+
+        self._search_prev_btn = QPushButton("\u25b2")
+        self._search_prev_btn.setFixedSize(24, 24)
+        self._search_prev_btn.clicked.connect(self._search_prev)
+        search_layout.addWidget(self._search_prev_btn)
+
+        self._search_next_btn = QPushButton("\u25bc")
+        self._search_next_btn.setFixedSize(24, 24)
+        self._search_next_btn.clicked.connect(self._search_next)
+        search_layout.addWidget(self._search_next_btn)
+
+        self._search_close_btn = QPushButton("\u2715")
+        self._search_close_btn.setFixedSize(24, 24)
+        self._search_close_btn.clicked.connect(self._close_search)
+        search_layout.addWidget(self._search_close_btn)
+
+        self._search_widget.hide()
+        layout.addWidget(self._search_widget)
+
+        self._search_matches: list[int] = []
+        self._search_current: int = -1
+
+        # Message list
+        self._model = ChatMessageModel(max_messages=settings.max_messages, parent=self)
+        self._delegate = ChatMessageDelegate(settings, parent=self)
+        if image_store:
+            self._delegate.set_image_store(image_store)
+
+        self._list_view = QListView()
+        self._list_view.setModel(self._model)
+        self._list_view.setItemDelegate(self._delegate)
+        self._list_view.setVerticalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        self._list_view.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._list_view.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self._list_view.setSelectionMode(QListView.SelectionMode.ExtendedSelection)
+        self._list_view.setWordWrap(True)
+        self._list_view.setUniformItemSizes(False)
+        self._list_view.setSpacing(0)
+        layout.addWidget(self._list_view)
+
+        self._list_view.viewport().setMouseTracking(True)
+        self._list_view.viewport().installEventFilter(self)
+
+        copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
+        copy_shortcut.activated.connect(self._copy_selected_messages)
+
+        find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        find_shortcut.activated.connect(self._toggle_search)
+
+        self._resize_timer: QTimer | None = None
+
+        self._model.add_messages(thread_messages)
+        self._list_view.scrollToBottom()
+        self.apply_theme()
+
+    @staticmethod
+    def _collect_thread_ids(
+        root_id: str, messages: list[ChatMessage]
+    ) -> set[str]:
+        """Collect the root message and all descendants in the reply chain."""
+        thread_ids = {root_id}
+        changed = True
+        while changed:
+            changed = False
+            for msg in messages:
+                if msg.id not in thread_ids and msg.reply_parent_msg_id in thread_ids:
+                    thread_ids.add(msg.id)
+                    changed = True
+        return thread_ids
+
+    def _matches_thread(self, msg: ChatMessage) -> bool:
+        """Check if a message belongs to this thread."""
+        return (
+            msg.id == self._root_msg_id
+            or msg.reply_parent_msg_id == self._root_msg_id
+        )
+
+    def add_messages(self, messages: list[ChatMessage]) -> None:
+        """Add new messages that belong to this thread."""
+        thread_msgs = [msg for msg in messages if self._matches_thread(msg)]
+        if not thread_msgs:
+            return
+
+        was_at_bottom = self._is_at_bottom()
+        self._model.add_messages(thread_msgs)
+
+        count = self._model.rowCount()
+        self._header.setText(f"  Reply thread \u2014 {count} messages")
+
+        if was_at_bottom:
+            self._list_view.scrollToBottom()
+
+    def apply_moderation(self, event) -> None:
+        """Apply a moderation event to messages in this dialog."""
+        self._model.apply_moderation(event)
+
+    def _is_at_bottom(self) -> bool:
+        scrollbar = self._list_view.verticalScrollBar()
+        return scrollbar.value() >= scrollbar.maximum() - 10
+
+    def _copy_selected_messages(self) -> None:
+        indexes = self._list_view.selectionModel().selectedIndexes()
+        if not indexes:
+            return
+        indexes.sort(key=lambda idx: idx.row())
+        lines: list[str] = []
+        for index in indexes:
+            message = index.data(MessageRole)
+            if not message or not isinstance(message, ChatMessage):
+                continue
+            prefix = ""
+            if self._settings.show_timestamps:
+                ts = message.timestamp.astimezone().strftime(self._settings.ts_strftime)
+                prefix = f"[{ts}] "
+            name = message.user.display_name
+            if message.is_action:
+                lines.append(f"{prefix}{name} {message.text}")
+            else:
+                lines.append(f"{prefix}{name}: {message.text}")
+        if lines:
+            clipboard = QApplication.clipboard()
+            clipboard.setText("\n".join(lines))
+
+    def apply_theme(self) -> None:
+        """Apply the current theme to the reply thread dialog."""
+        theme = get_theme()
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {theme.window_bg};
+            }}
+        """)
+        self._header.setStyleSheet(f"""
+            QLabel {{
+                background-color: {theme.chat_input_bg};
+                color: {theme.text_primary};
+                padding: 8px;
+                font-weight: bold;
+                font-size: 13px;
+            }}
+        """)
+        self._search_widget.setStyleSheet(f"""
+            QWidget {{
+                background-color: {theme.chat_input_bg};
+                border-bottom: 1px solid {theme.border_light};
+            }}
+        """)
+        self._search_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {theme.widget_bg};
+                border: 1px solid {theme.border};
+                border-radius: 3px;
+                padding: 3px 6px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border-color: {theme.accent}; }}
+        """)
+        self._search_count_label.setStyleSheet(
+            f"color: {theme.text_muted}; font-size: 11px;"
+            " background: transparent; min-width: 50px;"
+        )
+        search_btn_style = f"""
+            QPushButton {{
+                background: transparent; color: {theme.text_muted}; border: none;
+                font-size: 14px; padding: 2px 6px;
+            }}
+            QPushButton:hover {{
+                color: {theme.text_primary}; background: rgba(255,255,255,0.1);
+                border-radius: 3px;
+            }}
+        """
+        self._search_prev_btn.setStyleSheet(search_btn_style)
+        self._search_next_btn.setStyleSheet(search_btn_style)
+        self._search_close_btn.setStyleSheet(search_btn_style)
+        self._list_view.setStyleSheet(f"""
+            QListView {{
+                background-color: {theme.chat_bg};
+                border: none;
+                padding: 4px;
+            }}
+        """)
+        self._delegate.apply_theme()
+        self._list_view.viewport().update()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Invalidate item layout cache on resize."""
+        super().resizeEvent(event)
+        self._list_view.scheduleDelayedItemsLayout()
+        if self._resize_timer is None:
+            self._resize_timer = QTimer(self)
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._on_resize_debounced)
+        self._resize_timer.start(30)
+
+    def _on_resize_debounced(self) -> None:
+        self._delegate.invalidate_size_cache()
+        self._model.layoutChanged.emit()
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        """Handle Escape to close search bar in reply thread."""
+        if self._handle_search_key_press(event.key()):
+            return
+        super().keyPressEvent(event)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        """Handle Ctrl+Wheel, URL clicks, and cursor changes in reply thread."""
+        if obj is not self._list_view.viewport():
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.Type.Wheel and isinstance(event, QWheelEvent):
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta > 0:
+                    new_size = min(self._settings.font_size + 1, 30)
+                elif delta < 0:
+                    new_size = max(self._settings.font_size - 1, 4)
+                else:
+                    return True
+                if new_size != self._settings.font_size:
+                    self._settings.font_size = new_size
+                    self._model.layoutChanged.emit()
+                return True
+
+        if event.type() == QEvent.Type.MouseButtonRelease and isinstance(
+            event, QMouseEvent
+        ):
+            if event.button() == Qt.MouseButton.LeftButton:
+                index = self._list_view.indexAt(event.pos())
+                if index.isValid():
+                    message = index.data(MessageRole)
+                    if message and isinstance(message, ChatMessage):
+                        option = QStyleOptionViewItem()
+                        self._list_view.initViewItemOption(option)
+                        option.rect = self._list_view.visualRect(index)
+                        url = self._delegate._get_url_at_position(
+                            event.pos(), option, message
+                        )
+                        if url:
+                            try:
+                                webbrowser.open(url)
+                            except Exception as e:
+                                logger.error(f"Failed to open URL: {e}")
+                            return True
+
+        if event.type() == QEvent.Type.MouseMove and isinstance(event, QMouseEvent):
+            viewport = self._list_view.viewport()
+            index = self._list_view.indexAt(event.pos())
+            if index.isValid():
+                message = index.data(MessageRole)
+                if message and isinstance(message, ChatMessage):
+                    option = QStyleOptionViewItem()
+                    self._list_view.initViewItemOption(option)
+                    option.rect = self._list_view.visualRect(index)
+                    url = self._delegate._get_url_at_position(
+                        event.pos(), option, message
+                    )
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False

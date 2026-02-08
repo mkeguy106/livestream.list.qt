@@ -225,9 +225,9 @@ Planned features for future releases:
 - [x] Slow mode countdown — show countdown timer in input box indicating when you can send your next message
 - [x] Link tooltip previews — hover over links to see rich previews (YouTube thumbnails, Twitter embeds, etc.)
 - [x] Zero-width emotes — support 7TV/BTTV overlay emotes that stack on top of other emotes (e.g., slide, rainbow)
-- [ ] Smooth scrolling — animated scroll on new messages instead of jumping
+- [ ] Smooth scrolling — animated scroll on new messages instead of jumping. Qt defers QListView layout so `scrollbar.maximum()` is stale at call time. Possible fixes: (1) `QTimer.singleShot(0, ...)` to defer animation until after layout pass, (2) use `scrollbar.rangeChanged` signal to trigger animation when range updates, (3) hybrid — instant `scrollToBottom()` for auto-scroll, animate only on "New messages" button click where layout is stable
 - [ ] Streamer mode — auto-detect OBS/streaming software and hide usernames/whispers for privacy
-- [ ] Reply thread popup — open full reply threads in a dedicated popup window
+- [x] Reply thread popup — open full reply threads in a dedicated popup window
 - [x] User nicknames — assign custom local display names to other users
 - [x] User notes — attach notes to users, visible on their user card
 - [ ] Multiple accounts — quick account switcher popup for managing multiple logins per platform
@@ -235,9 +235,9 @@ Planned features for future releases:
 - [x] Previous message cycling — up/down arrows to cycle through previously sent messages
 - [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
 - [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
-- [ ] Pronouns display — show user pronouns on user cards
+- [x] Pronouns display — show user pronouns on user cards
 - [ ] Always-on-top / overlay mode — transparent overlay window for use with OBS or other apps
-- [ ] Prediction badge details — show picked outcome in prediction badges
+- [x] Prediction badge details — show picked outcome in prediction badges
 - [ ] Discover Channels — find new streamers to watch with browsable categories:
   - Top Streamers (highest viewer counts across platforms)
   - New Streamers (recently started streaming / rising channels)
