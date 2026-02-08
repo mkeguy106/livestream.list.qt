@@ -180,6 +180,7 @@ class BuiltinChatSettings:
     show_socials_banner: bool = True
     spellcheck_enabled: bool = True
     moderated_message_display: str = "strikethrough"  # strikethrough, truncated, hidden
+    user_card_hover: bool = True
     window: ChatWindowSettings = field(default_factory=ChatWindowSettings)
     # Theme-specific color settings
     dark_colors: ChatColorSettings = field(default_factory=ChatColorSettings)
@@ -647,6 +648,7 @@ class Settings:
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
+                user_card_hover=builtin_data.get("user_card_hover", True),
                 moderated_message_display=builtin_data.get(
                     "moderated_message_display", "strikethrough"
                 ),
@@ -809,6 +811,7 @@ class Settings:
                     "show_stream_title": self.chat.builtin.show_stream_title,
                     "show_socials_banner": self.chat.builtin.show_socials_banner,
                     "spellcheck_enabled": self.chat.builtin.spellcheck_enabled,
+                    "user_card_hover": self.chat.builtin.user_card_hover,
                     "moderated_message_display": self.chat.builtin.moderated_message_display,
                     "dark_colors": {
                         "alt_row_color_even": self.chat.builtin.dark_colors.alt_row_color_even,

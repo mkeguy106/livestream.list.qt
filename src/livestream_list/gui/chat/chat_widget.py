@@ -426,6 +426,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
         self._emotes_by_provider: dict[str, list] = {}
         self._link_preview_cache = LinkPreviewCache()
+        # User card hover state
+        self._card_hover_timer = QTimer(self)
+        self._card_hover_timer.setSingleShot(True)
+        self._card_hover_timer.setInterval(400)
+        self._card_hover_timer.timeout.connect(self._on_card_hover_timeout)
+        self._card_hover_user = None  # ChatUser or None
+        self._card_hover_pos = QPoint()
+        self._active_user_card: UserCardPopup | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -1898,6 +1906,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         spell_action.setChecked(self.settings.spellcheck_enabled)
         spell_action.toggled.connect(self._toggle_spellcheck)
 
+        # User card hover toggle
+        hover_action = menu.addAction("User Card on Hover")
+        hover_action.setCheckable(True)
+        hover_action.setChecked(self.settings.user_card_hover)
+        hover_action.toggled.connect(self._toggle_user_card_hover)
+
         menu.addSeparator()
 
         more_action = menu.addAction("More Settings...")
@@ -1943,6 +1957,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Toggle spellcheck on the input field."""
         self.settings.spellcheck_enabled = checked
         self.set_spellcheck_enabled(checked)
+        self.settings_changed.emit()
+
+    def _toggle_user_card_hover(self, checked: bool) -> None:
+        """Toggle user card on hover."""
+        self.settings.user_card_hover = checked
+        if not checked:
+            self._card_hover_timer.stop()
+            self._card_hover_user = None
         self.settings_changed.emit()
 
     def eventFilter(self, obj, event):  # noqa: N802
@@ -2016,6 +2038,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     name_rect = self._delegate._get_username_rect(option, message)
                     if name_rect.isValid() and name_rect.contains(event.pos()):
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
+                        # Start hover timer for user card
+                        if self.settings.user_card_hover and (
+                            not self._card_hover_timer.isActive()
+                            or self._card_hover_user != message.user
+                        ):
+                            self._card_hover_user = message.user
+                            self._card_hover_pos = event.globalPos()
+                            self._card_hover_timer.start()
                         return False
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
@@ -2032,6 +2062,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
                         return False
             viewport.setCursor(Qt.CursorShape.ArrowCursor)
+            # Cancel hover timer when not over a username
+            if self._card_hover_timer.isActive():
+                self._card_hover_timer.stop()
+                self._card_hover_user = None
             return False
 
         if isinstance(event, QHelpEvent):
@@ -2175,12 +2209,29 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._history_dialogs.add(dialog)
         dialog.show()
 
+    def _on_card_hover_timeout(self) -> None:
+        """Show user card after hover delay."""
+        if not self._card_hover_user:
+            return
+        # Skip if the card for this exact user is already showing
+        if (
+            self._active_user_card
+            and self._active_user_card._user.id == self._card_hover_user.id
+        ):
+            return
+        self._show_user_card(self._card_hover_user, self._card_hover_pos)
+
     def _show_user_card(self, user, pos) -> None:
         """Show a user card popup at the given global position."""
         from ...chat.models import ChatUser
 
         if not isinstance(user, ChatUser):
             return
+
+        # Close any existing user card
+        if self._active_user_card:
+            self._active_user_card.close()
+            self._active_user_card = None
 
         # Count messages from this user
         message_count = sum(
@@ -2198,10 +2249,17 @@ class ChatWidget(QWidget, ChatSearchMixin):
         )
         card.history_requested.connect(lambda u=user: self._show_user_history(u))
         card.show_at(pos)
+        self._active_user_card = card
+        card.destroyed.connect(lambda: self._clear_active_card(card))
 
         # Async fetch for Twitch users
         if user.platform == StreamPlatform.TWITCH:
             self._fetch_user_card_info(card, user.name)
+
+    def _clear_active_card(self, card) -> None:
+        """Clear the active card reference when it's destroyed."""
+        if self._active_user_card is card:
+            self._active_user_card = None
 
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
         """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
