@@ -878,6 +878,9 @@ class ChatWindow(QMainWindow):
         for widget in self._widgets.values():
             widget.set_emote_map(self.chat_manager.get_emote_map(widget.channel_key))
             widget.repaint_messages()
+            # Refresh emote picker icons if it's currently visible
+            if widget._emote_picker.isVisible():
+                widget._emote_picker.refresh_icons()
         self.update_animation_state()
 
     def _on_emote_map_updated(self, channel_key: str) -> None:

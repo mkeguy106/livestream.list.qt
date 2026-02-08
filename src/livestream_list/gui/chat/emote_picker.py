@@ -103,8 +103,28 @@ class EmotePickerWidget(QWidget):
 
     def set_emotes(self, emotes_by_provider: dict[str, list[ChatEmote]]) -> None:
         """Set the available emotes, organized by provider."""
+        if self._emotes is emotes_by_provider:
+            return
         self._emotes = emotes_by_provider
         self._rebuild_tabs()
+
+    def refresh_icons(self) -> None:
+        """Update button icons for emotes whose images have loaded since creation."""
+        scale = self._current_scale()
+        for btn, emote in self._all_buttons:
+            if btn.icon() and not btn.icon().isNull():
+                continue  # Already has an icon
+            if not self._image_store or not emote.image_set:
+                continue
+            image_set = emote.image_set.bind(self._image_store)
+            emote.image_set = image_set
+            image_ref = image_set.get_image_or_loaded(scale=scale)
+            if image_ref:
+                pixmap = image_ref.pixmap_or_load()
+                if pixmap and not pixmap.isNull():
+                    btn.setIcon(QIcon(pixmap))
+                    btn.setIconSize(pixmap.size())
+                    btn.setText("")
 
     def set_image_store(self, store: EmoteCache) -> None:
         """Set the shared image store."""
