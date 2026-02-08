@@ -187,13 +187,17 @@ class ImageSet:
         return list(self._images.values())
 
     def _pick_scale(self, scale: float) -> int:
-        # Clamp to available scales; prefer nearest
+        # Prefer smallest available scale >= requested; fall back to largest
         available = sorted(self._images.keys())
         if not available:
             return 2
-        return min(available, key=lambda s: abs(s - scale))
+        candidates = [s for s in available if s >= scale]
+        return candidates[0] if candidates else available[-1]
 
     @staticmethod
     def _pick_best_loaded(loaded: list[ImageRef], scale: float) -> ImageRef:
-        # If multiple loaded, choose closest to requested scale
-        return min(loaded, key=lambda img: abs(img.scale - scale))
+        # Prefer smallest loaded scale >= requested; fall back to largest loaded
+        candidates = [img for img in loaded if img.scale >= scale]
+        if candidates:
+            return min(candidates, key=lambda img: img.scale)
+        return max(loaded, key=lambda img: img.scale)

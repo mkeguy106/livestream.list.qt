@@ -45,7 +45,7 @@ FALLBACK_BADGE_IDS = {"owner", "moderator", "verified", "member"}
 URL_RE = re.compile(r'https?://[^\s<>\[\]"\'`)\]]+')
 
 # @mention detection (must be at start of text or preceded by whitespace)
-MENTION_RE = re.compile(r'(?:^|(?<=\s))@(\w+)')
+MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\w+)")
 
 # Shared alignment flags
 ALIGN_LEFT_VCENTER = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -180,8 +180,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
             painter.drawLine(int(cx), int(cy - r * 0.5), int(cx), int(cy + r * 0.35))
             # Cross-guard
             painter.drawLine(
-                int(cx - r * 0.3), int(cy - r * 0.05),
-                int(cx + r * 0.3), int(cy - r * 0.05),
+                int(cx - r * 0.3),
+                int(cy - r * 0.05),
+                int(cx + r * 0.3),
+                int(cy - r * 0.05),
             )
             # Handle
             pen.setWidthF(max(size * 0.15, 1.0))
@@ -328,14 +330,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
             return 0
         return max(1, int(round(pixmap.width() * (height / pixmap.height()))))
 
-    def _get_scaled_pixmap(self, key: str, pixmap: QPixmap, height: int) -> QPixmap:
+    def _get_scaled_pixmap(
+        self, key: str, pixmap: QPixmap, height: int, dpr: float = 1.0
+    ) -> QPixmap:
         """Return a cached scaled pixmap for the given key/height."""
-        cache_key = (key, height)
+        physical_height = int(height * dpr)
+        cache_key = (key, physical_height)
         cached = self._scaled_cache.get(cache_key)
         if cached and not cached.isNull():
             return cached
         smooth = Qt.TransformationMode.SmoothTransformation
-        scaled = pixmap.scaledToHeight(height, smooth)
+        scaled = pixmap.scaledToHeight(physical_height, smooth)
+        scaled.setDevicePixelRatio(dpr)
         if len(self._scaled_cache) >= self._scaled_cache_max:
             keys = list(self._scaled_cache.keys())
             for k in keys[: len(keys) // 4]:
@@ -344,15 +350,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
         return scaled
 
     def _get_scaled_animated_frames(
-        self, key: str, frames: list[QPixmap], height: int
+        self, key: str, frames: list[QPixmap], height: int, dpr: float = 1.0
     ) -> list[QPixmap]:
         """Return cached scaled frames for an animated emote."""
-        cache_key = (key, height)
+        physical_height = int(height * dpr)
+        cache_key = (key, physical_height)
         cached = self._scaled_animated_cache.get(cache_key)
         if cached:
             return cached
         smooth = Qt.TransformationMode.SmoothTransformation
-        scaled = [frame.scaledToHeight(height, smooth) for frame in frames]
+        scaled = [frame.scaledToHeight(physical_height, smooth) for frame in frames]
+        for frame in scaled:
+            frame.setDevicePixelRatio(dpr)
         if len(self._scaled_animated_cache) >= self._scaled_animated_cache_max:
             keys = list(self._scaled_animated_cache.keys())
             for k in keys[: len(keys) // 4]:
@@ -571,8 +580,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
             deleted_text = "<message deleted>"
             remaining_width = available_width - (x - rect.x())
             painter.drawText(
-                int(x), int(y), remaining_width, line_height,
-                ALIGN_LEFT_VCENTER, deleted_text,
+                int(x),
+                int(y),
+                remaining_width,
+                line_height,
+                ALIGN_LEFT_VCENTER,
+                deleted_text,
             )
             painter.restore()
             return
@@ -594,6 +607,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 fm,
                 message.is_moderated,
                 is_selected=is_selected,
+                dpr=self._current_scale(painter),
             )
         else:
             remaining_width = available_width - (text_x - rect.x())
@@ -624,6 +638,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         is_moderated: bool,
         is_selected: bool = False,
+        dpr: float = 1.0,
     ) -> None:
         """Paint text with inline emotes, wrapping at available_width."""
         start_x = x
@@ -663,11 +678,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
             frames = image_ref.frames_or_load() if image_ref else None
             if frames and self.settings.animate_emotes:
                 key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
-                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height)
+                scaled_frames = self._get_scaled_animated_frames(
+                    key, frames, emote_height, dpr
+                )
                 pixmap = self._select_animated_frame(image_ref, scaled_frames)
             elif frames:
                 key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
-                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height)
+                scaled_frames = self._get_scaled_animated_frames(
+                    key, frames, emote_height, dpr
+                )
                 pixmap = scaled_frames[0] if scaled_frames else frames[0]
             else:
                 pixmap = image_ref.pixmap_or_load() if image_ref else None
@@ -676,12 +695,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     scaled = pixmap
                 else:
                     key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
-                    scaled = self._get_scaled_pixmap(key, pixmap, emote_height)
-                emote_w = scaled.width()
+                    scaled = self._get_scaled_pixmap(key, pixmap, emote_height, dpr)
+                emote_w = int(scaled.width() / scaled.devicePixelRatio())
                 if emote.zero_width and last_emote_rect is not None:
-                    overlay_x = int(
-                        last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2
-                    )
+                    overlay_x = int(last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2)
                     overlay_y = int(last_emote_rect.y())
                     painter.drawPixmap(overlay_x, overlay_y, scaled)
                     last_end = end
@@ -827,9 +844,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     painter.setPen(saved_pen)
                 elif in_mention:
                     saved_pen = painter.pen()
-                    mention_color = (
-                        self._url_color_selected if is_selected else self._url_color
-                    )
+                    mention_color = self._url_color_selected if is_selected else self._url_color
                     painter.setPen(mention_color)
                     painter.drawText(
                         int(current_x),
@@ -963,9 +978,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            prefix_width += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            prefix_width += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             badge_count = 0
             for b in message.user.badges:
@@ -1091,9 +1107,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1161,9 +1178,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1250,12 +1268,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
             # Wrap emote if needed
             if emote.zero_width and last_emote_rect is not None:
-                overlay_x = int(
-                    last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2
-                )
+                overlay_x = int(last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2)
                 emote_rect = QRect(
-                    int(overlay_x), int(last_emote_rect.y()),
-                    int(emote_w), emote_height,
+                    int(overlay_x),
+                    int(last_emote_rect.y()),
+                    int(emote_w),
+                    emote_height,
                 )
                 if emote_rect.contains(pos):
                     return emote
@@ -1301,9 +1319,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1551,9 +1570,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1602,15 +1622,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if note_rect.contains(pos):
                 user_key = f"{message.user.platform.value}:{message.user.id}"
                 note_text = self.settings.user_notes.get(user_key, "")
-                return ChatBadge(
-                    id="note", name="note", image_url="", title=note_text
-                )
+                return ChatBadge(id="note", name="note", image_url="", title=note_text)
 
         return None
 
-    def _get_reply_context_rect(
-        self, option: QStyleOptionViewItem, message: ChatMessage
-    ) -> QRect:
+    def _get_reply_context_rect(self, option: QStyleOptionViewItem, message: ChatMessage) -> QRect:
         """Get the bounding rect of the reply context line, if present."""
         if not message.reply_parent_display_name:
             return QRect()
@@ -1631,9 +1647,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1689,9 +1706,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += QFontMetrics(ts_font).horizontalAdvance(
-                self.settings.ts_measure_text
-            ) + TIMESTAMP_PADDING
+            x += (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
 
         # Skip system text lines
         if message.is_system and message.system_text:
@@ -1753,13 +1771,27 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     segment = text[last_end:em_start]
                     prev_y = current_y
                     result = self._check_mention_words_at_pos(
-                        segment, current_x, current_y, start_x, right_edge,
-                        line_height, fm, pos, mention_ranges, last_end,
+                        segment,
+                        current_x,
+                        current_y,
+                        start_x,
+                        right_edge,
+                        line_height,
+                        fm,
+                        pos,
+                        mention_ranges,
+                        last_end,
                     )
                     if result:
                         return result
                     current_x, current_y = self._advance_wrapping_text(
-                        segment, current_x, current_y, start_x, right_edge, line_height, fm,
+                        segment,
+                        current_x,
+                        current_y,
+                        start_x,
+                        right_edge,
+                        line_height,
+                        fm,
                     )
                     if current_y != prev_y:
                         has_base_emote = False
@@ -1786,15 +1818,31 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if last_end < len(text):
                 segment = text[last_end:]
                 result = self._check_mention_words_at_pos(
-                    segment, current_x, current_y, start_x, right_edge,
-                    line_height, fm, pos, mention_ranges, last_end,
+                    segment,
+                    current_x,
+                    current_y,
+                    start_x,
+                    right_edge,
+                    line_height,
+                    fm,
+                    pos,
+                    mention_ranges,
+                    last_end,
                 )
                 if result:
                     return result
         else:
             result = self._check_mention_words_at_pos(
-                text, current_x, current_y, start_x, right_edge,
-                line_height, fm, pos, mention_ranges, 0,
+                text,
+                current_x,
+                current_y,
+                start_x,
+                right_edge,
+                line_height,
+                fm,
+                pos,
+                mention_ranges,
+                0,
             )
             if result:
                 return result
@@ -1837,7 +1885,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
             for m_start, m_end, username in mention_ranges:
                 if abs_word_start < m_end and abs_word_end > m_start:
                     word_rect = QRect(
-                        int(current_x), int(current_y), int(word_width), line_height,
+                        int(current_x),
+                        int(current_y),
+                        int(word_width),
+                        line_height,
                     )
                     if word_rect.contains(pos):
                         return username
