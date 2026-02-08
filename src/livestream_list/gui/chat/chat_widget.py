@@ -839,7 +839,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def set_connected(self) -> None:
         """Hide the connecting indicator and show the message list."""
-        self._connecting_label.setText("Waiting for messages\u2026")
+        self._connecting_label.hide()
         self._list_view.show()
         # Stop any active reconnect countdown
         if hasattr(self, "_reconnect_timer") and self._reconnect_timer.isActive():
