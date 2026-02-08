@@ -680,6 +680,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._raid_banner.hide()
         layout.addWidget(self._raid_banner)
         self._raid_auto_hide_timer: QTimer | None = None
+        self._raid_remaining: int = 0
+        self._raid_base_text: str = ""
 
         # New messages indicator (hidden by default)
         self._new_msg_button = QPushButton("New messages")
@@ -1672,19 +1674,27 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_train_banner.hide()
 
     def show_raid_banner(self, raid_msg: ChatMessage) -> None:
-        """Show the raid banner with raider info and auto-hide after 15s."""
+        """Show the raid banner with raider info and 120s countdown."""
         raider = raid_msg.user.display_name or raid_msg.user.name
         count = raid_msg.raid_viewer_count
-        self._raid_label.setText(f"\U0001f6a8 {raider} is raiding with {count:,} viewers!")
+        self._raid_base_text = f"\U0001f6a8 {raider} is raiding with {count:,} viewers!"
+        self._raid_remaining = 120
+        self._raid_label.setText(f"{self._raid_base_text}  ({self._raid_remaining}s)")
         self._raid_banner.show()
-        # Auto-hide after 15 seconds
         if self._raid_auto_hide_timer:
             self._raid_auto_hide_timer.stop()
         self._raid_auto_hide_timer = QTimer(self)
-        self._raid_auto_hide_timer.setSingleShot(True)
-        self._raid_auto_hide_timer.setInterval(15000)
-        self._raid_auto_hide_timer.timeout.connect(self._dismiss_raid_banner)
+        self._raid_auto_hide_timer.setInterval(1000)
+        self._raid_auto_hide_timer.timeout.connect(self._raid_countdown_tick)
         self._raid_auto_hide_timer.start()
+
+    def _raid_countdown_tick(self) -> None:
+        """Update the raid banner countdown each second."""
+        self._raid_remaining -= 1
+        if self._raid_remaining <= 0:
+            self._dismiss_raid_banner()
+            return
+        self._raid_label.setText(f"{self._raid_base_text}  ({self._raid_remaining}s)")
 
     def _dismiss_raid_banner(self) -> None:
         """Dismiss the raid banner."""
