@@ -59,45 +59,39 @@ pytest tests/test_file.py::test_name -v
 
 ## Architecture
 
-### Threading Model (Critical)
+### Module Structure
 
-Qt requires UI updates on the main thread. Pattern for async operations using AsyncWorker:
-
-```python
-class AsyncWorker(QThread):
-    finished = Signal(object)
-    error = Signal(str)
-    progress = Signal(str, str)  # message, detail
-
-    def __init__(self, coro_func, monitor=None, parent=None):
-        super().__init__(parent)
-        self.coro_func = coro_func
-        self.monitor = monitor
-
-    def run(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # CRITICAL: Reset aiohttp sessions for this event loop
-            if self.monitor:
-                self.monitor.reset_all_sessions()
-            result = loop.run_until_complete(self.coro_func())
-            self.finished.emit(result)
-            # Close sessions before closing loop
-            if self.monitor:
-                loop.run_until_complete(self.monitor.close_all_sessions())
-        except Exception as e:
-            self.error.emit(str(e))
-        finally:
-            if self.monitor:
-                self.monitor.reset_all_sessions()
-            loop.close()
+```
+src/livestream_list/
+├── api/                  # Platform API clients (Twitch Helix+GraphQL, YouTube/yt-dlp, Kick REST)
+├── chat/
+│   ├── connections/      # Per-platform WebSocket/IRC connections (BaseChatConnection subclasses)
+│   ├── emotes/           # Emote fetching, caching (two-tier LRU+disk), rendering, matching
+│   ├── auth/             # Kick OAuth 2.1+PKCE, YouTube auth helpers
+│   ├── spellcheck/       # Spellcheck integration
+│   ├── manager.py        # ChatManager - orchestrates connections, emotes, EventSub, routing
+│   ├── models.py         # ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses
+│   └── chat_log_store.py # JSONL/text per-channel logging with disk rotation
+├── core/                 # Data models, settings, theme definitions, monitor, streamlink
+├── gui/
+│   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, delegate, emote picker, etc.)
+│   ├── dialogs/          # Preferences, theme editor, add channel, import/export dialogs
+│   ├── stream_list/      # Stream list model and custom delegate
+│   ├── app.py            # Main QApplication, AsyncWorker
+│   ├── main_window.py    # QMainWindow, toolbar, stream list container
+│   └── theme.py          # ThemeManager singleton, stylesheet generation
+└── notifications/        # Desktop notification integration
 ```
 
-**Key points:**
+### Threading Model (Critical)
+
+Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a QThread subclass that runs async coroutines in a background thread, creating its own event loop. It emits `finished(object)`, `error(str)`, and `progress(str, str)` signals.
+
+**Key rules:**
 - Always pass `parent=self` when creating AsyncWorker to prevent QThread garbage collection crashes
 - Use Qt Signals for cross-thread communication (thread-safe)
-- Call `monitor.reset_all_sessions()` before/after async operations in threads
+- Call `monitor.reset_all_sessions()` before/after async operations in threads (aiohttp sessions are tied to event loops)
+- Never call `QTimer.singleShot` from a background thread — use a Qt Signal instead
 
 ### Data Flow
 
@@ -134,9 +128,9 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Kick chat**: Pusher WebSocket for reading (`wss://ws-us2.pusher.com`). Uses OAuth 2.1 + PKCE for auth. Sends messages via official API (`POST https://api.kick.com/public/v1/chat`). Kick echoes your own messages back via websocket (no local echo needed, unlike Twitch).
 
-**Kick OAuth**: App credentials hardcoded (`DEFAULT_KICK_CLIENT_ID`/`SECRET` in `chat/auth/kick_auth.py`). Requires `chat:write` and `user:read` scopes enabled in Kick Developer Portal. Uses port 65432 for redirect (`http://localhost:65432/redirect`). Auto-refreshes expired tokens on 401.
+**Kick OAuth**: OAuth 2.1 + PKCE flow in `chat/auth/kick_auth.py`. Auto-refreshes expired tokens on 401.
 
-**YouTube chat**: Uses pytchat library for reading chat messages. Message sending uses InnerTube API with SAPISIDHASH authentication (requires YouTube cookies: SID, HSID, SSID, APISID, SAPISID). Supports SuperChat tier detection and membership badge rendering.
+**YouTube chat**: pytchat for reading. Message sending uses InnerTube API with SAPISIDHASH authentication (requires browser cookies copied into Preferences > Accounts).
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
@@ -152,24 +146,40 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Socials Banner**: Fetched via `SocialsFetchWorker`. Twitch uses GraphQL, YouTube scrapes `/about` page (note: `UC...` IDs need `/channel/UC.../about` format), Kick uses REST API.
 
+**Chat Logging**: `ChatLogWriter` in `chat/chat_log_store.py` writes buffered JSONL + plain text per-channel logs. Date-based files with configurable disk limit and LRU deletion. History loads from JSONL on channel open.
+
+### Theme System
+
+Two-file architecture:
+- `core/theme_data.py` — `ThemeData` dataclass, 32 color fields across 8 categories, 6 built-in theme definitions, theme file I/O (load/save/import/export). Custom themes stored in `~/.config/livestream-list-qt/themes/*.json`.
+- `gui/theme.py` — `ThemeManager` singleton, runtime theme state, stylesheet generation with caching, dark/light mode detection via QPalette. Chat color overrides via `ChatColorSettings`.
+
+Theme editor dialog: `gui/dialogs/theme_editor.py`.
+
 ### Key Files
 
 Core architecture files (most other files follow patterns established in these):
 
 | File | Purpose |
 |------|---------|
-| `src/livestream_list/gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
-| `src/livestream_list/gui/main_window.py` | QMainWindow, StreamRow widget, all dialogs |
-| `src/livestream_list/gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
-| `src/livestream_list/gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
-| `src/livestream_list/gui/chat/message_model.py` | Chat message list model with deferred trim |
-| `src/livestream_list/chat/manager.py` | ChatManager - connection lifecycle, emote loading, EventSub, message routing |
-| `src/livestream_list/chat/connections/twitch.py` | Twitch IRC WebSocket connection |
-| `src/livestream_list/chat/models.py` | ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses |
-| `src/livestream_list/core/monitor.py` | StreamMonitor - channel tracking, refresh logic |
-| `src/livestream_list/core/models.py` | Channel, Livestream, StreamPlatform data classes |
-| `src/livestream_list/core/settings.py` | Settings persistence (JSON) |
-| `src/livestream_list/api/twitch.py` | Twitch Helix + GraphQL client |
+| `gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
+| `gui/main_window.py` | QMainWindow, toolbar, stream list container |
+| `gui/theme.py` | ThemeManager singleton, stylesheet generation |
+| `gui/dialogs/preferences.py` | Preferences dialog (accounts, chat, notifications, themes) |
+| `gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
+| `gui/chat/chat_window.py` | Chat QMainWindow, tab management, pop-out windows |
+| `gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
+| `gui/chat/emote_picker.py` | Searchable emote grid popup with animation/viewport culling |
+| `chat/manager.py` | ChatManager - connection lifecycle, emote loading, EventSub, routing |
+| `chat/models.py` | ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses |
+| `chat/emotes/cache.py` | Two-tier emote cache (memory LRU 2000 + disk 500MB) |
+| `core/monitor.py` | StreamMonitor - channel tracking, refresh logic |
+| `core/models.py` | Channel, Livestream, StreamPlatform data classes |
+| `core/settings.py` | Settings persistence (JSON), all app preferences |
+| `core/theme_data.py` | Theme definitions, built-in themes, theme file I/O |
+| `api/twitch.py` | Twitch Helix + GraphQL client |
+
+All paths relative to `src/livestream_list/`.
 
 ### Versioning
 
@@ -197,7 +207,6 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | Port 65432 already in use (OAuth) | `ReuseAddrHTTPServer` with `allow_reuse_address = True` |
 | offset-naive/offset-aware datetime mismatch | Use `datetime.now(timezone.utc)` |
 | Kick wrong duration | Use `start_time` field, add UTC timezone to parsed datetime |
-| OAuth login UI not updating | Use Qt Signal instead of QTimer.singleShot from background thread |
 | Kick chat send 401 | Token expired; auto-refresh handles it. If persists, re-login (check `chat:write` scope in Dev Portal) |
 | auth_state_changed affects wrong platform | Handler must check each widget's platform, not apply blindly |
 | Kick shows duplicate messages on send | Don't use local echo for Kick (it echoes via websocket unlike Twitch) |
