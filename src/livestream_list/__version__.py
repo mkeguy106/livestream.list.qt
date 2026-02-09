@@ -1,3 +1,3 @@
 """Version information for Livestream List."""
 
-__version__ = "0.30.0"
+__version__ = "1.0.0"
