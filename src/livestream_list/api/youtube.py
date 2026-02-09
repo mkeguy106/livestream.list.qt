@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns to extract YouTube page data
 # ytInitialPlayerResponse contains videoDetails with isLive status
-PLAYER_RESPONSE_RE = re.compile(
-    r"var ytInitialPlayerResponse\s*=\s*(\{.+?\});", re.DOTALL
-)
+PLAYER_RESPONSE_RE = re.compile(r"var ytInitialPlayerResponse\s*=\s*(\{.+?\});", re.DOTALL)
 # ytInitialData contains page structure (used as fallback)
 INITIAL_DATA_RE = re.compile(r"var ytInitialData\s*=\s*({.+?});</script>", re.DOTALL)
 
@@ -137,9 +135,7 @@ class YouTubeApiClient(BaseApiClient):
         url = self._build_channel_live_url(channel_id)
         try:
             timeout = aiohttp.ClientTimeout(total=15)
-            async with self.session.get(
-                url, headers=self.SCRAPE_HEADERS, timeout=timeout
-            ) as resp:
+            async with self.session.get(url, headers=self.SCRAPE_HEADERS, timeout=timeout) as resp:
                 if resp.status == 200:
                     return await resp.text()
                 else:

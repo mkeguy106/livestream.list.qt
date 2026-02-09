@@ -5,10 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -106,6 +104,10 @@ class PreferencesDialog(QDialog):
         chat_tab = self._create_chat_tab()
         tabs.addTab(chat_tab, "Chat")
 
+        # Appearance tab
+        appearance_tab = self._create_appearance_tab()
+        tabs.addTab(appearance_tab, "Appearance")
+
         # Accounts tab
         accounts_tab = self._create_accounts_tab()
         tabs.addTab(accounts_tab, "Accounts")
@@ -116,15 +118,9 @@ class PreferencesDialog(QDialog):
         # Dialog buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
-        apply_btn = buttons.addButton(QDialogButtonBox.Apply)
-        apply_btn.clicked.connect(self._on_apply)
         layout.addWidget(buttons)
 
         self._loading = False  # Init complete, allow updates
-
-    def _on_apply(self):
-        """Explicitly save all current settings."""
-        self.app.save_settings()
 
     def closeEvent(self, event):  # noqa: N802
         """Save dialog size on close."""
@@ -186,6 +182,24 @@ class PreferencesDialog(QDialog):
         storage_layout.addRow("Emote cache size:", self.emote_cache_spin)
 
         layout.addWidget(storage_group)
+
+        # UI Style group (moved from Appearance group)
+        style_group = QGroupBox("UI Style")
+        style_layout = QFormLayout(style_group)
+
+        self.style_combo = QComboBox()
+        for i, style in UI_STYLES.items():
+            self.style_combo.addItem(style["name"], i)
+        self.style_combo.setCurrentIndex(self.app.settings.ui_style)
+        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
+        style_layout.addRow("UI Style:", self.style_combo)
+
+        self.platform_colors_cb = QCheckBox("Platform colors")
+        self.platform_colors_cb.setChecked(self.app.settings.platform_colors)
+        self.platform_colors_cb.stateChanged.connect(self._on_platform_colors_changed)
+        style_layout.addRow(self.platform_colors_cb)
+
+        layout.addWidget(style_group)
 
         # Notifications group
         notif_group = QGroupBox("Notifications")
@@ -306,24 +320,6 @@ class PreferencesDialog(QDialog):
         notif_layout.addRow(self.test_notif_btn)
 
         layout.addWidget(notif_group)
-
-        # Appearance group
-        appear_group = QGroupBox("Appearance")
-        appear_layout = QFormLayout(appear_group)
-
-        self.style_combo = QComboBox()
-        for i, style in UI_STYLES.items():
-            self.style_combo.addItem(style["name"], i)
-        self.style_combo.setCurrentIndex(self.app.settings.ui_style)
-        self.style_combo.currentIndexChanged.connect(self._on_style_changed)
-        appear_layout.addRow("UI Style:", self.style_combo)
-
-        self.platform_colors_cb = QCheckBox("Platform colors")
-        self.platform_colors_cb.setChecked(self.app.settings.platform_colors)
-        self.platform_colors_cb.stateChanged.connect(self._on_platform_colors_changed)
-        appear_layout.addRow(self.platform_colors_cb)
-
-        layout.addWidget(appear_group)
 
         # Channel Information group
         info_group = QGroupBox("Channel Information")
@@ -655,174 +651,6 @@ class PreferencesDialog(QDialog):
         self.moderated_display_combo.currentIndexChanged.connect(self._on_chat_changed)
         builtin_layout.addRow("Deleted messages:", self.moderated_display_combo)
 
-        # Theme color selector - allows editing dark or light mode colors
-        builtin_layout.addRow(QLabel("<b>Theme Colors</b>"))
-        self.color_theme_combo = QComboBox()
-        self.color_theme_combo.addItem("Dark Mode", "dark")
-        self.color_theme_combo.addItem("Light Mode", "light")
-        self.color_theme_combo.currentIndexChanged.connect(self._on_color_theme_changed)
-        builtin_layout.addRow("Edit colors for:", self.color_theme_combo)
-
-        # Even row color picker
-        even_color_row = QHBoxLayout()
-        self.alt_row_even_swatch = QPushButton()
-        self.alt_row_even_swatch.setFixedSize(24, 24)
-        self.alt_row_even_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        even_color_row.addWidget(self.alt_row_even_swatch)
-        self.alt_row_even_edit = QLineEdit()
-        self.alt_row_even_edit.setText(
-            self.app.settings.chat.builtin.dark_colors.alt_row_color_even
-        )
-        self.alt_row_even_edit.setMaximumWidth(100)
-        self.alt_row_even_edit.editingFinished.connect(self._on_chat_changed)
-        self.alt_row_even_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.alt_row_even_swatch, t)
-        )
-        even_color_row.addWidget(self.alt_row_even_edit)
-        self.alt_row_even_reset = QPushButton("Reset")
-        self.alt_row_even_reset.setFixedWidth(50)
-        self.alt_row_even_reset.clicked.connect(
-            lambda: self._reset_color(self.alt_row_even_edit, "#00000000")
-        )
-        even_color_row.addWidget(self.alt_row_even_reset)
-        even_color_row.addStretch()
-        self.alt_row_even_swatch.clicked.connect(
-            lambda: self._pick_color_alpha(self.alt_row_even_edit, self.alt_row_even_swatch)
-        )
-        self._update_swatch(self.alt_row_even_swatch, self.alt_row_even_edit.text())
-        self.alt_row_even_label = QLabel("Even row color:")
-        builtin_layout.addRow(self.alt_row_even_label, even_color_row)
-
-        # Odd row color picker
-        odd_color_row = QHBoxLayout()
-        self.alt_row_odd_swatch = QPushButton()
-        self.alt_row_odd_swatch.setFixedSize(24, 24)
-        self.alt_row_odd_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        odd_color_row.addWidget(self.alt_row_odd_swatch)
-        self.alt_row_odd_edit = QLineEdit()
-        self.alt_row_odd_edit.setText(self.app.settings.chat.builtin.dark_colors.alt_row_color_odd)
-        self.alt_row_odd_edit.setMaximumWidth(100)
-        self.alt_row_odd_edit.editingFinished.connect(self._on_chat_changed)
-        self.alt_row_odd_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.alt_row_odd_swatch, t)
-        )
-        odd_color_row.addWidget(self.alt_row_odd_edit)
-        self.alt_row_odd_reset = QPushButton("Reset")
-        self.alt_row_odd_reset.setFixedWidth(50)
-        self.alt_row_odd_reset.clicked.connect(
-            lambda: self._reset_color(self.alt_row_odd_edit, "#0fffffff")
-        )
-        odd_color_row.addWidget(self.alt_row_odd_reset)
-        odd_color_row.addStretch()
-        self.alt_row_odd_swatch.clicked.connect(
-            lambda: self._pick_color_alpha(self.alt_row_odd_edit, self.alt_row_odd_swatch)
-        )
-        self._update_swatch(self.alt_row_odd_swatch, self.alt_row_odd_edit.text())
-        self.alt_row_odd_label = QLabel("Odd row color:")
-        builtin_layout.addRow(self.alt_row_odd_label, odd_color_row)
-
-        # Show/hide color pickers based on checkbox state
-        alt_visible = self.chat_alt_rows_cb.isChecked()
-        for w in (
-            self.alt_row_even_label,
-            self.alt_row_even_swatch,
-            self.alt_row_even_edit,
-            self.alt_row_even_reset,
-            self.alt_row_odd_label,
-            self.alt_row_odd_swatch,
-            self.alt_row_odd_edit,
-            self.alt_row_odd_reset,
-        ):
-            w.setVisible(alt_visible)
-        self.chat_alt_rows_cb.stateChanged.connect(self._toggle_alt_row_colors)
-
-        # Tab active color with swatch
-        active_row = QHBoxLayout()
-        self.tab_active_swatch = QPushButton()
-        self.tab_active_swatch.setFixedSize(24, 24)
-        self.tab_active_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        active_row.addWidget(self.tab_active_swatch)
-        self.tab_active_color_edit = QLineEdit()
-        self.tab_active_color_edit.setText(
-            self.app.settings.chat.builtin.dark_colors.tab_active_color
-        )
-        self.tab_active_color_edit.setMaximumWidth(100)
-        self.tab_active_color_edit.editingFinished.connect(self._on_chat_changed)
-        self.tab_active_color_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.tab_active_swatch, t)
-        )
-        active_row.addWidget(self.tab_active_color_edit)
-        self.tab_active_reset = QPushButton("Reset")
-        self.tab_active_reset.setFixedWidth(50)
-        self.tab_active_reset.clicked.connect(
-            lambda: self._reset_color(self.tab_active_color_edit, "#6441a5")
-        )
-        active_row.addWidget(self.tab_active_reset)
-        active_row.addStretch()
-        self.tab_active_swatch.clicked.connect(
-            lambda: self._pick_color(self.tab_active_color_edit, self.tab_active_swatch)
-        )
-        self._update_swatch(self.tab_active_swatch, self.tab_active_color_edit.text())
-        builtin_layout.addRow("Tab active color:", active_row)
-
-        # Tab inactive color with swatch
-        inactive_row = QHBoxLayout()
-        self.tab_inactive_swatch = QPushButton()
-        self.tab_inactive_swatch.setFixedSize(24, 24)
-        self.tab_inactive_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        inactive_row.addWidget(self.tab_inactive_swatch)
-        self.tab_inactive_color_edit = QLineEdit()
-        self.tab_inactive_color_edit.setText(
-            self.app.settings.chat.builtin.dark_colors.tab_inactive_color
-        )
-        self.tab_inactive_color_edit.setMaximumWidth(100)
-        self.tab_inactive_color_edit.editingFinished.connect(self._on_chat_changed)
-        self.tab_inactive_color_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.tab_inactive_swatch, t)
-        )
-        inactive_row.addWidget(self.tab_inactive_color_edit)
-        self.tab_inactive_reset = QPushButton("Reset")
-        self.tab_inactive_reset.setFixedWidth(50)
-        self.tab_inactive_reset.clicked.connect(
-            lambda: self._reset_color(self.tab_inactive_color_edit, "#16213e")
-        )
-        inactive_row.addWidget(self.tab_inactive_reset)
-        inactive_row.addStretch()
-        self.tab_inactive_swatch.clicked.connect(
-            lambda: self._pick_color(self.tab_inactive_color_edit, self.tab_inactive_swatch)
-        )
-        self._update_swatch(self.tab_inactive_swatch, self.tab_inactive_color_edit.text())
-        builtin_layout.addRow("Tab inactive color:", inactive_row)
-
-        # Mention highlight color picker
-        mention_row = QHBoxLayout()
-        self.mention_color_swatch = QPushButton()
-        self.mention_color_swatch.setFixedSize(24, 24)
-        self.mention_color_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        mention_row.addWidget(self.mention_color_swatch)
-        self.mention_color_edit = QLineEdit()
-        self.mention_color_edit.setText(
-            self.app.settings.chat.builtin.dark_colors.mention_highlight_color
-        )
-        self.mention_color_edit.setMaximumWidth(100)
-        self.mention_color_edit.editingFinished.connect(self._on_chat_changed)
-        self.mention_color_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.mention_color_swatch, t)
-        )
-        mention_row.addWidget(self.mention_color_edit)
-        self.mention_color_reset = QPushButton("Reset")
-        self.mention_color_reset.setFixedWidth(50)
-        self.mention_color_reset.clicked.connect(
-            lambda: self._reset_color(self.mention_color_edit, "#33ff8800")
-        )
-        mention_row.addWidget(self.mention_color_reset)
-        mention_row.addStretch()
-        self.mention_color_swatch.clicked.connect(
-            lambda: self._pick_color_alpha(self.mention_color_edit, self.mention_color_swatch)
-        )
-        self._update_swatch(self.mention_color_swatch, self.mention_color_edit.text())
-        builtin_layout.addRow("Mention highlight:", mention_row)
-
         # Banner settings separator
         builtin_layout.addRow(QLabel("<b>Chat Banners</b>"))
 
@@ -830,85 +658,13 @@ class PreferencesDialog(QDialog):
         self.show_stream_title_cb = QCheckBox("Show stream title banner")
         self.show_stream_title_cb.setChecked(self.app.settings.chat.builtin.show_stream_title)
         self.show_stream_title_cb.stateChanged.connect(self._on_chat_changed)
-        self.show_stream_title_cb.stateChanged.connect(self._toggle_banner_colors)
         builtin_layout.addRow(self.show_stream_title_cb)
 
         # Show socials toggle
         self.show_socials_cb = QCheckBox("Show channel socials banner")
         self.show_socials_cb.setChecked(self.app.settings.chat.builtin.show_socials_banner)
         self.show_socials_cb.stateChanged.connect(self._on_chat_changed)
-        self.show_socials_cb.stateChanged.connect(self._toggle_banner_colors)
         builtin_layout.addRow(self.show_socials_cb)
-
-        # Banner background color picker with reset button
-        banner_bg_row = QHBoxLayout()
-        self.banner_bg_swatch = QPushButton()
-        self.banner_bg_swatch.setFixedSize(24, 24)
-        self.banner_bg_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        banner_bg_row.addWidget(self.banner_bg_swatch)
-        self.banner_bg_edit = QLineEdit()
-        self.banner_bg_edit.setText(self.app.settings.chat.builtin.dark_colors.banner_bg_color)
-        self.banner_bg_edit.setMaximumWidth(100)
-        self.banner_bg_edit.editingFinished.connect(self._on_chat_changed)
-        self.banner_bg_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.banner_bg_swatch, t)
-        )
-        banner_bg_row.addWidget(self.banner_bg_edit)
-        self.banner_bg_reset = QPushButton("Reset")
-        self.banner_bg_reset.setFixedWidth(50)
-        self.banner_bg_reset.clicked.connect(
-            lambda: self._reset_color(self.banner_bg_edit, "#16213e")
-        )
-        banner_bg_row.addWidget(self.banner_bg_reset)
-        banner_bg_row.addStretch()
-        self.banner_bg_swatch.clicked.connect(
-            lambda: self._pick_color(self.banner_bg_edit, self.banner_bg_swatch)
-        )
-        self._update_swatch(self.banner_bg_swatch, self.banner_bg_edit.text())
-        self.banner_bg_label = QLabel("Banner background:")
-        builtin_layout.addRow(self.banner_bg_label, banner_bg_row)
-
-        # Banner text color picker with reset button
-        banner_text_row = QHBoxLayout()
-        self.banner_text_swatch = QPushButton()
-        self.banner_text_swatch.setFixedSize(24, 24)
-        self.banner_text_swatch.setCursor(Qt.CursorShape.PointingHandCursor)
-        banner_text_row.addWidget(self.banner_text_swatch)
-        self.banner_text_edit = QLineEdit()
-        self.banner_text_edit.setText(self.app.settings.chat.builtin.dark_colors.banner_text_color)
-        self.banner_text_edit.setMaximumWidth(100)
-        self.banner_text_edit.editingFinished.connect(self._on_chat_changed)
-        self.banner_text_edit.textChanged.connect(
-            lambda t: self._update_swatch(self.banner_text_swatch, t)
-        )
-        banner_text_row.addWidget(self.banner_text_edit)
-        self.banner_text_reset = QPushButton("Reset")
-        self.banner_text_reset.setFixedWidth(50)
-        self.banner_text_reset.clicked.connect(
-            lambda: self._reset_color(self.banner_text_edit, "#cccccc")
-        )
-        banner_text_row.addWidget(self.banner_text_reset)
-        banner_text_row.addStretch()
-        self.banner_text_swatch.clicked.connect(
-            lambda: self._pick_color(self.banner_text_edit, self.banner_text_swatch)
-        )
-        self._update_swatch(self.banner_text_swatch, self.banner_text_edit.text())
-        self.banner_text_label = QLabel("Banner text:")
-        builtin_layout.addRow(self.banner_text_label, banner_text_row)
-
-        # Show/hide banner color pickers based on checkbox states
-        banner_visible = self.show_stream_title_cb.isChecked() or self.show_socials_cb.isChecked()
-        for w in (
-            self.banner_bg_label,
-            self.banner_bg_swatch,
-            self.banner_bg_edit,
-            self.banner_bg_reset,
-            self.banner_text_label,
-            self.banner_text_swatch,
-            self.banner_text_edit,
-            self.banner_text_reset,
-        ):
-            w.setVisible(banner_visible)
 
         layout.addWidget(self.builtin_group)
 
@@ -1098,6 +854,19 @@ class PreferencesDialog(QDialog):
         layout.addStretch()
         scroll.setWidget(widget)
         return scroll
+
+    def _create_appearance_tab(self) -> QWidget:
+        """Create the Appearance tab with the theme editor."""
+        from .theme_editor import ThemeEditorWidget
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+
+        self._theme_editor = ThemeEditorWidget(self.app, parent=widget)
+        layout.addWidget(self._theme_editor)
+
+        return widget
 
     def _create_accounts_tab(self) -> QWidget:
         """Create the Accounts tab."""
@@ -1444,26 +1213,6 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_stream_title = self.show_stream_title_cb.isChecked()
         self.app.settings.chat.builtin.show_socials_banner = self.show_socials_cb.isChecked()
 
-        # Save color settings to the appropriate theme (dark or light)
-        is_dark = self.color_theme_combo.currentData() == "dark"
-        colors = (
-            self.app.settings.chat.builtin.dark_colors
-            if is_dark
-            else self.app.settings.chat.builtin.light_colors
-        )
-        colors.alt_row_color_even = self.alt_row_even_edit.text().strip() or "#00000000"
-        colors.alt_row_color_odd = self.alt_row_odd_edit.text().strip() or "#0fffffff"
-        colors.tab_active_color = self.tab_active_color_edit.text().strip() or "#6441a5"
-        colors.tab_inactive_color = self.tab_inactive_color_edit.text().strip() or (
-            "#16213e" if is_dark else "#e0e0e8"
-        )
-        colors.mention_highlight_color = self.mention_color_edit.text().strip() or "#33ff8800"
-        colors.banner_bg_color = self.banner_bg_edit.text().strip() or (
-            "#16213e" if is_dark else "#e8e8f0"
-        )
-        colors.banner_text_color = self.banner_text_edit.text().strip() or (
-            "#cccccc" if is_dark else "#333333"
-        )
         providers = []
         if self.emote_7tv_cb.isChecked():
             providers.append("7tv")
@@ -1509,142 +1258,6 @@ class PreferencesDialog(QDialog):
         else:
             text = f"{usage / (1024 * 1024):.1f} MB"
         self.log_disk_usage_label.setText(text)
-
-    def _on_color_theme_changed(self) -> None:
-        """Reload color pickers when switching between dark/light mode editing."""
-        is_dark = self.color_theme_combo.currentData() == "dark"
-        colors = (
-            self.app.settings.chat.builtin.dark_colors
-            if is_dark
-            else self.app.settings.chat.builtin.light_colors
-        )
-
-        # Prevent cascading updates while loading new values
-        self._loading = True
-        try:
-            # Update all color pickers with the selected theme's colors
-            self.alt_row_even_edit.setText(colors.alt_row_color_even)
-            self.alt_row_odd_edit.setText(colors.alt_row_color_odd)
-            self.tab_active_color_edit.setText(colors.tab_active_color)
-            self.tab_inactive_color_edit.setText(colors.tab_inactive_color)
-            self.mention_color_edit.setText(colors.mention_highlight_color)
-            self.banner_bg_edit.setText(colors.banner_bg_color)
-            self.banner_text_edit.setText(colors.banner_text_color)
-
-            # Update swatches
-            self._update_swatch(self.alt_row_even_swatch, colors.alt_row_color_even)
-            self._update_swatch(self.alt_row_odd_swatch, colors.alt_row_color_odd)
-            self._update_swatch(self.tab_active_swatch, colors.tab_active_color)
-            self._update_swatch(self.tab_inactive_swatch, colors.tab_inactive_color)
-            self._update_swatch(self.mention_color_swatch, colors.mention_highlight_color)
-            self._update_swatch(self.banner_bg_swatch, colors.banner_bg_color)
-            self._update_swatch(self.banner_text_swatch, colors.banner_text_color)
-        finally:
-            self._loading = False
-
-    def _update_swatch(self, button: QPushButton, hex_color: str) -> None:
-        """Update a color swatch button's background from a hex string."""
-        color = QColor(hex_color)
-        if color.isValid():
-            if color.alpha() < 255:
-                css_color = (
-                    f"rgba({color.red()}, {color.green()}, {color.blue()}, "
-                    f"{color.alpha() / 255:.2f})"
-                )
-            else:
-                css_color = hex_color
-            button.setStyleSheet(
-                f"background-color: {css_color}; border: 1px solid #666; border-radius: 3px;"
-            )
-        else:
-            button.setStyleSheet(
-                "background-color: #333; border: 1px solid #666; border-radius: 3px;"
-            )
-
-    def _pick_color(self, line_edit: QLineEdit, swatch: QPushButton) -> None:
-        """Open a color picker dialog and update the line edit and swatch."""
-        current = QColor(line_edit.text().strip())
-        if not current.isValid():
-            current = QColor("#6441a5")
-        color = QColorDialog.getColor(current, self, "Pick a color")
-        if color.isValid():
-            line_edit.setText(color.name())
-            self._update_swatch(swatch, color.name())
-            self._on_chat_changed()
-
-    def _pick_color_alpha(self, line_edit: QLineEdit, swatch: QPushButton) -> None:
-        """Open a color picker with alpha channel and update the line edit and swatch."""
-        text = line_edit.text().strip()
-        current = None
-        # Parse #AARRGGBB format (8 hex digits) manually since QColor doesn't handle it well
-        if text.startswith("#") and len(text) == 9:
-            try:
-                a = int(text[1:3], 16)
-                r = int(text[3:5], 16)
-                g = int(text[5:7], 16)
-                b = int(text[7:9], 16)
-                current = QColor(r, g, b, a)
-            except ValueError:
-                pass
-        if current is None or not current.isValid():
-            # Try standard QColor parsing for #RRGGBB format
-            current = QColor(text)
-        if not current.isValid():
-            current = QColor(255, 255, 255, 15)
-        color = QColorDialog.getColor(
-            current,
-            self,
-            "Pick a color",
-            QColorDialog.ColorDialogOption.ShowAlphaChannel,
-        )
-        if color.isValid():
-            # If user picked a color but alpha is very low (nearly invisible), assume they
-            # want it visible. This handles cases where the starting color was transparent
-            # or nearly transparent (like the default #0fffffff with alpha=15).
-            a = color.alpha()
-            if a < 32:
-                a = 255  # Make it fully opaque
-            r, g, b = color.red(), color.green(), color.blue()
-            # Format as #AARRGGBB for Qt
-            hex_color = f"#{a:02x}{r:02x}{g:02x}{b:02x}"
-            line_edit.setText(hex_color)
-            self._update_swatch(swatch, hex_color)
-            self._on_chat_changed()
-
-    def _toggle_alt_row_colors(self, state):
-        """Show/hide alternating row color pickers based on checkbox state."""
-        visible = bool(state)
-        for w in (
-            self.alt_row_even_label,
-            self.alt_row_even_swatch,
-            self.alt_row_even_edit,
-            self.alt_row_even_reset,
-            self.alt_row_odd_label,
-            self.alt_row_odd_swatch,
-            self.alt_row_odd_edit,
-            self.alt_row_odd_reset,
-        ):
-            w.setVisible(visible)
-
-    def _toggle_banner_colors(self, _state=None):
-        """Show/hide banner color pickers based on checkbox states."""
-        visible = self.show_stream_title_cb.isChecked() or self.show_socials_cb.isChecked()
-        for w in (
-            self.banner_bg_label,
-            self.banner_bg_swatch,
-            self.banner_bg_edit,
-            self.banner_bg_reset,
-            self.banner_text_label,
-            self.banner_text_swatch,
-            self.banner_text_edit,
-            self.banner_text_reset,
-        ):
-            w.setVisible(visible)
-
-    def _reset_color(self, edit: QLineEdit, default_value: str):
-        """Reset a color edit field to its default value."""
-        edit.setText(default_value)
-        self._on_chat_changed()
 
     def _reset_tab_defaults(self, tab_name: str):
         """Reset a preferences tab to default values after confirmation."""
@@ -1771,19 +1384,9 @@ class PreferencesDialog(QDialog):
             if idx >= 0:
                 self.moderated_display_combo.setCurrentIndex(idx)
             self.chat_name_colors_cb.setChecked(builtin.use_platform_name_colors)
-            # Color settings (use defaults for the currently selected color theme)
-            is_dark = self.color_theme_combo.currentData() == "dark"
-            colors = builtin.dark_colors if is_dark else builtin.light_colors
-            self.alt_row_even_edit.setText(colors.alt_row_color_even)
-            self.alt_row_odd_edit.setText(colors.alt_row_color_odd)
-            self.tab_active_color_edit.setText(colors.tab_active_color)
-            self.tab_inactive_color_edit.setText(colors.tab_inactive_color)
-            self.mention_color_edit.setText(colors.mention_highlight_color)
             # Banner settings
             self.show_stream_title_cb.setChecked(builtin.show_stream_title)
             self.show_socials_cb.setChecked(builtin.show_socials_banner)
-            self.banner_bg_edit.setText(colors.banner_bg_color)
-            self.banner_text_edit.setText(colors.banner_text_color)
             # Logging defaults
             from ...core.settings import ChatLoggingSettings
 

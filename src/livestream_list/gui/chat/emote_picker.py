@@ -5,9 +5,11 @@ import logging
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QGraphicsOpacityEffect,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -17,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...chat.emotes.cache import EmoteCache
+from ...chat.emotes.cache import DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW, EmoteCache
 from ...chat.models import ChatEmote
 from ..theme import get_theme
 
@@ -69,6 +71,7 @@ class EmotePickerWidget(QWidget):
         self._build_timer.setInterval(0)
         self._build_timer.timeout.connect(self._build_next_tab)
         self._gif_timer = None
+        self._gif_connected: bool = False
         self._animation_time_ms: int = 0
         self._setup_ui()
 
@@ -82,11 +85,21 @@ class EmotePickerWidget(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # Search bar
+        # Search bar + filter row
+        search_row = QHBoxLayout()
+        search_row.setSpacing(4)
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search emotes...")
-        self._search.textChanged.connect(self._on_search_changed)
-        layout.addWidget(self._search)
+        self._search.textChanged.connect(self._apply_filters)
+        search_row.addWidget(self._search)
+
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItems(["All", "Animated", "Static"])
+        self._filter_combo.setFixedWidth(90)
+        self._filter_combo.currentIndexChanged.connect(lambda _: self._apply_filters())
+        search_row.addWidget(self._filter_combo)
+
+        layout.addLayout(search_row)
 
         # Tab widget for providers
         self._tabs = QTabWidget()
@@ -106,6 +119,26 @@ class EmotePickerWidget(QWidget):
                 padding: 4px 8px;
                 color: {theme.text_primary};
                 font-size: 12px;
+            }}
+        """)
+        self._filter_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {theme.chat_input_bg};
+                border: 1px solid {theme.border_light};
+                border-radius: 4px;
+                padding: 4px 6px;
+                color: {theme.text_primary};
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 16px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {theme.popup_bg};
+                color: {theme.text_primary};
+                selection-background-color: {theme.accent};
+                border: 1px solid {theme.border_light};
             }}
         """)
         self._tabs.setStyleSheet(f"""
@@ -168,27 +201,45 @@ class EmotePickerWidget(QWidget):
 
     def refresh_icons(self) -> None:
         """Update button icons for emotes whose images have loaded since creation."""
+        cache = self._image_store
+        if not cache:
+            return
         scale = self._current_scale()
+        tracked_keys = {k for _, _, k in self._animated_buttons}
+        new_animated = False
         for btn, emote in self._all_buttons:
             try:
                 if btn.icon() and not btn.icon().isNull():
                     continue  # Already has an icon
             except RuntimeError:
                 continue  # C++ object deleted
-            if not self._image_store or not emote.image_set:
+            if not emote.image_set:
                 continue
-            image_set = emote.image_set.bind(self._image_store)
+            image_set = emote.image_set.bind(cache)
             emote.image_set = image_set
             image_ref = image_set.get_image_or_loaded(scale=scale)
-            if image_ref:
-                pixmap = image_ref.pixmap_or_load()
-                if pixmap and not pixmap.isNull():
-                    try:
-                        btn.setIcon(QIcon(pixmap))
-                        btn.setIconSize(pixmap.size())
-                        btn.setText("")
-                    except RuntimeError:
-                        continue
+            if not image_ref:
+                continue
+            pixmap = image_ref.pixmap_or_load()
+            if pixmap and not pixmap.isNull():
+                try:
+                    btn.setIcon(QIcon(pixmap))
+                    btn.setIconSize(pixmap.size())
+                    btn.setText("")
+                except RuntimeError:
+                    continue
+                # Detect newly-animated emotes that arrived after initial scan
+                key = image_ref.key
+                if key not in tracked_keys and cache.has_animation_data(key):
+                    if key not in cache.animated_dict:
+                        cache.request_animation_frames(key)
+                    self._animated_buttons.append((btn, emote, key))
+                    tracked_keys.add(key)
+                    new_animated = True
+        # Connect gif timer if we discovered new animated emotes
+        if new_animated and self._gif_timer and not self._gif_connected and self.isVisible():
+            self._gif_timer.tick.connect(self._on_gif_tick)
+            self._gif_connected = True
 
     def set_image_store(self, store: EmoteCache) -> None:
         """Set the shared image store."""
@@ -210,20 +261,24 @@ class EmotePickerWidget(QWidget):
             self._needs_rebuild = False
             self._rebuild_tabs()
         self._detect_animated_buttons()
+        self._request_missing_emotes()
         self.move(pos)
         self._search.clear()
+        self._filter_combo.setCurrentIndex(0)
         self._search.setFocus()
         self.show()
-        if self._gif_timer and self._animated_buttons:
+        if self._gif_timer and self._animated_buttons and not self._gif_connected:
             self._gif_timer.tick.connect(self._on_gif_tick)
+            self._gif_connected = True
 
     def hideEvent(self, event) -> None:  # noqa: N802
         """Disconnect animation timer when picker closes."""
-        if self._gif_timer:
+        if self._gif_timer and self._gif_connected:
             try:
                 self._gif_timer.tick.disconnect(self._on_gif_tick)
             except Exception:
                 pass
+            self._gif_connected = False
         super().hideEvent(event)
 
     def _sorted_providers(self) -> list[tuple[str, list[ChatEmote]]]:
@@ -373,12 +428,54 @@ class EmotePickerWidget(QWidget):
         self.emote_selected.emit(name)
         self.hide()
 
-    def _on_search_changed(self, text: str) -> None:
-        """Filter emotes by search text."""
-        search = text.lower()
+    def _apply_filters(self, _text: str | None = None) -> None:
+        """Filter emotes by search text and type filter."""
+        search = self._search.text().lower()
+        filter_idx = self._filter_combo.currentIndex()  # 0=All, 1=Animated, 2=Static
+        cache = self._image_store
+        scale = self._current_scale()
+
         for btn, emote in self._all_buttons:
-            visible = not search or search in emote.name.lower()
-            btn.setVisible(visible)
+            # Text filter
+            if search and search not in emote.name.lower():
+                btn.setVisible(False)
+                continue
+
+            # Type filter
+            if filter_idx != 0 and cache and emote.image_set:
+                image_set = emote.image_set.bind(cache)
+                emote.image_set = image_set
+                image_ref = image_set.get_image_or_loaded(scale=scale)
+                if image_ref:
+                    is_animated = cache.has_animation_data(image_ref.key)
+                    if filter_idx == 1 and not is_animated:
+                        btn.setVisible(False)
+                        continue
+                    if filter_idx == 2 and is_animated:
+                        btn.setVisible(False)
+                        continue
+
+            btn.setVisible(True)
+
+    def _request_missing_emotes(self) -> None:
+        """Request downloads for emotes not yet cached, prioritizing channel emotes."""
+        if not self._image_store:
+            return
+        cache = self._image_store
+        scale = self._current_scale()
+        for btn, emote in self._all_buttons:
+            if not emote.image_set:
+                continue
+            try:
+                if btn.icon() and not btn.icon().isNull():
+                    continue
+            except RuntimeError:
+                continue
+            image_set = emote.image_set.bind(cache)
+            emote.image_set = image_set
+            is_channel = emote.name in self._channel_emote_names
+            priority = DOWNLOAD_PRIORITY_HIGH if is_channel else DOWNLOAD_PRIORITY_LOW
+            image_set.prefetch(scale=scale, priority=priority)
 
     def _detect_animated_buttons(self) -> None:
         """Scan all buttons and identify which emotes have animation frames."""

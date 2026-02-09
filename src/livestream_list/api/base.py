@@ -34,6 +34,7 @@ async def safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
         logger.warning(f"Failed to parse JSON response: {e}")
         return None
 
+
 # Retry configuration
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_BASE_DELAY = 1.0  # seconds

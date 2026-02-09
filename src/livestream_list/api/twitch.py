@@ -24,7 +24,10 @@ DEFAULT_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
 GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
 # OAuth settings
-OAUTH_SCOPES = "user:read:follows chat:read chat:edit user:read:emotes user:manage:whispers"
+OAUTH_SCOPES = (
+    "user:read:follows chat:read chat:edit user:read:emotes"
+    " user:manage:whispers channel:read:hype_train"
+)
 
 
 class TwitchApiClient(BaseApiClient):

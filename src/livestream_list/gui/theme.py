@@ -53,6 +53,9 @@ class ThemeColors:
         chat_alt_row_even: str,
         chat_alt_row_odd: str,
         chat_mention_highlight: str,
+        # Stream list
+        list_alt_row_even: str,
+        list_alt_row_odd: str,
         # Completer/popup backgrounds
         popup_bg: str,
         popup_hover: str,
@@ -90,6 +93,8 @@ class ThemeColors:
         self.chat_alt_row_even = chat_alt_row_even
         self.chat_alt_row_odd = chat_alt_row_odd
         self.chat_mention_highlight = chat_mention_highlight
+        self.list_alt_row_even = list_alt_row_even
+        self.list_alt_row_odd = list_alt_row_odd
         self.popup_bg = popup_bg
         self.popup_hover = popup_hover
         self.popup_selected = popup_selected
@@ -135,6 +140,9 @@ DARK_THEME = ThemeColors(
     chat_alt_row_even="#00000000",
     chat_alt_row_odd="#1affffff",
     chat_mention_highlight="#33ff8800",
+    # Stream list
+    list_alt_row_even="#00000000",
+    list_alt_row_odd="#0dffffff",
     # Completer/popup backgrounds
     popup_bg="#1a1a2e",
     popup_hover="#1f2b4d",
@@ -182,6 +190,9 @@ LIGHT_THEME = ThemeColors(
     chat_alt_row_even="#00000000",
     chat_alt_row_odd="#0f000000",
     chat_mention_highlight="#40ff8800",
+    # Stream list
+    list_alt_row_even="#00000000",
+    list_alt_row_odd="#08000000",
     # Completer/popup backgrounds
     popup_bg="#ffffff",
     popup_hover="#f0f0f5",
@@ -229,6 +240,9 @@ HIGH_CONTRAST_THEME = ThemeColors(
     chat_alt_row_even="#00000000",
     chat_alt_row_odd="#20ffffff",
     chat_mention_highlight="#55ff8800",
+    # Stream list
+    list_alt_row_even="#00000000",
+    list_alt_row_odd="#10ffffff",
     # Completer/popup backgrounds
     popup_bg="#0a0a0a",
     popup_hover="#222222",
@@ -256,6 +270,8 @@ class ThemeManager:
     _instance: "ThemeManager | None" = None
     _settings: "Settings | None" = None
     _cached_is_dark: bool | None = None
+    _custom_theme_colors: ThemeColors | None = None  # Resolved custom theme
+    _active_colors: ThemeColors | None = None  # Cached final result
 
     @classmethod
     def instance(cls) -> "ThemeManager":
@@ -269,6 +285,7 @@ class ThemeManager:
         """Set the settings instance for theme management."""
         cls._settings = settings
         cls._cached_is_dark = None
+        cls._active_colors = None
 
     @classmethod
     def get_theme_mode(cls) -> ThemeMode:
@@ -284,6 +301,13 @@ class ThemeManager:
             cls._settings.theme_mode = mode
             cls._settings.save()
         cls._cached_is_dark = None
+        cls._active_colors = None
+
+    @classmethod
+    def set_custom_theme(cls, theme_colors: ThemeColors) -> None:
+        """Set the custom theme colors (call after loading from disk)."""
+        cls._custom_theme_colors = theme_colors
+        cls._active_colors = None
 
     @classmethod
     def detect_system_dark_mode(cls) -> bool:
@@ -296,7 +320,7 @@ class ThemeManager:
         # Compare window background luminance - dark themes have low luminance
         bg_color = palette.color(QPalette.ColorRole.Window)
         # Calculate relative luminance
-        luminance = (0.299 * bg_color.red() + 0.587 * bg_color.green() + 0.114 * bg_color.blue())
+        luminance = 0.299 * bg_color.red() + 0.587 * bg_color.green() + 0.114 * bg_color.blue()
         return luminance < 128
 
     @classmethod
@@ -306,7 +330,12 @@ class ThemeManager:
             return cls._cached_is_dark
 
         mode = cls.get_theme_mode()
-        if mode == ThemeMode.DARK or mode == ThemeMode.HIGH_CONTRAST:
+        if mode == ThemeMode.CUSTOM:
+            # Custom mode: use the base field from settings
+            result = (
+                cls._settings.custom_theme_base != "light" if cls._settings else True
+            )
+        elif mode == ThemeMode.DARK or mode == ThemeMode.HIGH_CONTRAST:
             result = True
         elif mode == ThemeMode.LIGHT:
             result = False
@@ -320,14 +349,51 @@ class ThemeManager:
     def invalidate_cache(cls) -> None:
         """Invalidate the cached theme state (call when system theme changes)."""
         cls._cached_is_dark = None
+        cls._active_colors = None
         _stylesheet_cache.clear()
+
+    @classmethod
+    def _merge_chat_overrides(cls, base: ThemeColors) -> ThemeColors:
+        """Apply ChatColorSettings overrides from settings to a base theme.
+
+        This maintains backward compatibility: built-in themes (Dark/Light/HC)
+        use ChatColorSettings from settings.chat.builtin for the 7 chat color
+        overrides. Custom themes ignore these overrides (all colors are in the
+        theme itself).
+        """
+        if cls._settings is None:
+            return base
+        overrides = cls._settings.chat.builtin.get_colors(cls.is_dark_mode())
+        # Create a copy with overrides applied
+        from ..core.theme_data import THEME_COLOR_FIELDS, theme_colors_to_dict
+
+        d = theme_colors_to_dict(base)
+        # Map ChatColorSettings fields to ThemeColors fields
+        d["chat_alt_row_even"] = overrides.alt_row_color_even
+        d["chat_alt_row_odd"] = overrides.alt_row_color_odd
+        d["chat_tab_active"] = overrides.tab_active_color
+        d["chat_tab_inactive"] = overrides.tab_inactive_color
+        d["chat_mention_highlight"] = overrides.mention_highlight_color
+        d["chat_banner_bg"] = overrides.banner_bg_color
+        d["chat_banner_text"] = overrides.banner_text_color
+        return ThemeColors(**{k: d[k] for k in THEME_COLOR_FIELDS})
 
     @classmethod
     def colors(cls) -> ThemeColors:
         """Get the current theme colors."""
-        if cls.get_theme_mode() == ThemeMode.HIGH_CONTRAST:
-            return HIGH_CONTRAST_THEME
-        return DARK_THEME if cls.is_dark_mode() else LIGHT_THEME
+        if cls._active_colors is not None:
+            return cls._active_colors
+
+        mode = cls.get_theme_mode()
+        if mode == ThemeMode.CUSTOM and cls._custom_theme_colors is not None:
+            cls._active_colors = cls._custom_theme_colors
+        elif mode == ThemeMode.HIGH_CONTRAST:
+            cls._active_colors = cls._merge_chat_overrides(HIGH_CONTRAST_THEME)
+        else:
+            base = DARK_THEME if cls.is_dark_mode() else LIGHT_THEME
+            cls._active_colors = cls._merge_chat_overrides(base)
+
+        return cls._active_colors
 
 
 def get_theme() -> ThemeColors:

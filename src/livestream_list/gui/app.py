@@ -222,6 +222,7 @@ class Application(QApplication):
 
         # Initialize theme manager with settings and apply app stylesheet
         ThemeManager.set_settings(self.settings)
+        self._load_custom_theme()
         self.setStyleSheet(get_app_stylesheet())
 
         # Validate YouTube cookies on startup
@@ -254,6 +255,43 @@ class Application(QApplication):
         self._process_check_timer = QTimer(self)  # Parent ensures cleanup
         self._process_check_timer.timeout.connect(self._check_processes)
         self._process_check_timer.start(2000)
+
+    def _load_custom_theme(self) -> None:
+        """Load the custom theme from disk if theme_mode is CUSTOM."""
+        from ..core.settings import ThemeMode
+        from ..core.theme_data import (
+            BUILTIN_THEMES,
+            get_themes_dir,
+            load_theme_file,
+            theme_data_to_theme_colors,
+        )
+
+        if self.settings.theme_mode != ThemeMode.CUSTOM:
+            return
+        slug = self.settings.custom_theme_slug
+        if not slug:
+            return
+
+        # Check built-in themes first
+        if slug in BUILTIN_THEMES:
+            td = BUILTIN_THEMES[slug]
+            ThemeManager.set_custom_theme(theme_data_to_theme_colors(td))
+            self.settings.custom_theme_base = td.base
+            return
+
+        # Try loading from custom themes directory
+        theme_path = get_themes_dir() / f"{slug}.json"
+        if theme_path.exists():
+            try:
+                td = load_theme_file(theme_path)
+                ThemeManager.set_custom_theme(theme_data_to_theme_colors(td))
+                self.settings.custom_theme_base = td.base
+            except Exception:
+                logger.warning(f"Failed to load custom theme '{slug}', falling back to dark")
+                self.settings.theme_mode = ThemeMode.DARK
+        else:
+            logger.warning(f"Custom theme '{slug}' not found, falling back to dark")
+            self.settings.theme_mode = ThemeMode.DARK
 
     def start_async_init(self, on_channels_loaded=None, on_init_complete=None):
         """Start asynchronous initialization (loading channels, refreshing)."""

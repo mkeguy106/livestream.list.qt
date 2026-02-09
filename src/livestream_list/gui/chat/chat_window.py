@@ -24,7 +24,7 @@ from ...chat.models import HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
 from ..theme import PLATFORM_COLORS as THEME_PLATFORM_COLORS
-from ..theme import ThemeManager, get_theme
+from ..theme import get_theme
 from ..window_utils import (
     apply_always_on_top,
     apply_always_on_top_qt,
@@ -613,10 +613,9 @@ class ChatWindow(QMainWindow):
         settings_action.triggered.connect(self.chat_settings_requested.emit)
 
     def update_tab_style(self) -> None:
-        """Refresh tab colors from settings (call after prefs change)."""
-        is_dark = ThemeManager.is_dark_mode()
-        colors = self.settings.chat.builtin.get_colors(is_dark)
-        self._tab_widget.setTabColors(colors.tab_active_color, colors.tab_inactive_color)
+        """Refresh tab colors from current theme (call after prefs change)."""
+        theme = get_theme()
+        self._tab_widget.setTabColors(theme.chat_tab_active, theme.chat_tab_inactive)
 
     def apply_theme(self) -> None:
         """Apply the current theme to the chat window."""
@@ -654,15 +653,13 @@ class ChatWindow(QMainWindow):
                     height: 0px;
                 }}
             """)
-            # Update tab bar and colors (use settings colors, not theme)
-            is_dark = ThemeManager.is_dark_mode()
-            colors = self.settings.chat.builtin.get_colors(is_dark)
+            # Update tab bar and colors from theme
             self._tab_widget._tab_bar.setStyleSheet(f"background-color: {theme.window_bg};")
-            self._tab_widget._tab_bar._active_color = colors.tab_active_color
-            self._tab_widget._tab_bar._inactive_color = colors.tab_inactive_color
+            self._tab_widget._tab_bar._active_color = theme.chat_tab_active
+            self._tab_widget._tab_bar._inactive_color = theme.chat_tab_inactive
             for tab in self._tab_widget._tab_bar._tabs:
-                tab._active_color = colors.tab_active_color
-                tab._inactive_color = colors.tab_inactive_color
+                tab._active_color = theme.chat_tab_active
+                tab._inactive_color = theme.chat_tab_inactive
                 tab._update_style()
             self._tab_widget._stack.setStyleSheet(f"background-color: {theme.widget_bg};")
             # Update all chat widgets

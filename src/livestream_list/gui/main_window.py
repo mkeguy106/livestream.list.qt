@@ -78,9 +78,7 @@ class _WhisperBanner(QWidget):
         layout.setSpacing(8)
 
         self._label = QLabel()
-        self._label.setStyleSheet(
-            "color: #ffffff; background: transparent; font-weight: bold;"
-        )
+        self._label.setStyleSheet("color: #ffffff; background: transparent; font-weight: bold;")
         layout.addWidget(self._label, 1)
 
         self._open_btn = QPushButton("Open Chat")
@@ -840,45 +838,72 @@ class MainWindow(QMainWindow):
 
     def _update_theme_button(self):
         """Update the theme button text and tooltip based on current mode."""
+        from ..core.theme_data import BUILTIN_THEMES
+
         mode = self.app.settings.theme_mode
-        if mode == ThemeMode.AUTO:
-            self.theme_btn.setText("◐")  # Half circle for auto
+        if mode == ThemeMode.CUSTOM:
+            slug = self.app.settings.custom_theme_slug
+            td = BUILTIN_THEMES.get(slug)
+            name = td.name if td else slug
+            self.theme_btn.setText("☾")
+            self.theme_btn.setToolTip(f"Theme: {name} (click to cycle)")
+        elif mode == ThemeMode.AUTO:
+            self.theme_btn.setText("◐")
             self.theme_btn.setToolTip("Theme: Auto (click to cycle)")
         elif mode == ThemeMode.LIGHT:
-            self.theme_btn.setText("☀")  # Sun for light
+            self.theme_btn.setText("☀")
             self.theme_btn.setToolTip("Theme: Light (click to cycle)")
         elif mode == ThemeMode.DARK:
-            self.theme_btn.setText("☾")  # Moon for dark
+            self.theme_btn.setText("☾")
             self.theme_btn.setToolTip("Theme: Dark (click to cycle)")
         elif mode == ThemeMode.HIGH_CONTRAST:
-            self.theme_btn.setText("◉")  # High contrast icon
+            self.theme_btn.setText("◉")
             self.theme_btn.setToolTip("Theme: High Contrast (click to cycle)")
 
     def _on_theme_toggle(self):
-        """Cycle through theme modes: Auto -> Light -> Dark -> Auto."""
+        """Cycle through built-in themes: Dark -> Light -> HC -> Nord -> Monokai -> Solarized."""
+        from ..core.theme_data import (
+            BUILTIN_THEME_ORDER,
+            BUILTIN_THEMES,
+            theme_data_to_theme_colors,
+        )
+
         mode = self.app.settings.theme_mode
-        # Remember current visual state before changing
-        was_dark = ThemeManager.is_dark_mode()
+        slug = self.app.settings.custom_theme_slug
 
-        if mode == ThemeMode.AUTO:
-            new_mode = ThemeMode.LIGHT
-        elif mode == ThemeMode.LIGHT:
-            new_mode = ThemeMode.DARK
+        # Map current state to a slug in the cycle
+        if mode == ThemeMode.CUSTOM and slug in BUILTIN_THEMES:
+            current_slug = slug
         elif mode == ThemeMode.DARK:
-            new_mode = ThemeMode.HIGH_CONTRAST
+            current_slug = "dark"
+        elif mode == ThemeMode.LIGHT:
+            current_slug = "light"
+        elif mode == ThemeMode.HIGH_CONTRAST:
+            current_slug = "high-contrast"
         else:
-            new_mode = ThemeMode.AUTO
+            # AUTO or custom non-builtin -> start from dark
+            current_slug = "dark"
 
-        self.app.settings.theme_mode = new_mode
+        # Find next theme in cycle
+        try:
+            idx = BUILTIN_THEME_ORDER.index(current_slug)
+            next_idx = (idx + 1) % len(BUILTIN_THEME_ORDER)
+        except ValueError:
+            next_idx = 0
+        next_slug = BUILTIN_THEME_ORDER[next_idx]
+        next_td = BUILTIN_THEMES[next_slug]
+
+        # Apply the new theme via CUSTOM mode for all built-in named themes
+        tc = theme_data_to_theme_colors(next_td)
+        ThemeManager.set_custom_theme(tc)
+        self.app.settings.theme_mode = ThemeMode.CUSTOM
+        self.app.settings.custom_theme_slug = next_slug
+        self.app.settings.custom_theme_base = next_td.base
         self.app.save_settings()
         ThemeManager.set_settings(self.app.settings)
         ThemeManager.invalidate_cache()
         self._update_theme_button()
-
-        # Only apply theme if the visual appearance actually changed
-        is_dark = ThemeManager.is_dark_mode()
-        if was_dark != is_dark:
-            self._apply_theme()
+        self._apply_theme()
 
     def _apply_theme(self):
         """Apply the current theme to all windows."""

@@ -1112,6 +1112,7 @@ class HypeTrainEventSubWorker(QThread):
 
     def __init__(self, oauth_token: str, client_id: str, parent=None):
         super().__init__(parent)
+        self._scope_warning_logged = False
         self.oauth_token = oauth_token
         self.client_id = client_id
         self._should_stop = False
@@ -1150,17 +1151,33 @@ class HypeTrainEventSubWorker(QThread):
     async def _run_eventsub(self):
         import aiohttp
 
+        backoff = 5
         async with aiohttp.ClientSession() as session:
             while not self._should_stop:
                 try:
-                    await self._connect_and_listen(session)
+                    had_subs = await self._connect_and_listen(session)
+                    if had_subs:
+                        backoff = 5  # Reset on successful session
+                    else:
+                        # No subscriptions succeeded (not a mod of any channel).
+                        # Use exponential backoff up to 5 minutes.
+                        logger.debug(
+                            f"HypeTrainEventSub: no active subscriptions, "
+                            f"retrying in {backoff}s"
+                        )
+                        await asyncio.sleep(backoff)
+                        backoff = min(backoff * 2, 300)
+                        continue
                 except Exception as e:
                     if self._should_stop:
                         return
-                    logger.warning(f"HypeTrainEventSub connection error: {e}, reconnecting in 5s")
-                    await asyncio.sleep(5)
+                    logger.warning(
+                        f"HypeTrainEventSub connection error: {e}, reconnecting in {backoff}s"
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 300)
 
-    async def _connect_and_listen(self, session):
+    async def _connect_and_listen(self, session) -> bool:
         import aiohttp
 
         async with session.ws_connect(
@@ -1169,16 +1186,18 @@ class HypeTrainEventSubWorker(QThread):
             welcome = await asyncio.wait_for(ws.receive_json(), timeout=15)
             if welcome.get("metadata", {}).get("message_type") != "session_welcome":
                 logger.warning(f"HypeTrainEventSub: unexpected first message: {welcome}")
-                return
+                return False
 
             session_id = welcome["payload"]["session"]["id"]
             keepalive_timeout = welcome["payload"]["session"].get("keepalive_timeout_seconds", 30)
             logger.info(f"HypeTrainEventSub connected, session={session_id}")
 
             # Subscribe all currently tracked channels
+            has_any_sub = False
             with self._lock:
                 for channel_key, broadcaster_id in self._channels.items():
-                    await self._subscribe_channel(session, session_id, broadcaster_id)
+                    if await self._subscribe_channel(session, session_id, broadcaster_id):
+                        has_any_sub = True
                 self._pending_subscribe.clear()
                 self._pending_unsubscribe.clear()
 
@@ -1192,7 +1211,8 @@ class HypeTrainEventSubWorker(QThread):
 
                 for channel_key, broadcaster_id in subs:
                     self._channels[channel_key] = broadcaster_id
-                    await self._subscribe_channel(session, session_id, broadcaster_id)
+                    if await self._subscribe_channel(session, session_id, broadcaster_id):
+                        has_any_sub = True
 
                 for channel_key in unsubs:
                     self._channels.pop(channel_key, None)
@@ -1217,7 +1237,7 @@ class HypeTrainEventSubWorker(QThread):
                         pass
                     elif msg_type == "session_reconnect":
                         logger.info("HypeTrainEventSub: reconnect requested")
-                        return
+                        return has_any_sub
                     elif msg_type == "revocation":
                         reason = (
                             data.get("payload", {}).get("subscription", {}).get("status", "unknown")
@@ -1228,10 +1248,15 @@ class HypeTrainEventSubWorker(QThread):
                     aiohttp.WSMsgType.CLOSED,
                     aiohttp.WSMsgType.ERROR,
                 ):
-                    return
+                    return has_any_sub
 
-    async def _subscribe_channel(self, session, session_id: str, broadcaster_id: str) -> None:
-        """Subscribe to all 3 hype train event types for a broadcaster."""
+    async def _subscribe_channel(
+        self, session, session_id: str, broadcaster_id: str
+    ) -> bool:
+        """Subscribe to all 3 hype train event types for a broadcaster.
+
+        Returns True if at least one subscription succeeded.
+        """
         event_types = [
             ("channel.hype_train.begin", "2"),
             ("channel.hype_train.progress", "2"),
@@ -1242,6 +1267,7 @@ class HypeTrainEventSubWorker(QThread):
             "Client-Id": self.client_id,
             "Content-Type": "application/json",
         }
+        any_success = False
         for event_type, version in event_types:
             payload = {
                 "type": event_type,
@@ -1261,6 +1287,14 @@ class HypeTrainEventSubWorker(QThread):
                             f"HypeTrainEventSub: subscribed to {event_type} "
                             f"for broadcaster {broadcaster_id}"
                         )
+                        any_success = True
+                    elif resp.status == 403:
+                        if not self._scope_warning_logged:
+                            self._scope_warning_logged = True
+                            logger.debug(
+                                f"HypeTrainEventSub: 403 for {event_type} "
+                                f"(not a mod of this channel)"
+                            )
                     else:
                         body = await resp.text()
                         logger.warning(
@@ -1269,6 +1303,7 @@ class HypeTrainEventSubWorker(QThread):
                         )
             except Exception as e:
                 logger.warning(f"HypeTrainEventSub: subscribe error for {event_type}: {e}")
+        return any_success
 
     def _handle_notification(self, data: dict) -> None:
         """Parse an EventSub hype train notification into a HypeTrainEvent."""

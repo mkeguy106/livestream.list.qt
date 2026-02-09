@@ -117,6 +117,9 @@ class StreamRowDelegate(QStyledItemDelegate):
         # Button colors
         self._input_bg = QColor(theme.input_bg)
         self._border = QColor(theme.border)
+        # Alternating row colors
+        self._list_alt_row_even = QColor(theme.list_alt_row_even)
+        self._list_alt_row_odd = QColor(theme.list_alt_row_odd)
 
     def apply_theme(self) -> None:
         """Apply theme colors (call when theme changes).
@@ -202,11 +205,19 @@ class StreamRowDelegate(QStyledItemDelegate):
         font_size = self._get_font_size()
         scale = self._get_scale()
 
+        # Row index (used for alternating colors and button rects)
+        row = index.row()
+
         # Background
         if is_selected:
             painter.fillRect(option.rect, self._selection_bg)
         else:
-            painter.fillRect(option.rect, self._widget_bg)
+            alt_color = self._list_alt_row_even if row % 2 == 0 else self._list_alt_row_odd
+            if alt_color.alpha() > 0:
+                painter.fillRect(option.rect, self._widget_bg)
+                painter.fillRect(option.rect, alt_color)
+            else:
+                painter.fillRect(option.rect, self._widget_bg)
 
         # Margins (fixed minimum, only grow with scale)
         margin_h = max(style["margin_h"], int(style["margin_h"] * scale))
@@ -228,7 +239,6 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         # Store button rects for this row
         button_rects: dict[str, QRect] = {}
-        row = index.row()
 
         # === SELECTION CHECKBOX ===
         # Scale layout constants with font
@@ -284,9 +294,7 @@ class StreamRowDelegate(QStyledItemDelegate):
             bold_font.setBold(True)
             painter.setFont(bold_font)
             painter.setPen(color)
-            painter.drawText(
-                x, y, platform_width, line_height, align_lv, platform_text
-            )
+            painter.drawText(x, y, platform_width, line_height, align_lv, platform_text)
             painter.setFont(font)
             x += platform_width + spacing
 
@@ -330,8 +338,14 @@ class StreamRowDelegate(QStyledItemDelegate):
         max_name_width = text_area_width // 2
         name_text = bold_fm.elidedText(name_text, Qt.TextElideMode.ElideRight, max_name_width)
         name_width = bold_fm.horizontalAdvance(name_text)
-        painter.drawText(x, y, name_width + 10, line_height,
-                        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name_text)
+        painter.drawText(
+            x,
+            y,
+            name_width + 10,
+            line_height,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            name_text,
+        )
         x += name_width + 10 + spacing
         painter.setFont(font)
 
@@ -355,10 +369,16 @@ class StreamRowDelegate(QStyledItemDelegate):
             playing_font = QFont(font)
             playing_font.setBold(True)
             painter.setFont(playing_font)
-            playing_text = "\u25B6 Playing"
+            playing_text = "\u25b6 Playing"
             playing_width = QFontMetrics(playing_font).horizontalAdvance(playing_text)
-            painter.drawText(x, y, playing_width + 10, line_height,
-                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, playing_text)
+            painter.drawText(
+                x,
+                y,
+                playing_width + 10,
+                line_height,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                playing_text,
+            )
             x += playing_width + 10 + spacing
             painter.setFont(font)
 
@@ -405,10 +425,10 @@ class StreamRowDelegate(QStyledItemDelegate):
             button_rects["play"] = btn_rect
             if is_playing:
                 # Stop square
-                self._draw_button(painter, btn_rect, "\u25A0", is_selected, self._status_error)
+                self._draw_button(painter, btn_rect, "\u25a0", is_selected, self._status_error)
             else:
                 # Play triangle
-                self._draw_button(painter, btn_rect, "\u25B6", is_selected)
+                self._draw_button(painter, btn_rect, "\u25b6", is_selected)
 
         # === TITLE ROW (DEFAULT style only) ===
         if style["show_title"] and livestream.live:
@@ -439,8 +459,12 @@ class StreamRowDelegate(QStyledItemDelegate):
         painter.restore()
 
     def _draw_button(
-        self, painter: QPainter, rect: QRect, text: str,
-        is_selected: bool, text_color: QColor | None = None
+        self,
+        painter: QPainter,
+        rect: QRect,
+        text: str,
+        is_selected: bool,
+        text_color: QColor | None = None,
     ) -> None:
         """Draw a styled button with background, border, and text."""
         # Draw button background with rounded corners

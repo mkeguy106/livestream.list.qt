@@ -27,9 +27,7 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
         return
 
     # Match by prefix — KDE appends " — AppName" to the Qt windowTitle
-    conditions = " || ".join(
-        f'c.caption.indexOf("{title}") === 0' for title in titles
-    )
+    conditions = " || ".join(f'c.caption.indexOf("{title}") === 0' for title in titles)
     value = "true" if on_top else "false"
     script_content = (
         "var clients = workspace.windowList();\n"
@@ -49,21 +47,35 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
         plugin_name = "llqt_always_on_top"
         # Unload any previous instance
         subprocess.run(
-            ["qdbus6", "org.kde.KWin", "/Scripting",
-             "org.kde.kwin.Scripting.unloadScript", plugin_name],
-            capture_output=True, timeout=3,
+            [
+                "qdbus6",
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.unloadScript",
+                plugin_name,
+            ],
+            capture_output=True,
+            timeout=3,
         )
         # Load and run the script
         result = subprocess.run(
-            ["qdbus6", "org.kde.KWin", "/Scripting",
-             "org.kde.kwin.Scripting.loadScript", script_path, plugin_name],
-            capture_output=True, timeout=3, text=True,
+            [
+                "qdbus6",
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.loadScript",
+                script_path,
+                plugin_name,
+            ],
+            capture_output=True,
+            timeout=3,
+            text=True,
         )
         if result.returncode == 0:
             subprocess.run(
-                ["qdbus6", "org.kde.KWin", "/Scripting",
-                 "org.kde.kwin.Scripting.start"],
-                capture_output=True, timeout=3,
+                ["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
+                capture_output=True,
+                timeout=3,
             )
             # Unload after a short delay via a singleshot
             QTimer.singleShot(500, lambda: _kwin_unload_script(plugin_name))
@@ -82,9 +94,15 @@ def _kwin_unload_script(plugin_name: str) -> None:
     """Unload a KWin script by plugin name (cleanup)."""
     try:
         subprocess.run(
-            ["qdbus6", "org.kde.KWin", "/Scripting",
-             "org.kde.kwin.Scripting.unloadScript", plugin_name],
-            capture_output=True, timeout=3,
+            [
+                "qdbus6",
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.unloadScript",
+                plugin_name,
+            ],
+            capture_output=True,
+            timeout=3,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass

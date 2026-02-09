@@ -65,6 +65,9 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Chat log export to text file
   - Emote autocomplete prioritizes recently used emotes
   - Emote picker popup (Ctrl+E) — searchable grid organized by provider, channel emotes first with separator
+  - Emote picker animates emotes with viewport culling (only visible emotes animate)
+  - Emote picker filter dropdown: All / Animated / Static
+  - Emote picker auto-downloads missing emotes on open (channel emotes prioritized)
   - Sub-only channel emotes greyed out with "Subscribe to use" tooltip
   - In-chat search with predicates (Ctrl+F) — from:user, has:link, is:sub, is:mod
   - Link tooltip previews — hover URLs to see page title
@@ -72,7 +75,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - User card on hover — hover username to see profile image, bio, followers, follow age, pronouns
   - User card text selectable and copyable (Ctrl+C or right-click)
   - Hype Train banner — purple-themed progress bar with level, goal, and countdown timer
-  - Raid banner — orange-themed banner with raider name and viewer count, auto-hides after 15s
+  - Raid banner — orange-themed banner with raider name and viewer count, 120s countdown timer
   - Chat logging — persistent JSONL/text per-channel logs with disk rotation
   - Chat history — load recent messages from disk logs when opening a channel
   - Always on Top toggle in gear menu (persisted, works on Wayland via KWin scripting)
@@ -95,8 +98,13 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 - **Selection Mode** - Multi-select channels for bulk deletion
   - Shift+click range selection
   - Trash bin for soft-delete with restore
+- **Theme System** - 6 built-in themes (Dark, Light, High Contrast, Nord, Monokai, Solarized) plus custom themes
+  - Theme editor in Preferences with per-color customization
+  - Import/export themes as JSON
+  - Quick cycle through themes via toolbar button
 - **UI Styles** - Default, Compact 1, Compact 2, Compact 3 layouts
   - All UI elements scale with compact modes (buttons, icons, toolbar)
+- **Alternating Row Colors** - Stream list and chat support alternating row backgrounds
 - **Stream Playback Tracking** - Shows "Playing" indicator with stop button
 - **Window Size Persistence** - Remembers window size between sessions
 
@@ -249,7 +257,7 @@ Planned features for future releases:
 - [ ] Configurable mod timeout buttons — quick mod-action buttons with customizable durations
 - [x] Previous message cycling — up/down arrows to cycle through previously sent messages
 - [ ] Live emote updates — 7TV EventAPI for real-time emote add/remove without manual refresh
-- [ ] Custom themes — full theme customization via JSON files beyond built-in dark/light
+- [x] Custom themes — full theme customization via theme editor with import/export, 6 built-in themes
 - [x] Pronouns display — show user pronouns on user cards
 - [x] Always-on-top — separate toggles for main window (View menu) and chat window (gear menu), with KWin scripting on KDE Plasma for Wayland compatibility
 - [x] Prediction badge details — show picked outcome in prediction badges

@@ -61,9 +61,7 @@ class UserCardFetchWorker:
     GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
     @staticmethod
-    async def fetch_twitch_user_info(
-        login: str, channel_login: str = ""
-    ) -> dict | None:
+    async def fetch_twitch_user_info(login: str, channel_login: str = "") -> dict | None:
         """Fetch Twitch user card info via GraphQL.
 
         Uses its own aiohttp session and static GQL credentials so it can
@@ -127,9 +125,7 @@ class UserCardFetchWorker:
                     "profile_image_url": user_data.get("profileImageURL", ""),
                     "display_name": user_data.get("displayName", ""),
                     "description": user_data.get("description") or "",
-                    "follower_count": (
-                        user_data.get("followers", {}).get("totalCount", 0)
-                    ),
+                    "follower_count": (user_data.get("followers", {}).get("totalCount", 0)),
                     "followed_at": "",
                 }
 
@@ -157,15 +153,9 @@ class UserCardFetchWorker:
                     ) as resp2:
                         if resp2.status == 200:
                             fdata = await resp2.json()
-                            follow = (
-                                fdata.get("data", {})
-                                .get("user", {})
-                                .get("follow")
-                            )
+                            follow = fdata.get("data", {}).get("user", {}).get("follow")
                             if follow:
-                                result["followed_at"] = follow.get(
-                                    "followedAt", ""
-                                )
+                                result["followed_at"] = follow.get("followedAt", "")
 
                 return result
         except Exception as e:
@@ -179,9 +169,7 @@ class UserCardFetchWorker:
             return b""
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=5)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
                     if resp.status == 200:
                         return await resp.read()
         except Exception as e:
@@ -254,8 +242,7 @@ class UserCardPopup(QFrame):
         self._avatar_label = QLabel()
         self._avatar_label.setFixedSize(50, 50)
         self._avatar_label.setStyleSheet(
-            "background: transparent; border: none;"
-            " border-radius: 25px;"
+            "background: transparent; border: none; border-radius: 25px;"
         )
         self._avatar_label.hide()
         top_layout.addWidget(self._avatar_label)
@@ -274,12 +261,8 @@ class UserCardPopup(QFrame):
         name_font.setBold(True)
         name_font.setPointSize(13)
         name_label.setFont(name_font)
-        name_label.setStyleSheet(
-            f"color: {user_color}; background: transparent; border: none;"
-        )
-        name_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        name_label.setStyleSheet(f"color: {user_color}; background: transparent; border: none;")
+        name_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(name_label)
         header_layout.addWidget(name_label)
 
@@ -291,9 +274,7 @@ class UserCardPopup(QFrame):
                 f"color: {theme.text_muted}; font-style: italic;"
                 " background: transparent; border: none;"
             )
-            nick_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
+            nick_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self._text_labels.append(nick_label)
             header_layout.addWidget(nick_label)
 
@@ -306,12 +287,9 @@ class UserCardPopup(QFrame):
         }
         platform_label = QLabel(platform_names.get(user.platform, ""))
         platform_label.setStyleSheet(
-            f"color: {theme.text_muted}; font-size: 11px;"
-            " background: transparent; border: none;"
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; border: none;"
         )
-        platform_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        platform_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(platform_label)
         header_layout.addWidget(platform_label)
         name_col.addLayout(header_layout)
@@ -323,9 +301,7 @@ class UserCardPopup(QFrame):
                 f"color: {theme.text_muted}; font-size: 11px;"
                 " background: transparent; border: none;"
             )
-            login_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
+            login_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self._text_labels.append(login_label)
             name_col.addWidget(login_label)
 
@@ -354,7 +330,8 @@ class UserCardPopup(QFrame):
                         if pixmap and not pixmap.isNull():
                             badge_label.setPixmap(
                                 pixmap.scaled(
-                                    18, 18,
+                                    18,
+                                    18,
                                     Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.SmoothTransformation,
                                 )
@@ -366,12 +343,9 @@ class UserCardPopup(QFrame):
         # Pronouns (loaded async, initially hidden)
         self._pronouns_label = QLabel()
         self._pronouns_label.setStyleSheet(
-            f"color: {theme.text_muted}; font-size: 11px;"
-            " background: transparent; border: none;"
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; border: none;"
         )
-        self._pronouns_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self._pronouns_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(self._pronouns_label)
         self._pronouns_label.hide()
         layout.addWidget(self._pronouns_label)
@@ -385,8 +359,7 @@ class UserCardPopup(QFrame):
 
         # Info section
         info_style = (
-            f"color: {theme.text_muted}; font-size: 11px;"
-            " background: transparent; border: none;"
+            f"color: {theme.text_muted}; font-size: 11px; background: transparent; border: none;"
         )
 
         # Bio/description (Twitch only, loaded async)
@@ -396,9 +369,7 @@ class UserCardPopup(QFrame):
             " background: transparent; border: none;"
         )
         self._bio_label.setWordWrap(True)
-        self._bio_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self._bio_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(self._bio_label)
         self._bio_label.hide()
         layout.addWidget(self._bio_label)
@@ -418,9 +389,7 @@ class UserCardPopup(QFrame):
         # Followers (Twitch only, loaded async)
         self._followers_label = QLabel()
         self._followers_label.setStyleSheet(info_style)
-        self._followers_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self._followers_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(self._followers_label)
         self._followers_label.hide()
         layout.addWidget(self._followers_label)
@@ -428,9 +397,7 @@ class UserCardPopup(QFrame):
         # Follow age (Twitch only, loaded async)
         self._follow_age_label = QLabel()
         self._follow_age_label.setStyleSheet(info_style)
-        self._follow_age_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        self._follow_age_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(self._follow_age_label)
         self._follow_age_label.hide()
         layout.addWidget(self._follow_age_label)
@@ -438,9 +405,7 @@ class UserCardPopup(QFrame):
         # Session message count
         count_label = QLabel(f"Session messages: {message_count}")
         count_label.setStyleSheet(info_style)
-        count_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
+        count_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(count_label)
         layout.addWidget(count_label)
 
@@ -453,9 +418,7 @@ class UserCardPopup(QFrame):
                 " background: transparent; border: none;"
             )
             note_label.setWordWrap(True)
-            note_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
+            note_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             self._text_labels.append(note_label)
             layout.addWidget(note_label)
 
@@ -540,9 +503,7 @@ class UserCardPopup(QFrame):
             try:
                 from datetime import datetime, timezone
 
-                dt = datetime.fromisoformat(
-                    followed_at_str.replace("Z", "+00:00")
-                )
+                dt = datetime.fromisoformat(followed_at_str.replace("Z", "+00:00"))
                 now = datetime.now(timezone.utc)
                 delta = now - dt
                 days = delta.days
@@ -556,9 +517,7 @@ class UserCardPopup(QFrame):
                 else:
                     text = f"{days}d"
                 formatted_date = dt.astimezone().strftime("%b %d, %Y")
-                self._follow_age_label.setText(
-                    f"Following: {text} (since {formatted_date})"
-                )
+                self._follow_age_label.setText(f"Following: {text} (since {formatted_date})")
             except Exception:
                 self._follow_age_label.setText("Following: Yes")
             self._follow_age_label.show()
@@ -647,9 +606,7 @@ class UserCardPopup(QFrame):
         selected = self._get_selected_text()
         if selected:
             copy_sel = menu.addAction("Copy")
-            copy_sel.triggered.connect(
-                lambda: QApplication.clipboard().setText(selected)
-            )
+            copy_sel.triggered.connect(lambda: QApplication.clipboard().setText(selected))
         copy_all = menu.addAction("Copy All")
         copy_all.triggered.connect(self._copy_text)
         menu.exec(event.globalPos())

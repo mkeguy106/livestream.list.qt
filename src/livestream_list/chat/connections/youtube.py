@@ -300,9 +300,7 @@ class YouTubeChatConnection(BaseChatConnection):
         """
         async with self._extract_lock:
             # Skip if another coroutine just re-extracted
-            if self._params_extracted_at and (
-                time.monotonic() - self._params_extracted_at < 60
-            ):
+            if self._params_extracted_at and (time.monotonic() - self._params_extracted_at < 60):
                 return bool(self._send_params and self._innertube_api_key)
 
             old_api_key = self._innertube_api_key
@@ -334,8 +332,7 @@ class YouTubeChatConnection(BaseChatConnection):
             headers = {
                 "Cookie": cookie_header,
                 "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64; rv:134.0)"
-                    " Gecko/20100101 Firefox/134.0"
+                    "Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0"
                 ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",

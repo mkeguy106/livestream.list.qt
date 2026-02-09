@@ -22,6 +22,7 @@ class ThemeMode(str, _Enum):
     LIGHT = "light"
     DARK = "dark"
     HIGH_CONTRAST = "high_contrast"
+    CUSTOM = "custom"  # User-defined or built-in named theme
 
 
 APP_NAME = "livestream-list-qt"
@@ -293,6 +294,8 @@ class Settings:
     platform_colors: bool = True  # Color platform icons and channel names
     font_size: int = 0  # 0 = system default, otherwise point size for stream list
     theme_mode: ThemeMode = ThemeMode.AUTO  # auto, light, or dark
+    custom_theme_slug: str = ""  # slug of active custom/built-in named theme
+    custom_theme_base: str = "dark"  # "dark" or "light" for CUSTOM mode is_dark_mode()
 
     # Platform settings
     twitch: TwitchSettings = field(default_factory=TwitchSettings)
@@ -477,6 +480,8 @@ class Settings:
             settings.theme_mode = ThemeMode(old_theme_mode)
         except ValueError:
             settings.theme_mode = ThemeMode.AUTO
+        settings.custom_theme_slug = data.get("custom_theme_slug", "")
+        settings.custom_theme_base = data.get("custom_theme_base", "dark")
 
         # Twitch
         if "twitch" in data:
@@ -768,6 +773,8 @@ class Settings:
             "platform_colors": self.platform_colors,
             "font_size": self.font_size,
             "theme_mode": self.theme_mode.value,
+            "custom_theme_slug": self.custom_theme_slug,
+            "custom_theme_base": self.custom_theme_base,
             "twitch": {
                 "client_id": self.twitch.client_id,
                 "client_secret": self.twitch.client_secret,

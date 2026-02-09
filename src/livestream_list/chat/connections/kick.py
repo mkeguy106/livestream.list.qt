@@ -160,9 +160,7 @@ class KickChatConnection(BaseChatConnection):
                     if retry is None:
                         self._emit_error("Send failed after token refresh (401)")
                     elif retry == "rate_limited":
-                        self._emit_error(
-                            "Rate limit reached. Wait a moment before sending again."
-                        )
+                        self._emit_error("Rate limit reached. Wait a moment before sending again.")
                     elif retry == "server_error":
                         self._emit_error("Kick server error after token refresh")
                     return False
