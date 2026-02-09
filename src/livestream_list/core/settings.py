@@ -51,7 +51,7 @@ class StreamlinkSettings:
     path: str = "streamlink"
     player: str = "mpv"
     player_args: str = (
-        "--profile=low-latency --cache=yes --demuxer-readahead-secs=1.0 --cache-pause=no"
+        "--cache=yes --demuxer-readahead-secs=5 --demuxer-max-bytes=50MiB --cache-pause=no"
     )
     default_quality: StreamQuality = StreamQuality.SOURCE
     additional_args: str = "--twitch-low-latency --kick-low-latency"
