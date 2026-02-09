@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>life.covert.livestreamListQt</id>
+  <id>app.livestreamlist.LivestreamListQt</id>
   <name>Livestream List (Qt)</name>
   <summary>Monitor your favorite livestreams (Qt version)</summary>
   <metadata_license>CC0-1.0</metadata_license>
@@ -22,7 +22,7 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">life.covert.livestreamListQt.desktop</launchable>
+  <launchable type="desktop-id">app.livestreamlist.LivestreamListQt.desktop</launchable>
 
   <url type="homepage">https://github.com/mkeguy106/livestream-list-linux</url>
   <url type="bugtracker">https://github.com/mkeguy106/livestream-list-linux/issues</url>

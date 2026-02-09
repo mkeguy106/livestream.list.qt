@@ -1,4 +1,4 @@
-app-id: life.covert.livestreamListQt
+app-id: app.livestreamlist.LivestreamListQt
 runtime: org.kde.Platform
 runtime-version: '6.9'
 sdk: org.kde.Sdk
@@ -37,10 +37,10 @@ modules:
     buildsystem: simple
     build-commands:
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir .
-      - install -Dm644 data/life.covert.livestreamListQt.desktop ${FLATPAK_DEST}/share/applications/life.covert.livestreamListQt.desktop
-      - install -Dm644 data/life.covert.livestreamListQt.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/life.covert.livestreamListQt.svg
-      - install -Dm644 data/life.covert.livestreamListQt-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/life.covert.livestreamListQt-symbolic.svg
-      - install -Dm644 data/life.covert.livestreamListQt.metainfo.xml ${FLATPAK_DEST}/share/metainfo/life.covert.livestreamListQt.metainfo.xml
+      - install -Dm644 data/app.livestreamlist.LivestreamListQt.desktop ${FLATPAK_DEST}/share/applications/app.livestreamlist.LivestreamListQt.desktop
+      - install -Dm644 data/app.livestreamlist.LivestreamListQt.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/app.livestreamlist.LivestreamListQt.svg
+      - install -Dm644 data/app.livestreamlist.LivestreamListQt-symbolic.svg ${FLATPAK_DEST}/share/icons/hicolor/symbolic/apps/app.livestreamlist.LivestreamListQt-symbolic.svg
+      - install -Dm644 data/app.livestreamlist.LivestreamListQt.metainfo.xml ${FLATPAK_DEST}/share/metainfo/app.livestreamlist.LivestreamListQt.metainfo.xml
     sources:
       - type: dir
         path: .

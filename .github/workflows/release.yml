@@ -38,8 +38,8 @@ jobs:
               ls -la /workspace/
               flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
               flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
-              flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir /workspace/life.covert.livestreamListQt.yml
-              flatpak build-bundle ~/.local/share/flatpak/repo /workspace/livestreamListQt.flatpak life.covert.livestreamListQt
+              flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir /workspace/app.livestreamlist.LivestreamListQt.yml
+              flatpak build-bundle ~/.local/share/flatpak/repo /workspace/livestreamListQt.flatpak app.livestreamlist.LivestreamListQt
             ")
 
           echo "Container ID: $CONTAINER_ID"

@@ -127,7 +127,7 @@ Download `livestreamListQt.flatpak` from [Releases](https://github.com/mkeguy106
 flatpak install --user ~/Downloads/livestreamListQt-v*.flatpak
 
 # Run
-flatpak run life.covert.livestreamListQt
+flatpak run app.livestreamlist.LivestreamListQt
 
 # Or launch from your application menu: "Livestream List (Qt)"
 ```
@@ -219,7 +219,7 @@ Configure in Preferences > Streamlink:
 
 ```bash
 # Flatpak
-flatpak uninstall life.covert.livestreamListQt
+flatpak uninstall app.livestreamlist.LivestreamListQt
 
 # Manual installation
 rm -rf ~/.config/livestream-list-qt

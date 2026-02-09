@@ -167,8 +167,8 @@ class Application(QApplication):
         self.setApplicationName("Livestream List (Qt)")
         self.setApplicationDisplayName("Livestream List (Qt)")
         self.setApplicationVersion(__version__)
-        self.setOrganizationName("life.covert")
-        self.setOrganizationDomain("life.covert")
+        self.setOrganizationName("app.livestreamlist")
+        self.setOrganizationDomain("app.livestreamlist")
 
         # Core components
         self.settings: Settings | None = None
