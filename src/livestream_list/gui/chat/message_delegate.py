@@ -590,6 +590,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         msg_text = message.text
         text_x = x
         text_y = y
+        wrap_x = rect.x()  # Wrapped lines start at left margin
 
         if self.settings.show_emotes and message.emote_positions:
             self._paint_text_with_emotes(
@@ -605,6 +606,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 message.is_moderated,
                 is_selected=is_selected,
                 dpr=self._current_scale(painter),
+                wrap_x=wrap_x,
             )
         else:
             remaining_width = available_width - (text_x - rect.x())
@@ -618,6 +620,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 fm,
                 message.is_moderated,
                 is_selected=is_selected,
+                wrap_x=wrap_x,
             )
 
         painter.restore()
@@ -636,9 +639,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         is_moderated: bool,
         is_selected: bool = False,
         dpr: float = 1.0,
+        wrap_x: int | None = None,
     ) -> None:
         """Paint text with inline emotes, wrapping at available_width."""
-        start_x = x
+        start_x = wrap_x if wrap_x is not None else x
         current_x = x
         current_y = y
         right_edge = x + available_width
@@ -889,9 +893,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         is_moderated: bool,
         is_selected: bool = False,
+        wrap_x: int | None = None,
     ) -> None:
         """Paint text with word wrapping."""
         right_edge = x + available_width
+        start_x = wrap_x if wrap_x is not None else x
         url_ranges = self._get_url_ranges(text)
         mention_ranges = self._get_mention_ranges(text)
         self._draw_wrapping_text(
@@ -899,7 +905,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             text,
             x,
             y,
-            x,
+            start_x,
             right_edge,
             line_height,
             fm,
@@ -1000,25 +1006,29 @@ class ChatMessageDelegate(QStyledItemDelegate):
         prefix_width += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Calculate number of lines needed via wrapping simulation
-        content_width = available_width - prefix_width
-        if content_width <= 0:
-            content_width = available_width
+        # First line has reduced width (after prefix); wrapped lines get full width
+        first_line_width = available_width - prefix_width
+        if first_line_width <= 0:
+            first_line_width = available_width
 
         if self.settings.show_emotes and message.emote_positions:
             lines = self._compute_wrapped_lines_with_emotes(
                 message.text,
                 message.emote_positions,
-                content_width,
+                first_line_width,
                 fm,
                 emote_height,
                 scale,
+                wrap_width=available_width,
             )
         else:
             text_width = fm.horizontalAdvance(message.text)
             lines = 1
-            if text_width > content_width:
+            if text_width > first_line_width:
                 # Simulate word wrapping
-                lines = self._compute_wrapped_lines(message.text, content_width, fm)
+                lines = self._compute_wrapped_lines(
+                    message.text, first_line_width, fm, wrap_width=available_width
+                )
 
         # Reply context needs an extra line
         extra_reply_height = 0
@@ -1227,10 +1237,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text + emotes with wrapping logic
-        # start_x must be x (after badges+username) to match paint behavior
+        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
         last_end = 0
-        start_x = x
+        start_x = rect.x()
         current_x = x
         current_y = y
         available_width = rect.width()
@@ -1368,9 +1378,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text with wrapping, checking URL word positions
-        # start_x must be x (after badges+username) to match paint behavior
+        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
-        start_x = x
+        start_x = rect.x()
         current_x = x
         current_y = y
         right_edge = rect.x() + rect.width()
@@ -1754,8 +1764,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x += QFontMetrics(bold_font).horizontalAdvance(name_text)
 
         # Walk through text checking mention word positions
+        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
-        start_x = x
+        start_x = rect.x()
         current_x = x
         current_y = y
         right_edge = rect.x() + rect.width()
@@ -1901,17 +1912,26 @@ class ChatMessageDelegate(QStyledItemDelegate):
         text: str,
         content_width: int,
         fm: QFontMetrics,
+        wrap_width: int | None = None,
     ) -> int:
-        """Compute how many lines text needs with word wrapping."""
+        """Compute how many lines text needs with word wrapping.
+
+        content_width is the available width for the first line.
+        wrap_width is the available width for subsequent lines (defaults to content_width).
+        """
+        if wrap_width is None:
+            wrap_width = content_width
         lines = 1
         current_x = 0
+        line_width = content_width  # First line
         words = text.split(" ")
         for i, word in enumerate(words):
             draw_word = word if i == 0 else " " + word
             word_width = fm.horizontalAdvance(draw_word)
-            if current_x + word_width > content_width and current_x > 0:
+            if current_x + word_width > line_width and current_x > 0:
                 lines += 1
                 current_x = 0
+                line_width = wrap_width  # Subsequent lines get full width
                 if draw_word.startswith(" "):
                     draw_word = draw_word[1:]
                     word_width = fm.horizontalAdvance(draw_word)
@@ -1926,10 +1946,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         emote_height: int,
         scale: float,
+        wrap_width: int | None = None,
     ) -> int:
-        """Compute how many lines text+emotes need with word wrapping."""
+        """Compute how many lines text+emotes need with word wrapping.
+
+        content_width is the available width for the first line.
+        wrap_width is the available width for subsequent lines (defaults to content_width).
+        """
+        if wrap_width is None:
+            wrap_width = content_width
         lines = 1
         current_x = 0
+        line_width = content_width  # First line
         last_end = 0
         has_base_emote = False
 
@@ -1938,8 +1966,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if start > last_end:
                 segment = text[last_end:start]
                 prev_lines = lines
-                current_x, lines = self._advance_line_count(
-                    segment, current_x, lines, content_width, fm
+                current_x, lines, line_width = self._advance_line_count(
+                    segment, current_x, lines, line_width, fm, wrap_width
                 )
                 if lines != prev_lines:
                     has_base_emote = False
@@ -1957,9 +1985,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 last_end = end
                 continue
 
-            if current_x + emote_w > content_width and current_x > 0:
+            if current_x + emote_w > line_width and current_x > 0:
                 lines += 1
                 current_x = 0
+                line_width = wrap_width
                 has_base_emote = False
             current_x += emote_w
             has_base_emote = True
@@ -1968,7 +1997,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Remaining text
         if last_end < len(text):
             segment = text[last_end:]
-            _, lines = self._advance_line_count(segment, current_x, lines, content_width, fm)
+            _, lines, _ = self._advance_line_count(
+                segment, current_x, lines, line_width, fm, wrap_width
+            )
 
         return lines
 
@@ -1977,22 +2008,26 @@ class ChatMessageDelegate(QStyledItemDelegate):
         text: str,
         current_x: int,
         lines: int,
-        content_width: int,
+        line_width: int,
         fm: QFontMetrics,
-    ) -> tuple[int, int]:
+        wrap_width: int | None = None,
+    ) -> tuple[int, int, int]:
         """Advance line count through text with word wrapping (no drawing).
 
-        Returns (current_x, lines).
+        Returns (current_x, lines, line_width).
         """
+        if wrap_width is None:
+            wrap_width = line_width
         words = text.split(" ")
         for i, word in enumerate(words):
             draw_word = word if i == 0 else " " + word
             word_width = fm.horizontalAdvance(draw_word)
-            if current_x + word_width > content_width and current_x > 0:
+            if current_x + word_width > line_width and current_x > 0:
                 lines += 1
                 current_x = 0
+                line_width = wrap_width
                 if draw_word.startswith(" "):
                     draw_word = draw_word[1:]
                     word_width = fm.horizontalAdvance(draw_word)
             current_x += word_width
-        return current_x, lines
+        return current_x, lines, line_width
