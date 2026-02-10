@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 EMOTE_BUTTON_SIZE = 36
 GRID_COLUMNS = 8
+_SCAN_BATCH_SIZE = 50  # Buttons per tick for deferred animation/download scan
 
 # Tab ordering: platform emotes first, then 3rd party alphabetically
 _PROVIDER_ORDER = {
@@ -73,6 +74,11 @@ class EmotePickerWidget(QWidget):
         self._gif_timer = None
         self._gif_connected: bool = False
         self._animation_time_ms: int = 0
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setSingleShot(True)
+        self._scan_timer.setInterval(0)
+        self._scan_timer.timeout.connect(self._process_scan_batch)
+        self._scan_index: int = 0
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -200,46 +206,11 @@ class EmotePickerWidget(QWidget):
         self._rebuild_tabs()
 
     def refresh_icons(self) -> None:
-        """Update button icons for emotes whose images have loaded since creation."""
-        cache = self._image_store
-        if not cache:
-            return
-        scale = self._current_scale()
-        tracked_keys = {k for _, _, k in self._animated_buttons}
-        new_animated = False
-        for btn, emote in self._all_buttons:
-            try:
-                if btn.icon() and not btn.icon().isNull():
-                    continue  # Already has an icon
-            except RuntimeError:
-                continue  # C++ object deleted
-            if not emote.image_set:
-                continue
-            image_set = emote.image_set.bind(cache)
-            emote.image_set = image_set
-            image_ref = image_set.get_image_or_loaded(scale=scale)
-            if not image_ref:
-                continue
-            pixmap = image_ref.pixmap_or_load()
-            if pixmap and not pixmap.isNull():
-                try:
-                    btn.setIcon(QIcon(pixmap))
-                    btn.setIconSize(pixmap.size())
-                    btn.setText("")
-                except RuntimeError:
-                    continue
-                # Detect newly-animated emotes that arrived after initial scan
-                key = image_ref.key
-                if key not in tracked_keys and cache.has_animation_data(key):
-                    if key not in cache.animated_dict:
-                        cache.request_animation_frames(key)
-                    self._animated_buttons.append((btn, emote, key))
-                    tracked_keys.add(key)
-                    new_animated = True
-        # Connect gif timer if we discovered new animated emotes
-        if new_animated and self._gif_timer and not self._gif_connected and self.isVisible():
-            self._gif_timer.tick.connect(self._on_gif_tick)
-            self._gif_connected = True
+        """Update button icons for emotes whose images have loaded since creation.
+
+        Delegates to the deferred batched scan to avoid blocking the main thread.
+        """
+        self._start_deferred_scan()
 
     def set_image_store(self, store: EmoteCache) -> None:
         """Set the shared image store."""
@@ -260,19 +231,17 @@ class EmotePickerWidget(QWidget):
         if self._needs_rebuild:
             self._needs_rebuild = False
             self._rebuild_tabs()
-        self._detect_animated_buttons()
-        self._request_missing_emotes()
         self.move(pos)
         self._search.clear()
         self._filter_combo.setCurrentIndex(0)
         self._search.setFocus()
         self.show()
-        if self._gif_timer and self._animated_buttons and not self._gif_connected:
-            self._gif_timer.tick.connect(self._on_gif_tick)
-            self._gif_connected = True
+        # Kick off deferred scan (animation detection + missing emote requests)
+        self._start_deferred_scan()
 
     def hideEvent(self, event) -> None:  # noqa: N802
         """Disconnect animation timer when picker closes."""
+        self._scan_timer.stop()
         if self._gif_timer and self._gif_connected:
             try:
                 self._gif_timer.tick.disconnect(self._on_gif_tick)
@@ -297,6 +266,7 @@ class EmotePickerWidget(QWidget):
         self._tabs.clear()
         self._all_buttons.clear()
         self._build_timer.stop()
+        self._scan_timer.stop()
 
         providers = self._sorted_providers()
         if not providers:
@@ -457,46 +427,75 @@ class EmotePickerWidget(QWidget):
 
             btn.setVisible(True)
 
-    def _request_missing_emotes(self) -> None:
-        """Request downloads for emotes not yet cached, prioritizing channel emotes."""
-        if not self._image_store:
+    def _start_deferred_scan(self) -> None:
+        """Begin batched scan of buttons for animation data and missing downloads."""
+        self._animated_buttons.clear()
+        self._scan_index = 0
+        self._scan_timer.start()
+
+    def _process_scan_batch(self) -> None:
+        """Process a batch of buttons — set icons, detect animation, request downloads.
+
+        Combines the work of the old refresh_icons, _detect_animated_buttons, and
+        _request_missing_emotes into one batched pass. Processes _SCAN_BATCH_SIZE
+        buttons per event loop tick to avoid blocking the main thread.
+        """
+        if not self._image_store or not self._all_buttons:
             return
         cache = self._image_store
         scale = self._current_scale()
-        for btn, emote in self._all_buttons:
+        icon_size = QSize(EMOTE_BUTTON_SIZE - 4, EMOTE_BUTTON_SIZE - 4)
+        end = min(self._scan_index + _SCAN_BATCH_SIZE, len(self._all_buttons))
+
+        for i in range(self._scan_index, end):
+            btn, emote = self._all_buttons[i]
             if not emote.image_set:
                 continue
+            image_set = emote.image_set.bind(cache)
+            emote.image_set = image_set
+
             try:
-                if btn.icon() and not btn.icon().isNull():
-                    continue
+                has_icon = btn.icon() and not btn.icon().isNull()
             except RuntimeError:
                 continue
-            image_set = emote.image_set.bind(cache)
-            emote.image_set = image_set
-            is_channel = emote.name in self._channel_emote_names
-            priority = DOWNLOAD_PRIORITY_HIGH if is_channel else DOWNLOAD_PRIORITY_LOW
-            image_set.prefetch(scale=scale, priority=priority)
 
-    def _detect_animated_buttons(self) -> None:
-        """Scan all buttons and identify which emotes have animation frames."""
-        self._animated_buttons.clear()
-        if not self._image_store:
-            return
-        cache = self._image_store
-        scale = self._current_scale()
-        for btn, emote in self._all_buttons:
-            if not emote.image_set:
-                continue
-            image_set = emote.image_set.bind(cache)
-            emote.image_set = image_set
             image_ref = image_set.get_image_or_loaded(scale=scale)
-            if not image_ref:
-                continue
-            key = image_ref.key
-            if cache.has_animation_data(key):
-                if key not in cache.animated_dict:
-                    cache.request_animation_frames(key)
-                self._animated_buttons.append((btn, emote, key))
+
+            if image_ref:
+                key = image_ref.key
+                # Set icon from cache if button is still blank
+                if not has_icon:
+                    pixmap = image_ref.pixmap_or_load()
+                    if pixmap and not pixmap.isNull():
+                        try:
+                            btn.setIcon(QIcon(pixmap))
+                            btn.setIconSize(icon_size)
+                            btn.setText("")
+                            has_icon = True
+                        except RuntimeError:
+                            continue
+
+                # Animation detection
+                if cache.has_animation_data(key):
+                    if key not in cache.animated_dict:
+                        cache.request_animation_frames(key)
+                    self._animated_buttons.append((btn, emote, key))
+
+            # Request download for emotes still without icons
+            if not has_icon:
+                is_channel = emote.name in self._channel_emote_names
+                priority = DOWNLOAD_PRIORITY_HIGH if is_channel else DOWNLOAD_PRIORITY_LOW
+                image_set.prefetch(scale=scale, priority=priority)
+
+        self._scan_index = end
+
+        if self._scan_index < len(self._all_buttons):
+            self._scan_timer.start()
+        else:
+            # Scan complete — connect gif timer if animated buttons were found
+            if self._gif_timer and self._animated_buttons and not self._gif_connected:
+                self._gif_timer.tick.connect(self._on_gif_tick)
+                self._gif_connected = True
 
     def _on_gif_tick(self, elapsed_ms: int) -> None:
         """Advance animation frame for visible animated emote buttons."""

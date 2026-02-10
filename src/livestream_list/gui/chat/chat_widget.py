@@ -2566,8 +2566,6 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._emote_picker.set_image_store(self._image_store)
         if self._gif_timer:
             self._emote_picker.set_gif_timer(self._gif_timer)
-        # Refresh any buttons that were created before their images loaded
-        self._emote_picker.refresh_icons()
         # Position above the emote button
         btn_pos = self._emote_button.mapToGlobal(self._emote_button.rect().topLeft())
         picker_pos = btn_pos - QPoint(0, self._emote_picker.height())
