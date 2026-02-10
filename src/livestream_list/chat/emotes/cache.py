@@ -680,7 +680,7 @@ class EmoteCache(QObject):
 
         # Create new loader
         self._loader = EmoteLoaderWorker(parent=self)
-        self._loader.image_decoded.connect(self._on_download_image_decoded)
+        self._loader.bytes_ready.connect(self._on_download_bytes_ready)
         self._loader.emote_failed.connect(self._on_emote_failed)
         self._loader.finished.connect(self._on_loader_finished)
 
@@ -690,27 +690,17 @@ class EmoteCache(QObject):
 
         self._loader.start()
 
-    def _on_download_image_decoded(
-        self, key: str, data: bytes, image: QImage, is_animated: bool
-    ) -> None:
-        """Handle decoded image from download worker — only QPixmap creation on main thread."""
-        pixmap = QPixmap.fromImage(image)
-        if pixmap.isNull():
-            self._handle_download_failure(key, "decode")
+    def _on_download_bytes_ready(self, key: str, data: bytes) -> None:
+        """Handle downloaded emote bytes — queue for budgeted main-thread decoding."""
+        if not data:
+            self._handle_download_failure(key, "empty")
             return
-
-        if is_animated:
-            self._no_animation.discard(key)
-        else:
-            last_url = self._last_download_url.get(key)
-            if last_url and self._is_fallback_url(key, last_url):
-                self._no_animation.add(key)
-        # Store original bytes directly — skip PNG re-encode
-        self.put(key, pixmap, raw_data=data)
-        self._clear_download_attempts(key)
+        self._decode_queue.append((key, data))
+        if not self._decode_timer.isActive():
+            self._decode_timer.start()
 
     def _process_decode_queue(self) -> None:
-        """Decode emotes loaded from disk in batches to avoid blocking the UI."""
+        """Decode emotes (from downloads or disk) in budgeted batches."""
         start_time = time.monotonic()
         budget_ms = 30.0
 
@@ -719,16 +709,24 @@ class EmoteCache(QObject):
 
             result = _decode_image_data(data)
             if result is None:
+                self._handle_download_failure(key, "decode")
                 continue
 
             image, is_animated = result
             pixmap = QPixmap.fromImage(image)
             if pixmap.isNull():
+                self._handle_download_failure(key, "decode")
                 continue
 
             if is_animated:
                 self._no_animation.discard(key)
+            else:
+                last_url = self._last_download_url.get(key)
+                if last_url and self._is_fallback_url(key, last_url):
+                    self._no_animation.add(key)
+            # Store original bytes directly — skip PNG re-encode
             self.put(key, pixmap, raw_data=data)
+            self._clear_download_attempts(key)
 
             elapsed_ms = (time.monotonic() - start_time) * 1000
             if elapsed_ms >= budget_ms:
@@ -1120,12 +1118,11 @@ class EmoteLoaderWorker(QThread):
     """Worker thread for downloading emote images.
 
     Processes a queue of (key, url) pairs, downloads images via aiohttp,
-    decodes QImage in a thread pool (off main thread), and emits decoded
-    images. Only QPixmap.fromImage() happens on the main thread.
+    and emits raw bytes via signals. Decoding happens on the main thread
+    in budgeted batches to avoid UI freezes.
     """
 
-    # Decoded image ready: key, raw_data, QImage, is_animated
-    image_decoded = Signal(str, bytes, object, bool)
+    bytes_ready = Signal(str, bytes)  # key, raw_data
     emote_failed = Signal(str, str, int, str)  # key, url, status, reason
 
     def __init__(self, parent: QObject | None = None):
@@ -1188,9 +1185,7 @@ class EmoteLoaderWorker(QThread):
                     await asyncio.sleep(0.1)
 
     async def _download_one(self, session, sem, timeout, key: str, url: str) -> None:
-        """Download a single emote image and decode off the event loop."""
-        import asyncio
-
+        """Download a single emote image."""
         async with sem:
             try:
                 async with session.get(url, timeout=timeout) as resp:
@@ -1201,16 +1196,7 @@ class EmoteLoaderWorker(QThread):
                     if not data:
                         self.emote_failed.emit(key, url, resp.status, "empty")
                         return
+                    self.bytes_ready.emit(key, data)
             except Exception as e:
                 logger.debug(f"Failed to download emote {key}: {e}")
                 self.emote_failed.emit(key, url, 0, "exception")
-                return
-
-        # Decode QImage in thread pool (QImage is thread-safe, QPixmap is not)
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, _decode_image_data, data)
-        if result is None:
-            self.emote_failed.emit(key, url, 0, "decode")
-            return
-        image, is_animated = result
-        self.image_decoded.emit(key, data, image, is_animated)
