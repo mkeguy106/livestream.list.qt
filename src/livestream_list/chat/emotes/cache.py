@@ -297,7 +297,14 @@ class EmoteDiskLoaderWorker(QThread):
 
 
 class _DiskCacheWorker(threading.Thread):
-    """Background worker for disk writes and eviction."""
+    """Background worker for disk writes and eviction.
+
+    Uses incremental size tracking to avoid full directory scans on every write.
+    A full calibration scan runs once on startup and every 5 minutes thereafter.
+    Eviction only triggers when the running total exceeds the configured limit.
+    """
+
+    _RECALIBRATE_INTERVAL_S = 300.0  # 5 minutes
 
     def __init__(self, cache_dir: Path, get_limit_bytes, logger_obj) -> None:
         super().__init__(daemon=True)
@@ -306,13 +313,13 @@ class _DiskCacheWorker(threading.Thread):
         self._logger = logger_obj
         self._queue: queue.Queue[tuple[str, Path | None, bytes | None]] = queue.Queue()
         self._stop_event = threading.Event()
-        self._pending_writes = 0
-        self._last_enforce = 0.0
-        self._last_size_bytes = 0
+        self._total_size_bytes: int = 0
+        self._calibrated: bool = False
+        self._last_calibration: float = 0.0
 
     @property
     def last_size_bytes(self) -> int:
-        return self._last_size_bytes
+        return self._total_size_bytes
 
     def enqueue_write(self, path: Path, data: bytes) -> None:
         self._queue.put(("write", path, data))
@@ -324,12 +331,51 @@ class _DiskCacheWorker(threading.Thread):
         self._stop_event.set()
         self._queue.put(("stop", None, None))
 
+    def _calibrate(self) -> None:
+        """Full size-only scan of the cache directory."""
+        total = 0
+        try:
+            for f in self._cache_dir.iterdir():
+                try:
+                    total += f.stat().st_size
+                except OSError:
+                    continue
+        except OSError as e:
+            self._logger.debug(f"Disk cache calibration error: {e}")
+        self._total_size_bytes = total
+        self._calibrated = True
+        self._last_calibration = time.monotonic()
+        self._logger.info(
+            f"Disk cache calibrated: {total // (1024 * 1024)}mb "
+            f"({total:,} bytes)"
+        )
+
+    def _maybe_recalibrate(self) -> None:
+        """Re-calibrate if enough time has elapsed."""
+        now = time.monotonic()
+        if now - self._last_calibration >= self._RECALIBRATE_INTERVAL_S:
+            self._calibrate()
+
+    def _run_eviction_if_needed(self) -> None:
+        """Run eviction only if the running total exceeds the limit."""
+        max_bytes = self._get_limit_bytes()
+        if self._total_size_bytes > max_bytes:
+            self._total_size_bytes = _enforce_disk_limit(
+                self._cache_dir, max_bytes, self._logger
+            )
+
     def run(self) -> None:
         while not self._stop_event.is_set():
             try:
-                kind, path, data = self._queue.get(timeout=0.5)
+                kind, path, data = self._queue.get(timeout=1.0)
             except queue.Empty:
+                # Idle — recalibrate if stale
+                self._maybe_recalibrate()
                 continue
+
+            # Lazy first calibration on first queue item
+            if not self._calibrated:
+                self._calibrate()
 
             if kind == "stop":
                 return
@@ -338,23 +384,11 @@ class _DiskCacheWorker(threading.Thread):
                     path.write_bytes(data)
                 except Exception as e:
                     self._logger.debug(f"Failed to write disk cache file: {e}")
-                self._pending_writes += 1
-                self._last_size_bytes += len(data)
+                else:
+                    self._total_size_bytes += len(data)
+                self._run_eviction_if_needed()
             elif kind == "enforce":
-                self._pending_writes = 0
-                self._last_enforce = time.monotonic()
-                self._last_size_bytes = _enforce_disk_limit(
-                    self._cache_dir, self._get_limit_bytes(), self._logger
-                )
-
-            # Throttle eviction checks to avoid excessive scans
-            now = time.monotonic()
-            if self._pending_writes >= 20 or (now - self._last_enforce) > 30:
-                self._pending_writes = 0
-                self._last_enforce = now
-                self._last_size_bytes = _enforce_disk_limit(
-                    self._cache_dir, self._get_limit_bytes(), self._logger
-                )
+                self._run_eviction_if_needed()
 
 
 def _enforce_disk_limit(cache_dir: Path, max_bytes: int, logger_obj) -> int:
@@ -1110,6 +1144,7 @@ class EmoteCache(QObject):
             self._no_animation.clear()
             self._download_attempts.clear()
             self._download_blocked_until.clear()
+            self._disk_worker._total_size_bytes = 0
         except Exception as e:
             logger.error(f"Failed to clear disk cache: {e}")
 

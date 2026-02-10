@@ -25,41 +25,81 @@ logger = logging.getLogger(__name__)
 class MainThreadWatchdog(QObject):
     """Watchdog that detects when the main thread is blocked.
 
-    Logs a warning with stack trace when the main thread doesn't respond
-    for more than the threshold time.
+    Two-component design:
+    1. QTimer (100ms) on main thread — only updates a heartbeat timestamp
+    2. Daemon thread — polls every 50ms and captures the main thread's stack
+       via sys._current_frames() when the heartbeat goes stale
+
+    This means the stack trace shows what the main thread is *actually doing*
+    during a block, not just the watchdog's own _tick() method.
     """
 
     def __init__(self, parent: QObject | None = None, threshold_ms: int = 500):
         super().__init__(parent)
         self._threshold_s = threshold_ms / 1000.0
-        self._last_tick = time.monotonic()
+        self._heartbeat: float = time.monotonic()
+        self._main_thread_id = threading.get_ident()
+
+        # QTimer on main thread — just bumps the heartbeat timestamp
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
-        self._timer.start(100)  # Check every 100ms
-        self._main_thread_id = threading.get_ident()
+        self._timer.start(100)
+
+        # Daemon thread — monitors heartbeat staleness
+        self._stop_event = threading.Event()
+        self._monitor_thread = threading.Thread(
+            target=self._monitor_loop, daemon=True, name="watchdog-monitor"
+        )
+        self._monitor_thread.start()
         logger.info(f"MainThreadWatchdog started (threshold={threshold_ms}ms)")
 
     def _tick(self) -> None:
-        now = time.monotonic()
-        delta = now - self._last_tick
-        if delta > self._threshold_s:
-            # Main thread was blocked - log with stack trace
-            logger.warning(f"MAIN THREAD BLOCKED for {delta:.2f}s! Stack traces of all threads:")
-            for thread_id, frame in sys._current_frames().items():
-                thread_name = "MAIN" if thread_id == self._main_thread_id else f"Thread-{thread_id}"
-                stack = "".join(traceback.format_stack(frame))
-                logger.warning(f"\n--- {thread_name} ---\n{stack}")
-        # Log heartbeat every 10 seconds
-        if not hasattr(self, "_last_heartbeat"):
-            self._last_heartbeat = now
-        if now - self._last_heartbeat >= 10.0:
-            logger.warning(f"[WATCHDOG-HEARTBEAT] tick at {now:.1f}")
-            self._last_heartbeat = now
-        self._last_tick = now
+        """Main thread heartbeat — near-zero overhead (single float assignment)."""
+        self._heartbeat = time.monotonic()
+
+    def _monitor_loop(self) -> None:
+        """Background thread that watches for stale heartbeats."""
+        block_detected = False
+        block_start: float = 0.0
+        last_heartbeat_log: float = time.monotonic()
+
+        while not self._stop_event.wait(0.05):  # Poll every 50ms
+            now = time.monotonic()
+            staleness = now - self._heartbeat
+
+            if staleness > self._threshold_s:
+                if not block_detected:
+                    # First detection — capture main thread stack
+                    block_detected = True
+                    block_start = now
+                    frames = sys._current_frames()
+                    main_frame = frames.get(self._main_thread_id)
+                    if main_frame:
+                        stack = "".join(traceback.format_stack(main_frame))
+                        logger.warning(
+                            f"MAIN THREAD BLOCKED ({staleness:.2f}s stale)! "
+                            f"Stack:\n{stack}"
+                        )
+                    else:
+                        logger.warning(
+                            f"MAIN THREAD BLOCKED ({staleness:.2f}s stale) "
+                            f"— could not capture stack"
+                        )
+            elif block_detected:
+                # Heartbeat resumed — log total block duration
+                total = now - block_start
+                logger.warning(f"Main thread resumed after {total:.2f}s block")
+                block_detected = False
+
+            # Heartbeat log every 10s
+            if now - last_heartbeat_log >= 10.0:
+                logger.info(f"[WATCHDOG-HEARTBEAT] alive at {now:.1f}")
+                last_heartbeat_log = now
 
     def stop(self) -> None:
         """Stop the watchdog."""
         self._timer.stop()
+        self._stop_event.set()
 
 
 class AsyncWorker(QThread):
@@ -626,6 +666,10 @@ class Application(QApplication):
 
     def cleanup(self):
         """Clean up resources."""
+        # Stop watchdog
+        if self._watchdog:
+            self._watchdog.stop()
+
         # Stop timers
         if self._refresh_timer:
             self._refresh_timer.stop()
