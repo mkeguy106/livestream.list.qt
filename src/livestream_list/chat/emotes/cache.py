@@ -24,6 +24,7 @@ DISK_CACHE_EVICT_PERCENT = 0.2  # Evict 20% when over limit
 DOWNLOAD_PRIORITY_HIGH = 0
 DOWNLOAD_PRIORITY_LOW = 1
 MAX_EMOTE_DOWNLOAD_RETRIES = 2
+CONCURRENT_EMOTE_DOWNLOADS = 10
 FRAME_CONVERT_BASE_BUDGET_MS = 4.0
 FRAME_CONVERT_MAX_BUDGET_MS = 8.0
 FRAME_CONVERT_INTERVAL_MS = 16  # ~60fps, was 4ms which was too aggressive
@@ -1151,26 +1152,51 @@ class EmoteLoaderWorker(QThread):
             loop.close()
 
     async def _process_queue(self) -> None:
-        """Download emotes from the queue."""
+        """Download emotes from the queue with concurrent requests."""
+        import asyncio
+
         import aiohttp
 
-        async with aiohttp.ClientSession() as session:
-            while not self._should_stop:
-                try:
-                    _priority, _seq, key, url = self._queue.get(timeout=0.2)
-                except queue.Empty:
-                    continue
-                try:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        if resp.status != 200:
-                            self.emote_failed.emit(key, url, resp.status, "http")
-                            continue
-                        data = await resp.read()
-                        if not data:
-                            self.emote_failed.emit(key, url, resp.status, "empty")
-                            continue
-                        # Emit raw bytes only - decoding happens on main thread
-                        self.bytes_ready.emit(key, data)
-                except Exception as e:
-                    logger.debug(f"Failed to download emote {key}: {e}")
-                    self.emote_failed.emit(key, url, 0, "exception")
+        sem = asyncio.Semaphore(CONCURRENT_EMOTE_DOWNLOADS)
+        timeout = aiohttp.ClientTimeout(total=10)
+        connector = aiohttp.TCPConnector(limit=20, limit_per_host=8)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            tasks: set[asyncio.Task] = set()
+
+            while not self._should_stop or tasks:
+                # Drain available items from queue (non-blocking)
+                if not self._should_stop:
+                    while True:
+                        try:
+                            _pri, _seq, key, url = self._queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        task = asyncio.create_task(
+                            self._download_one(session, sem, timeout, key, url)
+                        )
+                        tasks.add(task)
+                        task.add_done_callback(tasks.discard)
+
+                if tasks:
+                    await asyncio.wait(
+                        tasks, timeout=0.15, return_when=asyncio.FIRST_COMPLETED
+                    )
+                elif not self._should_stop:
+                    await asyncio.sleep(0.1)
+
+    async def _download_one(self, session, sem, timeout, key: str, url: str) -> None:
+        """Download a single emote image."""
+        async with sem:
+            try:
+                async with session.get(url, timeout=timeout) as resp:
+                    if resp.status != 200:
+                        self.emote_failed.emit(key, url, resp.status, "http")
+                        return
+                    data = await resp.read()
+                    if not data:
+                        self.emote_failed.emit(key, url, resp.status, "empty")
+                        return
+                    self.bytes_ready.emit(key, data)
+            except Exception as e:
+                logger.debug(f"Failed to download emote {key}: {e}")
+                self.emote_failed.emit(key, url, 0, "exception")
