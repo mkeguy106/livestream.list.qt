@@ -690,7 +690,6 @@ class ChatWindow(QMainWindow):
             f"(pending {metrics['emote_pending']}) | "
             f"Disk {disk_mb}/{metrics['disk_limit_mb']} MB | "
             f"DL {metrics['downloads_queued']}+{metrics['downloads_inflight']} | "
-            f"Prefetch {metrics['prefetch_queue']}/{metrics['prefetch_inflight']} | "
             f"MsgQ {metrics['message_queue']}"
         )
         if self._metrics_label:
@@ -1005,7 +1004,6 @@ class ChatWindow(QMainWindow):
         """Persist chat setting toggles and relayout active widget."""
         self.settings.save()
         self.chat_manager.on_emote_settings_changed()
-        self.chat_manager._update_prefetch_targets()
         # Only relayout the active widget to avoid lockups
         # Other widgets will be relayouted when they become active
         current_widget = self._tab_widget.currentWidget()

@@ -5,7 +5,6 @@ import logging
 import re
 import time
 import uuid
-from collections import deque
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -14,7 +13,7 @@ from ..core.models import Livestream, StreamPlatform
 from ..core.settings import Settings
 from .chat_log_store import ChatLogWriter
 from .connections.base import BaseChatConnection
-from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, DOWNLOAD_PRIORITY_LOW, EmoteCache
+from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, EmoteCache
 from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
 from .emotes.matcher import find_third_party_emotes
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
@@ -27,7 +26,6 @@ _DEFAULT_TWITCH_CLIENT_ID = "gnvljs5w28wkpz60vfug0z5rp5d66h"
 GLOBAL_EMOTE_TTL = 24 * 60 * 60  # 24 hours
 USER_EMOTE_TTL = 30 * 60  # 30 minutes
 CHANNEL_EMOTE_TTL = 6 * 60 * 60  # 6 hours
-PREFETCH_CONCURRENCY = 1
 MAX_RECENT_CHANNELS = 30
 MESSAGE_FLUSH_INTERVAL_MS = 50
 MAX_MESSAGES_PER_FLUSH = 200
@@ -1445,13 +1443,6 @@ class ChatManager(QObject):
         self._emote_update_timer.setSingleShot(True)
         self._emote_update_timer.timeout.connect(self._emit_emote_cache_update)
 
-        # Prefetch state (favorites/recent/active)
-        self._prefetch_queue: deque[str] = deque()
-        self._prefetch_inflight: set[str] = set()
-        self._prefetch_workers: dict[str, EmoteFetchWorker] = {}
-        self._prefetch_timer = QTimer(self)
-        self._prefetch_timer.timeout.connect(self._process_prefetch_queue)
-        self._prefetch_timer.start(500)
         self._last_emote_providers = tuple(self.settings.chat.builtin.emote_providers)
 
         # Message batching to throttle UI updates
@@ -1528,8 +1519,6 @@ class ChatManager(QObject):
             "disk_limit_mb": int(self.settings.emote_cache_mb),
             "downloads_queued": self._emote_cache.downloads_queued(),
             "downloads_inflight": self._emote_cache.downloads_inflight(),
-            "prefetch_queue": len(self._prefetch_queue),
-            "prefetch_inflight": len(self._prefetch_inflight),
             "message_queue": pending_messages,
         }
 
@@ -1565,7 +1554,6 @@ class ChatManager(QObject):
 
         self._livestreams[channel_key] = livestream
         self._record_recent_channel(channel_key)
-        self._update_prefetch_targets()
         self._start_connection(channel_key, livestream)
 
         # Start emote fetching for this channel
@@ -1745,13 +1733,9 @@ class ChatManager(QObject):
         self._resolved_emote_maps.pop(channel_key, None)
 
         self.chat_closed.emit(channel_key)
-        self._update_prefetch_targets()
 
     def on_refresh_complete(self, livestreams: list[Livestream] | None = None) -> None:
-        """Handle refresh complete to update prefetch targets."""
-        if livestreams is None and self._monitor:
-            livestreams = self._monitor.live_streams
-        self._update_prefetch_targets(livestreams)
+        """Handle refresh complete to keep emotes fresh."""
         # Keep global/user emotes fresh without manual refresh.
         self._ensure_global_emotes()
         self._ensure_user_emotes()
@@ -1765,100 +1749,6 @@ class ChatManager(QObject):
         recents = recents[:MAX_RECENT_CHANNELS]
         self.settings.chat.recent_channels = recents
         self.settings.save()
-
-    def _update_prefetch_targets(self, livestreams: list[Livestream] | None = None) -> None:
-        """Update prefetch queue based on favorites/recent/active channels."""
-        if not self.settings.chat.builtin.show_emotes:
-            self._prefetch_queue.clear()
-            return
-        if self.settings.emote_cache_mb <= 0:
-            self._prefetch_queue.clear()
-            return
-
-        ordered: list[str] = []
-        seen: set[str] = set()
-
-        def add_key(key: str) -> None:
-            if key and key not in seen:
-                seen.add(key)
-                ordered.append(key)
-
-        # Active chats (highest priority, but will be skipped later)
-        for key in self._connections.keys():
-            add_key(key)
-
-        # Recent chats
-        for key in self.settings.chat.recent_channels or []:
-            add_key(key)
-
-        # Favorites
-        if self._monitor:
-            for channel in self._monitor.channels:
-                if channel.favorite:
-                    add_key(channel.unique_key)
-
-        # Filter to known channels only
-        known = set()
-        if self._monitor:
-            known.update(ch.unique_key for ch in self._monitor.channels)
-        known.update(self._livestreams.keys())
-        ordered = [key for key in ordered if key in known]
-
-        # Rebuild queue, skipping active connections and recent fetches
-        now = time.monotonic()
-        self._prefetch_queue = deque(
-            key
-            for key in ordered
-            if key not in self._connections
-            and key not in self._emote_fetch_workers
-            and key not in self._prefetch_inflight
-            and (now - self._channel_emotes_fetched_at.get(key, 0)) >= CHANNEL_EMOTE_TTL
-        )
-
-    def _process_prefetch_queue(self) -> None:
-        """Prefetch emotes for queued channels in the background."""
-        if not self._prefetch_queue:
-            return
-        if len(self._prefetch_inflight) >= PREFETCH_CONCURRENCY:
-            return
-
-        channel_key = self._prefetch_queue.popleft()
-        if channel_key in self._prefetch_inflight:
-            return
-        channel = None
-        if self._monitor:
-            for ch in self._monitor.channels:
-                if ch.unique_key == channel_key:
-                    channel = ch
-                    break
-        if not channel and channel_key in self._livestreams:
-            channel = self._livestreams[channel_key].channel
-        if not channel:
-            return
-
-        worker = EmoteFetchWorker(
-            channel_key=channel_key,
-            platform=channel.platform.value.lower(),
-            channel_id=channel.channel_id,
-            providers=self.settings.chat.builtin.emote_providers
-            if self.settings.chat.builtin.show_emotes
-            else [],
-            oauth_token=self.settings.twitch.access_token,
-            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
-            fetch_badges=False,
-            parent=self,
-        )
-        worker.emotes_fetched.connect(self._on_emotes_fetched)
-        self._prefetch_workers[channel_key] = worker
-        self._prefetch_inflight.add(channel_key)
-        worker.finished.connect(lambda key=channel_key: self._on_prefetch_finished(key))
-        worker.start()
-
-    def _on_prefetch_finished(self, channel_key: str) -> None:
-        self._prefetch_inflight.discard(channel_key)
-        worker = self._prefetch_workers.pop(channel_key, None)
-        if worker and worker.isRunning():
-            worker.wait(1000)
 
     def send_message(
         self,
@@ -2128,7 +2018,6 @@ class ChatManager(QObject):
         """Disconnect all active chat connections."""
         for key in list(self._workers.keys()):
             self.close_chat(key)
-        self._prefetch_timer.stop()
         self._message_flush_timer.stop()
         self._stop_whisper_listener()
         self._stop_hype_train_listener()
@@ -2608,18 +2497,14 @@ class ChatManager(QObject):
         for emote in twitch_list:
             if not isinstance(emote, ChatEmote):
                 continue
-            image_set = self._bind_emote_image_set(emote)
-            if image_set:
-                image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_LOW)
+            self._bind_emote_image_set(emote)
             self._global_twitch_emotes[emote.name] = emote
 
         self._global_common_emotes = {}
         for emote in common_list:
             if not isinstance(emote, ChatEmote):
                 continue
-            image_set = self._bind_emote_image_set(emote)
-            if image_set:
-                image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_LOW)
+            self._bind_emote_image_set(emote)
             self._global_common_emotes[emote.name] = emote
         self._global_emotes_fetched_at = time.monotonic()
 
