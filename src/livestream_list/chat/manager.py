@@ -1394,6 +1394,8 @@ class ChatManager(QObject):
     hype_train_event = Signal(str, object)
     # Emitted on raid events (channel_key, ChatMessage)
     raid_received = Signal(str, object)
+    # Emitted on @mention of our user (channel_key, ChatMessage)
+    mention_received = Signal(str, object)
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1411,6 +1413,7 @@ class ChatManager(QObject):
         self._emote_cache = EmoteCache(parent=self)
         self._emote_cache.emote_loaded.connect(self._on_emote_loaded)
         self._emote_cache.set_disk_limit_mb(self.settings.emote_cache_mb)
+        logger.info(f"Emote disk cache limit: {self.settings.emote_cache_mb}MB")
         self._gif_timer = GifTimer(parent=self)
         self._image_expiration_pool = ImageExpirationPool(self._emote_cache, parent=self)
 
@@ -2278,9 +2281,13 @@ class ChatManager(QObject):
         our_nick = self._get_our_nick(channel_key)
         if our_nick:
             mention_pattern = f"@{our_nick}".lower()
+            our_nick_lower = our_nick.lower()
             for msg in messages:
                 if mention_pattern in msg.text.lower():
                     msg.is_mention = True
+                    # Emit mention signal (skip our own messages)
+                    if msg.user.name.lower() != our_nick_lower:
+                        self.mention_received.emit(channel_key, msg)
 
         # Detect custom highlight keywords
         keywords = self.settings.chat.builtin.highlight_keywords

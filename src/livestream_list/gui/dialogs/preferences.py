@@ -210,7 +210,7 @@ class PreferencesDialog(QDialog):
         self.notif_enabled_cb.stateChanged.connect(self._on_notif_changed)
         notif_layout.addRow(self.notif_enabled_cb)
 
-        self.notif_sound_cb = QCheckBox("Play sound")
+        self.notif_sound_cb = QCheckBox("Play sound for channels going live")
         self.notif_sound_cb.setChecked(self.app.settings.notifications.sound_enabled)
         self.notif_sound_cb.stateChanged.connect(self._on_notif_changed)
         notif_layout.addRow(self.notif_sound_cb)
@@ -314,10 +314,37 @@ class PreferencesDialog(QDialog):
         self.notif_raid_cb.stateChanged.connect(self._on_notif_changed)
         notif_layout.addRow(self.notif_raid_cb)
 
-        # Test notification button
-        self.test_notif_btn = QPushButton("Test Notification")
-        self.test_notif_btn.clicked.connect(self._on_test_notification)
-        notif_layout.addRow(self.test_notif_btn)
+        # Mention notifications
+        self.notif_mention_cb = QCheckBox("Play sound for @mentions")
+        self.notif_mention_cb.setChecked(
+            self.app.settings.notifications.mention_notifications_enabled
+        )
+        self.notif_mention_cb.stateChanged.connect(self._on_notif_changed)
+        notif_layout.addRow(self.notif_mention_cb)
+
+        # Mention custom sound
+        self.notif_mention_sound_path = QLineEdit()
+        self.notif_mention_sound_path.setPlaceholderText("Default (bell.oga)")
+        self.notif_mention_sound_path.setText(
+            self.app.settings.notifications.mention_custom_sound_path
+        )
+        self.notif_mention_sound_path.textChanged.connect(self._on_notif_changed)
+        mention_sound_browse_btn = QPushButton("Browse...")
+        mention_sound_browse_btn.clicked.connect(self._on_browse_mention_sound)
+        mention_sound_row = QHBoxLayout()
+        mention_sound_row.addWidget(self.notif_mention_sound_path)
+        mention_sound_row.addWidget(mention_sound_browse_btn)
+        notif_layout.addRow("Mention sound:", mention_sound_row)
+
+        # Test notification buttons
+        self.test_live_btn = QPushButton("Test Live Sound")
+        self.test_live_btn.clicked.connect(self._on_test_notification)
+        self.test_mention_btn = QPushButton("Test Mention Sound")
+        self.test_mention_btn.clicked.connect(self._on_test_mention_notification)
+        test_row = QHBoxLayout()
+        test_row.addWidget(self.test_live_btn)
+        test_row.addWidget(self.test_mention_btn)
+        notif_layout.addRow(test_row)
 
         layout.addWidget(notif_group)
 
@@ -1076,6 +1103,8 @@ class PreferencesDialog(QDialog):
         notif.quiet_hours_start = self.notif_quiet_start.time().toString("HH:mm")
         notif.quiet_hours_end = self.notif_quiet_end.time().toString("HH:mm")
         notif.raid_notifications_enabled = self.notif_raid_cb.isChecked()
+        notif.mention_notifications_enabled = self.notif_mention_cb.isChecked()
+        notif.mention_custom_sound_path = self.notif_mention_sound_path.text().strip()
         self.app.save_settings()
 
     def _on_style_changed(self, index):
@@ -1094,6 +1123,16 @@ class PreferencesDialog(QDialog):
         )
         if path:
             self.notif_sound_path.setText(path)
+
+    def _on_browse_mention_sound(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Mention Sound",
+            "",
+            "Audio Files (*.wav *.ogg *.oga *.mp3 *.flac *.opus);;All Files (*)",
+        )
+        if path:
+            self.notif_mention_sound_path.setText(path)
 
     def _on_notif_backend_changed(self, index):
         self.app.settings.notifications.backend = self.notif_backend_combo.currentData()
@@ -1118,6 +1157,11 @@ class PreferencesDialog(QDialog):
         # Send test notification (bypasses enabled check, handles flatpak)
         if self.app.notification_bridge:
             self.app.notification_bridge.send_test_notification(test_livestream)
+
+    def _on_test_mention_notification(self):
+        """Send a test @mention notification."""
+        if self.app.notifier:
+            self.app.notifier.test_mention_notification_sync()
 
     def _on_platform_colors_changed(self, state):
         self.app.settings.platform_colors = self.platform_colors_cb.isChecked()
@@ -1317,6 +1361,8 @@ class PreferencesDialog(QDialog):
             q_end = notif_defaults.quiet_hours_end.split(":")
             self.notif_quiet_end.setTime(QTime(int(q_end[0]), int(q_end[1])))
             self.notif_raid_cb.setChecked(notif_defaults.raid_notifications_enabled)
+            self.notif_mention_cb.setChecked(notif_defaults.mention_notifications_enabled)
+            self.notif_mention_sound_path.setText(notif_defaults.mention_custom_sound_path)
             # Appearance
             self.style_combo.setCurrentIndex(defaults.ui_style)
             self.platform_colors_cb.setChecked(defaults.platform_colors)

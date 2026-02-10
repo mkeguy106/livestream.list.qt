@@ -335,7 +335,7 @@ class Notifier:
         )
 
         # Play sound directly (notify-send hints don't work on all DEs)
-        if self.settings.sound_enabled:
+        if self.settings.sound_enabled or is_test:
             self._play_sound(self.settings.custom_sound_path or None)
 
         if not is_test:
@@ -389,6 +389,107 @@ class Notifier:
 
         if self.settings.sound_enabled:
             self._play_sound(self.settings.custom_sound_path or None)
+
+    def _play_mention_sound(self) -> None:
+        """Play a distinct sound for @mention notifications.
+
+        Uses bell.oga (different from stream-live's message-new-instant.oga),
+        or the user's custom mention sound path if configured.
+        """
+        custom = self.settings.mention_custom_sound_path
+        if custom and os.path.isfile(custom):
+            self._play_sound(custom)
+            return
+        # Default: freedesktop bell sound
+        for path in [
+            "/usr/share/sounds/freedesktop/stereo/bell.oga",
+            "/usr/share/sounds/freedesktop/stereo/complete.oga",
+        ]:
+            if os.path.isfile(path) and shutil.which("paplay"):
+                subprocess.Popen(
+                    ["paplay", path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return
+
+    def send_mention_notification_sync(
+        self, channel_name: str, sender_name: str, text_preview: str
+    ) -> None:
+        """Send a desktop notification for an @mention.
+
+        Args:
+            channel_name: Display name of the channel.
+            sender_name: Display name of the person who mentioned us.
+            text_preview: Preview of the message text (truncated).
+        """
+        if not self.settings.mention_notifications_enabled:
+            return
+
+        if self._is_quiet_hours():
+            return
+
+        title = f"@mention in {channel_name}"
+        body = f"{sender_name}: {text_preview[:100]}"
+
+        is_flatpak = os.path.exists("/.flatpak-info")
+        if is_flatpak:
+            cmd = [
+                "flatpak-spawn",
+                "--host",
+                "notify-send",
+                title,
+                body,
+                "--app-name=Livestream List (Qt)",
+            ]
+        elif shutil.which("notify-send"):
+            cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
+        else:
+            return
+
+        if self.settings.urgency in ("low", "critical"):
+            cmd.extend(["--urgency", self.settings.urgency])
+
+        if self.settings.timeout_seconds > 0:
+            cmd.extend(["--expire-time", str(self.settings.timeout_seconds * 1000)])
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        self._play_mention_sound()
+
+    def test_mention_notification_sync(self) -> None:
+        """Send a test @mention notification (bypasses enabled check)."""
+        title = "@mention in Test Channel"
+        body = "TestUser: hey @you check this out!"
+
+        is_flatpak = os.path.exists("/.flatpak-info")
+        if is_flatpak:
+            cmd = [
+                "flatpak-spawn",
+                "--host",
+                "notify-send",
+                title,
+                body,
+                "--app-name=Livestream List (Qt)",
+            ]
+        elif shutil.which("notify-send"):
+            cmd = ["notify-send", title, body, "--app-name=Livestream List (Qt)"]
+        else:
+            # No notify-send, still play the sound
+            self._play_mention_sound()
+            return
+
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        self._play_mention_sound()
 
     def _log_notification(self, livestream: Livestream) -> None:
         """Record a notification in the in-memory log (max 50 entries)."""

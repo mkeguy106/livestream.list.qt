@@ -80,6 +80,8 @@ class NotificationSettings:
     quiet_hours_start: str = "22:00"  # HH:MM 24h
     quiet_hours_end: str = "08:00"
     raid_notifications_enabled: bool = True
+    mention_notifications_enabled: bool = True
+    mention_custom_sound_path: str = ""  # empty = bell.oga default
 
 
 @dataclass
@@ -549,6 +551,8 @@ class Settings:
                 quiet_hours_start=n.get("quiet_hours_start", "22:00"),
                 quiet_hours_end=n.get("quiet_hours_end", "08:00"),
                 raid_notifications_enabled=n.get("raid_notifications_enabled", True),
+                mention_notifications_enabled=n.get("mention_notifications_enabled", True),
+                mention_custom_sound_path=n.get("mention_custom_sound_path", ""),
             )
 
         # Window (with validation for reasonable dimensions)
@@ -832,6 +836,8 @@ class Settings:
                 "quiet_hours_start": self.notifications.quiet_hours_start,
                 "quiet_hours_end": self.notifications.quiet_hours_end,
                 "raid_notifications_enabled": self.notifications.raid_notifications_enabled,
+                "mention_notifications_enabled": self.notifications.mention_notifications_enabled,
+                "mention_custom_sound_path": self.notifications.mention_custom_sound_path,
             },
             "window": {
                 "width": self.window.width,
