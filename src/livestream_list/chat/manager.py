@@ -237,41 +237,48 @@ class EmoteFetchWorker(QThread):
         return None
 
     async def _fetch_channel_emotes(self, channel_id: str) -> list[ChatEmote]:
-        """Fetch channel emotes from all providers."""
+        """Fetch channel emotes from all providers using a shared session."""
+        import aiohttp
+
         all_emotes: list[ChatEmote] = []
 
-        # Fetch native platform emotes first
-        if self.platform == "twitch":
-            twitch_provider = TwitchProvider(
-                oauth_token=self.oauth_token,
-                client_id=self.client_id,
-            )
-            try:
-                channel_emotes = await twitch_provider.get_channel_emotes(self.platform, channel_id)
-                all_emotes.extend(channel_emotes)
-                logger.debug(f"Fetched {len(channel_emotes)} channel emotes from twitch")
-            except Exception as e:
-                logger.debug(f"Failed to fetch channel emotes from twitch: {e}")
+        async with aiohttp.ClientSession() as session:
+            # Fetch native platform emotes first
+            if self.platform == "twitch":
+                twitch_provider = TwitchProvider(
+                    oauth_token=self.oauth_token,
+                    client_id=self.client_id,
+                )
+                try:
+                    channel_emotes = await twitch_provider.get_channel_emotes(
+                        self.platform, channel_id, session=session
+                    )
+                    all_emotes.extend(channel_emotes)
+                    logger.debug(f"Fetched {len(channel_emotes)} channel emotes from twitch")
+                except Exception as e:
+                    logger.debug(f"Failed to fetch channel emotes from twitch: {e}")
 
-        # Fetch third-party emotes
-        provider_map = {
-            "7tv": SevenTVProvider,
-            "bttv": BTTVProvider,
-            "ffz": FFZProvider,
-        }
+            # Fetch third-party emotes
+            provider_map = {
+                "7tv": SevenTVProvider,
+                "bttv": BTTVProvider,
+                "ffz": FFZProvider,
+            }
 
-        for name in self.providers:
-            provider_cls = provider_map.get(name)
-            if not provider_cls:
-                continue
+            for name in self.providers:
+                provider_cls = provider_map.get(name)
+                if not provider_cls:
+                    continue
 
-            provider = provider_cls()
-            try:
-                channel_emotes = await provider.get_channel_emotes(self.platform, channel_id)
-                all_emotes.extend(channel_emotes)
-                logger.debug(f"Fetched {len(channel_emotes)} channel emotes from {name}")
-            except Exception as e:
-                logger.debug(f"Failed to fetch channel emotes from {name}: {e}")
+                provider = provider_cls()
+                try:
+                    channel_emotes = await provider.get_channel_emotes(
+                        self.platform, channel_id, session=session
+                    )
+                    all_emotes.extend(channel_emotes)
+                    logger.debug(f"Fetched {len(channel_emotes)} channel emotes from {name}")
+                except Exception as e:
+                    logger.debug(f"Failed to fetch channel emotes from {name}: {e}")
 
         return all_emotes
 
@@ -775,35 +782,38 @@ class GlobalEmoteFetchWorker(QThread):
             loop.close()
 
     async def _fetch_globals(self) -> dict:
+        import aiohttp
+
         twitch_globals: list[ChatEmote] = []
         common_globals: list[ChatEmote] = []
 
-        twitch_provider = TwitchProvider(
-            oauth_token=self.oauth_token,
-            client_id=self.client_id,
-        )
-        try:
-            twitch_globals = await twitch_provider.get_global_emotes()
-            logger.debug(f"Fetched {len(twitch_globals)} Twitch global emotes")
-        except Exception as e:
-            logger.debug(f"Failed to fetch Twitch global emotes: {e}")
-
-        provider_map = {
-            "7tv": SevenTVProvider,
-            "bttv": BTTVProvider,
-            "ffz": FFZProvider,
-        }
-        for name in self.providers:
-            provider_cls = provider_map.get(name)
-            if not provider_cls:
-                continue
-            provider = provider_cls()
+        async with aiohttp.ClientSession() as session:
+            twitch_provider = TwitchProvider(
+                oauth_token=self.oauth_token,
+                client_id=self.client_id,
+            )
             try:
-                emotes = await provider.get_global_emotes()
-                common_globals.extend(emotes)
-                logger.debug(f"Fetched {len(emotes)} global emotes from {name}")
+                twitch_globals = await twitch_provider.get_global_emotes(session=session)
+                logger.debug(f"Fetched {len(twitch_globals)} Twitch global emotes")
             except Exception as e:
-                logger.debug(f"Failed to fetch global emotes from {name}: {e}")
+                logger.debug(f"Failed to fetch Twitch global emotes: {e}")
+
+            provider_map = {
+                "7tv": SevenTVProvider,
+                "bttv": BTTVProvider,
+                "ffz": FFZProvider,
+            }
+            for name in self.providers:
+                provider_cls = provider_map.get(name)
+                if not provider_cls:
+                    continue
+                provider = provider_cls()
+                try:
+                    emotes = await provider.get_global_emotes(session=session)
+                    common_globals.extend(emotes)
+                    logger.debug(f"Fetched {len(emotes)} global emotes from {name}")
+                except Exception as e:
+                    logger.debug(f"Failed to fetch global emotes from {name}: {e}")
 
         return {"twitch": twitch_globals, "common": common_globals}
 
@@ -860,6 +870,8 @@ class UserEmoteFetchWorker(QThread):
         return None
 
     async def _fetch_user_emotes(self) -> list[ChatEmote]:
+        import aiohttp
+
         if not self.oauth_token:
             return []
 
@@ -872,7 +884,8 @@ class UserEmoteFetchWorker(QThread):
             client_id=self.client_id,
         )
         try:
-            emotes = await twitch_provider.get_user_emotes(user_id)
+            async with aiohttp.ClientSession() as session:
+                emotes = await twitch_provider.get_user_emotes(user_id, session=session)
             logger.debug(f"Fetched {len(emotes)} user emotes")
             return emotes
         except Exception as e:

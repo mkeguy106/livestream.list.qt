@@ -2,6 +2,7 @@
 
 import logging
 from abc import ABC, abstractmethod
+from contextlib import asynccontextmanager
 
 import aiohttp
 
@@ -12,6 +13,17 @@ logger = logging.getLogger(__name__)
 
 # Default Twitch client ID for unauthenticated requests
 _DEFAULT_TWITCH_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+@asynccontextmanager
+async def _optional_session(session=None, **kwargs):
+    """Use an existing session or create a temporary one."""
+    if session is not None:
+        yield session
+    else:
+        async with aiohttp.ClientSession(**kwargs) as s:
+            yield s
 
 
 class BaseEmoteProvider(ABC):
@@ -23,11 +35,13 @@ class BaseEmoteProvider(ABC):
         """Provider name."""
 
     @abstractmethod
-    async def get_global_emotes(self) -> list[ChatEmote]:
+    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
         """Fetch global emotes for this provider."""
 
     @abstractmethod
-    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+    async def get_channel_emotes(
+        self, platform: str, channel_id: str, session=None
+    ) -> list[ChatEmote]:
         """Fetch channel-specific emotes.
 
         Args:
@@ -56,14 +70,15 @@ class TwitchProvider(BaseEmoteProvider):
             headers["Authorization"] = f"Bearer {self.oauth_token}"
         return headers
 
-    async def get_global_emotes(self) -> list[ChatEmote]:
+    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
         """Fetch Twitch global emotes."""
         emotes: list[ChatEmote] = []
         try:
-            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/chat/emotes/global",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers=self._get_headers(),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         logger.debug(f"Twitch global emotes failed: {resp.status}")
@@ -79,18 +94,21 @@ class TwitchProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+    async def get_channel_emotes(
+        self, platform: str, channel_id: str, session=None
+    ) -> list[ChatEmote]:
         """Fetch Twitch channel emotes (subscriber emotes)."""
         emotes: list[ChatEmote] = []
         if platform != "twitch":
             return emotes
 
         try:
-            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/chat/emotes",
                     params={"broadcaster_id": channel_id},
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers=self._get_headers(),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         logger.debug(f"Twitch channel emotes failed: {resp.status}")
@@ -106,7 +124,7 @@ class TwitchProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_user_emotes(self, user_id: str) -> list[ChatEmote]:
+    async def get_user_emotes(self, user_id: str, session=None) -> list[ChatEmote]:
         """Fetch all emotes the authenticated user has access to.
 
         This includes subscriber emotes from channels they're subscribed to,
@@ -117,17 +135,18 @@ class TwitchProvider(BaseEmoteProvider):
             return emotes
 
         try:
-            async with aiohttp.ClientSession(headers=self._get_headers()) as session:
+            async with _optional_session(session) as s:
                 cursor: str | None = ""
                 while cursor is not None:
                     params: dict[str, str] = {"user_id": user_id}
                     if cursor:
                         params["after"] = cursor
 
-                    async with session.get(
+                    async with s.get(
                         f"{self.BASE_URL}/chat/emotes/user",
                         params=params,
-                        timeout=aiohttp.ClientTimeout(total=15),
+                        headers=self._get_headers(),
+                        timeout=_REQUEST_TIMEOUT,
                     ) as resp:
                         if resp.status != 200:
                             logger.debug(f"Twitch user emotes failed: {resp.status}")
@@ -154,12 +173,13 @@ class TwitchProvider(BaseEmoteProvider):
         if not emote_id or not name:
             return None
 
-        # Twitch CDN URL - prefer animated if available; fall back on 404
-        # Format options: static/animated, light/dark, 1.0/2.0/3.0
+        # Twitch CDN: "default" auto-serves GIF for animated, PNG for static (no 404)
+        formats = data.get("format", ["static"])
+        is_animated = "animated" in formats
         specs: dict[int, ImageSpec] = {}
         for scale in (1, 2, 3):
-            animated_url = (
-                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/animated/dark/{scale}.0"
+            url = (
+                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/{scale}.0"
             )
             static_url = (
                 f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/dark/{scale}.0"
@@ -168,9 +188,9 @@ class TwitchProvider(BaseEmoteProvider):
             specs[scale] = ImageSpec(
                 scale=scale,
                 key=key,
-                url=animated_url,
+                url=url,
                 fallback_url=static_url,
-                animated=True,
+                animated=is_animated,
             )
         image_set = ImageSet(specs)
         url = specs[2].url
@@ -193,14 +213,14 @@ class SevenTVProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "7tv"
 
-    async def get_global_emotes(self) -> list[ChatEmote]:
+    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
         """Fetch 7TV global emotes."""
         emotes: list[ChatEmote] = []
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/emote-sets/global",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -215,14 +235,16 @@ class SevenTVProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+    async def get_channel_emotes(
+        self, platform: str, channel_id: str, session=None
+    ) -> list[ChatEmote]:
         """Fetch 7TV channel emotes."""
         emotes: list[ChatEmote] = []
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/users/{platform}/{channel_id}",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -283,14 +305,14 @@ class BTTVProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "bttv"
 
-    async def get_global_emotes(self) -> list[ChatEmote]:
+    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
         """Fetch BTTV global emotes."""
         emotes: list[ChatEmote] = []
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/cached/emotes/global",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -305,7 +327,9 @@ class BTTVProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+    async def get_channel_emotes(
+        self, platform: str, channel_id: str, session=None
+    ) -> list[ChatEmote]:
         """Fetch BTTV channel emotes."""
         emotes: list[ChatEmote] = []
         # BTTV uses Twitch user IDs for channel lookup
@@ -313,10 +337,10 @@ class BTTVProvider(BaseEmoteProvider):
             return emotes
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/cached/users/twitch/{channel_id}",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -373,14 +397,14 @@ class FFZProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "ffz"
 
-    async def get_global_emotes(self) -> list[ChatEmote]:
+    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
         """Fetch FFZ global emotes."""
         emotes: list[ChatEmote] = []
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/set/global",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -397,7 +421,9 @@ class FFZProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_channel_emotes(self, platform: str, channel_id: str) -> list[ChatEmote]:
+    async def get_channel_emotes(
+        self, platform: str, channel_id: str, session=None
+    ) -> list[ChatEmote]:
         """Fetch FFZ channel emotes."""
         emotes: list[ChatEmote] = []
         # FFZ uses Twitch user IDs
@@ -405,10 +431,10 @@ class FFZProvider(BaseEmoteProvider):
             return emotes
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with _optional_session(session) as s:
+                async with s.get(
                     f"{self.BASE_URL}/room/id/{channel_id}",
-                    timeout=aiohttp.ClientTimeout(total=15),
+                    timeout=_REQUEST_TIMEOUT,
                 ) as resp:
                     if resp.status != 200:
                         return emotes
@@ -434,6 +460,8 @@ class FFZProvider(BaseEmoteProvider):
 
         # FFZ URLs: pick best available size
         urls = data.get("urls", {})
+        animated_urls = data.get("animated", {})
+
         url = urls.get("2") or urls.get("1") or ""
         if url and url.startswith("//"):
             url = "https:" + url
@@ -453,7 +481,21 @@ class FFZProvider(BaseEmoteProvider):
             except ValueError:
                 continue
             key = f"emote:ffz:{emote_id}@{scale}x"
-            specs[scale] = ImageSpec(scale=scale, key=key, url=full_url)
+
+            # Use animated URL as primary if available
+            anim_url = animated_urls.get(size_str)
+            if anim_url:
+                if anim_url.startswith("//"):
+                    anim_url = "https:" + anim_url
+                specs[scale] = ImageSpec(
+                    scale=scale,
+                    key=key,
+                    url=anim_url,
+                    fallback_url=full_url,
+                    animated=True,
+                )
+            else:
+                specs[scale] = ImageSpec(scale=scale, key=key, url=full_url)
         image_set = ImageSet(specs) if specs else None
 
         return ChatEmote(
