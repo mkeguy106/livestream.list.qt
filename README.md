@@ -72,7 +72,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - In-chat search with predicates (Ctrl+F) — from:user, has:link, is:sub, is:mod
   - Link tooltip previews — hover URLs to see page title
   - Zero-width emotes — 7TV overlay emotes that stack on other emotes
-  - User card on hover — hover username to see profile image, bio, followers, follow age, pronouns
+  - User card on hover — hover username to see profile image, bio, followers, follow age, pronouns (YouTube: avatar, bio, subscriber count, join date, country)
   - User card text selectable and copyable (Ctrl+C or right-click)
   - Hype Train banner — purple-themed progress bar with level, goal, and countdown timer
   - Raid banner — orange-themed banner with raider name and viewer count, 120s countdown timer
@@ -84,6 +84,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
   - YouTube chat works when stream is live
+  - YouTube expired cookie detection with clear error messaging
 - **Import Twitch Follows** - Login to Twitch and import your followed channels
 - **Export/Import** - Backup and restore channels and settings
   - Includes app version for compatibility tracking
