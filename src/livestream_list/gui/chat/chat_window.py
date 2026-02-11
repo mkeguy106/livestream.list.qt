@@ -612,6 +612,16 @@ class ChatWindow(QMainWindow):
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self.chat_settings_requested.emit)
 
+        chat_menu.addSeparator()
+
+        zoom_in_action = chat_menu.addAction("Zoom In")
+        zoom_in_action.setShortcut("Ctrl+=")
+        zoom_in_action.triggered.connect(self._zoom_in)
+
+        zoom_out_action = chat_menu.addAction("Zoom Out")
+        zoom_out_action.setShortcut("Ctrl+-")
+        zoom_out_action.triggered.connect(self._zoom_out)
+
     def update_tab_style(self) -> None:
         """Refresh tab colors from current theme (call after prefs change)."""
         theme = get_theme()
@@ -999,6 +1009,26 @@ class ChatWindow(QMainWindow):
         if isinstance(current_widget, ChatWidget):
             current_widget._delegate.invalidate_size_cache()
             current_widget._model.layoutChanged.emit()
+
+    def _zoom_in(self) -> None:
+        """Increase chat font size."""
+        current = self.settings.chat.builtin.font_size
+        if current == 0:
+            from PySide6.QtWidgets import QApplication
+
+            current = QApplication.font().pointSize()
+        new_size = min(30, current + 1)
+        self._on_font_size_changed(new_size)
+
+    def _zoom_out(self) -> None:
+        """Decrease chat font size."""
+        current = self.settings.chat.builtin.font_size
+        if current == 0:
+            from PySide6.QtWidgets import QApplication
+
+            current = QApplication.font().pointSize()
+        new_size = max(4, current - 1)
+        self._on_font_size_changed(new_size)
 
     def _on_settings_changed(self) -> None:
         """Persist chat setting toggles and relayout active widget."""

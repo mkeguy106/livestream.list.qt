@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QStatusBar,
     QToolBar,
@@ -412,6 +413,12 @@ class MainWindow(QMainWindow):
         prefs_action.setShortcut("Ctrl+,")
         prefs_action.triggered.connect(self.show_preferences_dialog)
 
+        edit_menu.addSeparator()
+
+        # Theme submenu
+        self._theme_menu = edit_menu.addMenu("&Theme")
+        self._populate_theme_menu()
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -419,6 +426,33 @@ class MainWindow(QMainWindow):
         self._always_on_top_action.setCheckable(True)
         self._always_on_top_action.setChecked(self.app.settings.window.always_on_top)
         self._always_on_top_action.toggled.connect(self._toggle_always_on_top)
+
+        view_menu.addSeparator()
+
+        zoom_in_action = view_menu.addAction("Zoom &In")
+        zoom_in_action.setShortcut("Ctrl+=")
+        zoom_in_action.triggered.connect(self._zoom_in)
+
+        zoom_out_action = view_menu.addAction("Zoom &Out")
+        zoom_out_action.setShortcut("Ctrl+-")
+        zoom_out_action.triggered.connect(self._zoom_out)
+
+        view_menu.addSeparator()
+
+        self._hide_offline_action = view_menu.addAction("&Hide Offline")
+        self._hide_offline_action.setCheckable(True)
+        self._hide_offline_action.setChecked(self.app.settings.hide_offline)
+        self._hide_offline_action.triggered.connect(self._on_filter_changed)
+
+        self._favorites_action = view_menu.addAction("&Favorites Only")
+        self._favorites_action.setCheckable(True)
+        self._favorites_action.setChecked(self.app.settings.favorites_only)
+        self._favorites_action.triggered.connect(self._on_filter_changed)
+
+        view_menu.addSeparator()
+
+        trash_action = view_menu.addAction("&Trash Bin...")
+        trash_action.triggered.connect(self._show_trash_dialog)
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -446,34 +480,6 @@ class MainWindow(QMainWindow):
         refresh_btn.clicked.connect(self._on_refresh)
         toolbar.addWidget(refresh_btn)
 
-        # Theme toggle button
-        self.theme_btn = QToolButton()
-        self._update_theme_button()
-        self.theme_btn.clicked.connect(self._on_theme_toggle)
-        toolbar.addWidget(self.theme_btn)
-
-        toolbar.addSeparator()
-
-        # Hide offline toggle
-        self.hide_offline_btn = QToolButton()
-        self.hide_offline_btn.setText("\u25c9")  # ◉ fisheye - "live only"
-        self.hide_offline_btn.setToolTip("Hide offline channels")
-        self.hide_offline_btn.setCheckable(True)
-        self.hide_offline_btn.setChecked(self.app.settings.hide_offline)
-        self.hide_offline_btn.setProperty("filterToggle", True)
-        self.hide_offline_btn.clicked.connect(self._on_filter_changed)
-        toolbar.addWidget(self.hide_offline_btn)
-
-        # Favorites toggle
-        self.favorites_btn = QToolButton()
-        self.favorites_btn.setText("\u2605")  # ★ black star
-        self.favorites_btn.setToolTip("Show favorites only")
-        self.favorites_btn.setCheckable(True)
-        self.favorites_btn.setChecked(self.app.settings.favorites_only)
-        self.favorites_btn.setProperty("filterToggle", True)
-        self.favorites_btn.clicked.connect(self._on_filter_changed)
-        toolbar.addWidget(self.favorites_btn)
-
         toolbar.addSeparator()
 
         # Selection mode button
@@ -484,14 +490,10 @@ class MainWindow(QMainWindow):
         self.select_btn.clicked.connect(self._toggle_selection_mode)
         toolbar.addWidget(self.select_btn)
 
-        # Trash bin button
-        self.trash_btn = QToolButton()
-        self.trash_btn.setText("\u2672")
-        self.trash_btn.setToolTip("Trash bin (deleted channels)")
-        self.trash_btn.clicked.connect(self._show_trash_dialog)
-        toolbar.addWidget(self.trash_btn)
-
-        toolbar.addSeparator()
+        # Spacer to push filters to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        toolbar.addWidget(spacer)
 
         # Name filter
         self.name_filter_edit = QLineEdit()
@@ -538,8 +540,8 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self):
         """Apply current settings to the UI."""
-        self.hide_offline_btn.setChecked(self.app.settings.hide_offline)
-        self.favorites_btn.setChecked(self.app.settings.favorites_only)
+        self._hide_offline_action.setChecked(self.app.settings.hide_offline)
+        self._favorites_action.setChecked(self.app.settings.favorites_only)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
         # Invalidate delegate cache in case layout settings changed
         if self._stream_delegate:
@@ -620,12 +622,12 @@ class MainWindow(QMainWindow):
 
         if not livestreams:
             # Check why empty
-            if self.hide_offline_btn.isChecked():
+            if self._hide_offline_action.isChecked():
                 if not self._initial_check_complete:
                     self.all_offline_label.setText("Checking stream status...")
                 else:
                     self.all_offline_label.setText("All channels are offline")
-            elif self.favorites_btn.isChecked():
+            elif self._favorites_action.isChecked():
                 self.all_offline_label.setText("No favorite channels")
             elif self._name_filter:
                 self.all_offline_label.setText(f"No channels match '{self._name_filter}'")
@@ -664,8 +666,8 @@ class MainWindow(QMainWindow):
         livestreams = monitor.livestreams
 
         # Apply filters
-        hide_offline = self.hide_offline_btn.isChecked()
-        favorites_only = self.favorites_btn.isChecked()
+        hide_offline = self._hide_offline_action.isChecked()
+        favorites_only = self._favorites_action.isChecked()
 
         filtered = []
         for ls in livestreams:
@@ -796,8 +798,8 @@ class MainWindow(QMainWindow):
 
     def _on_filter_changed(self):
         """Handle filter checkbox changes."""
-        self.app.settings.hide_offline = self.hide_offline_btn.isChecked()
-        self.app.settings.favorites_only = self.favorites_btn.isChecked()
+        self.app.settings.hide_offline = self._hide_offline_action.isChecked()
+        self.app.settings.favorites_only = self._favorites_action.isChecked()
         self._platform_filter = self.platform_combo.currentData()
         self.app.save_settings()
         self.refresh_stream_list()
@@ -836,73 +838,70 @@ class MainWindow(QMainWindow):
         self.set_status("Refreshing...")
         self.app.refresh(on_complete=lambda: self.set_status("Ready"))
 
-    def _update_theme_button(self):
-        """Update the theme button text and tooltip based on current mode."""
-        from ..core.theme_data import BUILTIN_THEMES
+    def _zoom_in(self):
+        """Increase the stream list font size."""
+        current = self.app.settings.font_size
+        if current == 0:
+            current = QApplication.font().pointSize()
+        new_size = min(30, current + 1)
+        self.app.settings.font_size = new_size
+        self.app.save_settings()
+        if self._stream_delegate:
+            self._stream_delegate.invalidate_size_cache()
+        if self._stream_model:
+            self._stream_model.layoutChanged.emit()
 
-        mode = self.app.settings.theme_mode
-        if mode == ThemeMode.CUSTOM:
-            slug = self.app.settings.custom_theme_slug
-            td = BUILTIN_THEMES.get(slug)
-            name = td.name if td else slug
-            self.theme_btn.setText("☾")
-            self.theme_btn.setToolTip(f"Theme: {name} (click to cycle)")
-        elif mode == ThemeMode.AUTO:
-            self.theme_btn.setText("◐")
-            self.theme_btn.setToolTip("Theme: Auto (click to cycle)")
-        elif mode == ThemeMode.LIGHT:
-            self.theme_btn.setText("☀")
-            self.theme_btn.setToolTip("Theme: Light (click to cycle)")
-        elif mode == ThemeMode.DARK:
-            self.theme_btn.setText("☾")
-            self.theme_btn.setToolTip("Theme: Dark (click to cycle)")
-        elif mode == ThemeMode.HIGH_CONTRAST:
-            self.theme_btn.setText("◉")
-            self.theme_btn.setToolTip("Theme: High Contrast (click to cycle)")
+    def _zoom_out(self):
+        """Decrease the stream list font size."""
+        current = self.app.settings.font_size
+        if current == 0:
+            current = QApplication.font().pointSize()
+        new_size = max(6, current - 1)
+        self.app.settings.font_size = new_size
+        self.app.save_settings()
+        if self._stream_delegate:
+            self._stream_delegate.invalidate_size_cache()
+        if self._stream_model:
+            self._stream_model.layoutChanged.emit()
 
-    def _on_theme_toggle(self):
-        """Cycle through built-in themes: Dark -> Light -> HC -> Nord -> Monokai -> Solarized."""
-        from ..core.theme_data import (
-            BUILTIN_THEME_ORDER,
-            BUILTIN_THEMES,
-            theme_data_to_theme_colors,
-        )
+    def _populate_theme_menu(self):
+        """Build the Theme submenu with all available themes."""
+        from ..core.theme_data import list_all_themes
 
-        mode = self.app.settings.theme_mode
-        slug = self.app.settings.custom_theme_slug
+        self._theme_menu.clear()
+        current_slug = self.app.settings.custom_theme_slug
 
-        # Map current state to a slug in the cycle
-        if mode == ThemeMode.CUSTOM and slug in BUILTIN_THEMES:
-            current_slug = slug
-        elif mode == ThemeMode.DARK:
-            current_slug = "dark"
-        elif mode == ThemeMode.LIGHT:
-            current_slug = "light"
-        elif mode == ThemeMode.HIGH_CONTRAST:
-            current_slug = "high-contrast"
-        else:
-            # AUTO or custom non-builtin -> start from dark
-            current_slug = "dark"
+        for td in list_all_themes():
+            action = self._theme_menu.addAction(td.name)
+            action.setCheckable(True)
+            action.setChecked(
+                self.app.settings.theme_mode == ThemeMode.CUSTOM and td.slug == current_slug
+            )
+            action.triggered.connect(lambda checked, slug=td.slug: self._apply_theme_by_slug(slug))
 
-        # Find next theme in cycle
-        try:
-            idx = BUILTIN_THEME_ORDER.index(current_slug)
-            next_idx = (idx + 1) % len(BUILTIN_THEME_ORDER)
-        except ValueError:
-            next_idx = 0
-        next_slug = BUILTIN_THEME_ORDER[next_idx]
-        next_td = BUILTIN_THEMES[next_slug]
+    def _apply_theme_by_slug(self, slug: str):
+        """Apply a specific theme by its slug."""
+        from ..core.theme_data import BUILTIN_THEMES, list_all_themes, theme_data_to_theme_colors
 
-        # Apply the new theme via CUSTOM mode for all built-in named themes
-        tc = theme_data_to_theme_colors(next_td)
+        # Find the ThemeData for this slug
+        td = BUILTIN_THEMES.get(slug)
+        if not td:
+            for t in list_all_themes():
+                if t.slug == slug:
+                    td = t
+                    break
+        if not td:
+            return
+
+        tc = theme_data_to_theme_colors(td)
         ThemeManager.set_custom_theme(tc)
         self.app.settings.theme_mode = ThemeMode.CUSTOM
-        self.app.settings.custom_theme_slug = next_slug
-        self.app.settings.custom_theme_base = next_td.base
+        self.app.settings.custom_theme_slug = slug
+        self.app.settings.custom_theme_base = td.base
         self.app.save_settings()
         ThemeManager.set_settings(self.app.settings)
         ThemeManager.invalidate_cache()
-        self._update_theme_button()
+        self._populate_theme_menu()
         self._apply_theme()
 
     def _apply_theme(self):
@@ -933,11 +932,6 @@ class MainWindow(QMainWindow):
                 QToolButton:checked {{
                     background-color: {theme.accent};
                     color: {theme.selection_text};
-                }}
-                QToolButton[filterToggle="true"]:checked {{
-                    background-color: {theme.accent_hover};
-                    color: {theme.text_primary};
-                    border: 1px solid {theme.accent};
                 }}
                 QListWidget {{
                     background-color: {theme.widget_bg};
