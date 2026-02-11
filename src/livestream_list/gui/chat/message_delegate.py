@@ -2006,7 +2006,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         for i, word in enumerate(words):
             draw_word = word if i == 0 else " " + word
             word_width = fm.horizontalAdvance(draw_word)
-            if current_x + word_width > line_width and current_x > 0:
+            if current_x + word_width > line_width and (current_x > 0 or line_width < wrap_width):
                 lines += 1
                 current_x = 0
                 line_width = wrap_width  # Subsequent lines get full width
@@ -2063,7 +2063,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 last_end = end
                 continue
 
-            if current_x + emote_w > line_width and current_x > 0:
+            if current_x + emote_w > line_width and (current_x > 0 or line_width < wrap_width):
                 lines += 1
                 current_x = 0
                 line_width = wrap_width
@@ -2100,7 +2100,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         for i, word in enumerate(words):
             draw_word = word if i == 0 else " " + word
             word_width = fm.horizontalAdvance(draw_word)
-            if current_x + word_width > line_width and current_x > 0:
+            if current_x + word_width > line_width and (current_x > 0 or line_width < wrap_width):
                 lines += 1
                 current_x = 0
                 line_width = wrap_width
