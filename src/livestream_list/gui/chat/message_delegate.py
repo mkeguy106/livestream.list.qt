@@ -87,6 +87,65 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._mention_highlight = QColor(theme.chat_mention_highlight)
         self._hype_chat_accent = QColor(218, 165, 32)
         self._mention_accent = QColor(255, 165, 0)
+        self._chat_bg = QColor(theme.chat_bg)
+        self._contrast_cache: dict[tuple[int, int], QColor] = {}
+
+    @staticmethod
+    def _relative_luminance(color: QColor) -> float:
+        """WCAG 2.0 relative luminance."""
+
+        def linearize(c: int) -> float:
+            v = c / 255.0
+            return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+        return (
+            0.2126 * linearize(color.red())
+            + 0.7152 * linearize(color.green())
+            + 0.0722 * linearize(color.blue())
+        )
+
+    @staticmethod
+    def _contrast_ratio(l1: float, l2: float) -> float:
+        """WCAG 2.0 contrast ratio between two luminance values."""
+        lighter, darker = max(l1, l2), min(l1, l2)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    @staticmethod
+    def _composite_alpha(overlay: QColor, base: QColor) -> QColor:
+        """Composite an ARGB overlay onto an opaque base."""
+        a = overlay.alphaF()
+        return QColor(
+            int(overlay.red() * a + base.red() * (1 - a)),
+            int(overlay.green() * a + base.green() * (1 - a)),
+            int(overlay.blue() * a + base.blue() * (1 - a)),
+        )
+
+    def _ensure_contrast(self, color: QColor, bg: QColor) -> QColor:
+        """Adjust username color lightness so it meets WCAG 3.0:1 contrast against bg."""
+        key = (color.rgb(), bg.rgb())
+        if key in self._contrast_cache:
+            return self._contrast_cache[key]
+
+        fg_lum = self._relative_luminance(color)
+        bg_lum = self._relative_luminance(bg)
+
+        if self._contrast_ratio(fg_lum, bg_lum) >= 3.0:
+            self._contrast_cache[key] = color
+            return color
+
+        # Adjust HSL lightness toward readable range
+        h, s, l, a = color.getHslF()  # noqa: E741
+        dark_bg = bg_lum < 0.5
+        for _ in range(20):
+            l = min(l + 0.05, 0.9) if dark_bg else max(l - 0.05, 0.15)  # noqa: E741
+            adjusted = QColor.fromHslF(h, s, l, a)
+            if self._contrast_ratio(self._relative_luminance(adjusted), bg_lum) >= 3.0:
+                self._contrast_cache[key] = adjusted
+                return adjusted
+
+        adjusted = QColor.fromHslF(h, s, l, a)
+        self._contrast_cache[key] = adjusted
+        return adjusted
 
     def _resolve_display_name(self, message: ChatMessage) -> str:
         """Return display name with nickname if set, e.g. 'nickname (original)'."""
@@ -549,6 +608,25 @@ class ChatMessageDelegate(QStyledItemDelegate):
             user_color = QColor(message.user.color) if message.user.color else QColor(180, 130, 255)
         else:
             user_color = QColor(100, 180, 220)
+
+        if not is_selected:
+            if message.is_mention:
+                effective_bg = self._composite_alpha(self._mention_highlight, self._chat_bg)
+            elif message.is_system:
+                sys_bg = QColor(self._system_message_color)
+                sys_bg.setAlpha(40)
+                effective_bg = self._composite_alpha(sys_bg, self._chat_bg)
+            elif message.is_hype_chat:
+                hype_bg = QColor(self._hype_chat_accent)
+                hype_bg.setAlpha(30)
+                effective_bg = self._composite_alpha(hype_bg, self._chat_bg)
+            elif self.settings.show_alternating_rows:
+                row_color = self._alt_row_even if index.row() % 2 == 0 else self._alt_row_odd
+                effective_bg = self._composite_alpha(row_color, self._chat_bg)
+            else:
+                effective_bg = self._chat_bg
+            user_color = self._ensure_contrast(user_color, effective_bg)
+
         painter.setPen(highlight_color if is_selected else user_color)
 
         name_text = self._resolve_display_name(message)
