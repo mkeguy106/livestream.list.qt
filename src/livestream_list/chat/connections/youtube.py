@@ -166,10 +166,13 @@ class YouTubeChatConnection(BaseChatConnection):
             self._emit_error("YouTube chat sending not available (cookies not configured)")
             return False
         if self._chat_restriction and not self._send_params:
-            self._emit_error(
-                f"Cannot send: {self._chat_restriction}. "
-                "Use browser popout chat for restricted chats."
-            )
+            if self._chat_restriction == "cookies_expired":
+                self._emit_error("YouTube login expired — update cookies to send")
+            else:
+                self._emit_error(
+                    f"Cannot send: {self._chat_restriction}. "
+                    "Use browser popout chat for restricted chats."
+                )
             return False
 
         sapisid = self._cookies.get("SAPISID", "")
@@ -185,7 +188,7 @@ class YouTubeChatConnection(BaseChatConnection):
                 await self._re_extract_send_params()
 
         if not self._send_params or not self._innertube_api_key:
-            self._emit_error("YouTube chat sending not available (chat may be restricted)")
+            self._emit_error("YouTube login expired — update cookies to send")
             return False
 
         result = await self._do_send_yt(text)
@@ -329,6 +332,7 @@ class YouTubeChatConnection(BaseChatConnection):
             import aiohttp
 
             cookie_header = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+            sapisid = self._cookies.get("SAPISID", "")
             headers = {
                 "Cookie": cookie_header,
                 "User-Agent": (
@@ -336,7 +340,11 @@ class YouTubeChatConnection(BaseChatConnection):
                 ),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
+                "Origin": "https://www.youtube.com",
+                "Referer": "https://www.youtube.com/",
             }
+            if sapisid:
+                headers["Authorization"] = _generate_sapisidhash(sapisid)
 
             url = f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
 
@@ -352,6 +360,18 @@ class YouTubeChatConnection(BaseChatConnection):
 
                     html = await resp.text()
 
+            # Check if YouTube recognizes our cookies as authenticated
+            logged_in_match = re.search(r'"LOGGED_IN"\s*:\s*(true|false)', html)
+            is_logged_in = logged_in_match and logged_in_match.group(1) == "true"
+            if not is_logged_in:
+                logger.warning(
+                    "YouTube does not recognize cookies as authenticated "
+                    "(LOGGED_IN=false). Cookies may be expired — "
+                    "re-export from browser in Preferences > Accounts."
+                )
+                self._chat_restriction = "cookies_expired"
+                return
+
             # Extract INNERTUBE_API_KEY
             api_key_match = re.search(r'"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"', html)
             if api_key_match:
@@ -362,10 +382,23 @@ class YouTubeChatConnection(BaseChatConnection):
             if version_match:
                 self._client_version = version_match.group(1)
 
+            # Diagnostic logging — check which key markers exist in HTML
+            has_send = "sendLiveChatMessageEndpoint" in html
+            has_restricted = "liveChatRestrictedParticipationRenderer" in html
+            has_input = "liveChatMessageInputRenderer" in html
+            logger.debug(
+                "YouTube live_chat HTML markers: "
+                f"sendEndpoint={'yes' if has_send else 'no'}, "
+                f"restrictedRenderer={'yes' if has_restricted else 'no'}, "
+                f"inputRenderer={'yes' if has_input else 'no'}"
+            )
+
             # Extract sendLiveChatMessageEndpoint params
+            # Use re.DOTALL with bounded window to handle nested JSON objects
             params_match = re.search(
-                r'"sendLiveChatMessageEndpoint"\s*:\s*\{[^}]*"params"\s*:\s*"([^"]+)"',
+                r'"sendLiveChatMessageEndpoint"\s*:\s*\{.{0,1000}?"params"\s*:\s*"([^"]+)"',
                 html,
+                re.DOTALL,
             )
             if params_match:
                 self._send_params = params_match.group(1)
@@ -377,9 +410,9 @@ class YouTubeChatConnection(BaseChatConnection):
 
             # Extract logged-in user's display name for local echo
             author_match = re.search(
-                r'"liveChatMessageInputRenderer"\s*:\s*\{[^}]*"authorName"\s*:\s*\{'
-                r'[^}]*"simpleText"\s*:\s*"([^"]+)"',
+                r'"liveChatMessageInputRenderer"\s*:\s*\{.{0,500}?"authorName"\s*:\s*\{.{0,200}?"simpleText"\s*:\s*"([^"]+)"',
                 html,
+                re.DOTALL,
             )
             if author_match:
                 self._nick = author_match.group(1)
@@ -387,9 +420,9 @@ class YouTubeChatConnection(BaseChatConnection):
 
             # Check for chat restrictions (e.g. subscribers-only mode)
             restriction_match = re.search(
-                r'"liveChatRestrictedParticipationRenderer"\s*:\s*\{'
-                r'[^}]*"message"\s*:\s*\{[^}]*"runs"\s*:\s*\[\s*\{[^}]*"text"\s*:\s*"([^"]+)"',
+                r'"liveChatRestrictedParticipationRenderer"\s*:\s*\{.{0,500}?"text"\s*:\s*"([^"]+)"',
                 html,
+                re.DOTALL,
             )
             if restriction_match:
                 self._chat_restriction = restriction_match.group(1)
@@ -401,8 +434,9 @@ class YouTubeChatConnection(BaseChatConnection):
 
             # Check for slow mode in initial page data
             slow_match = re.search(
-                r'"slowModeRenderer"\s*:\s*\{[^}]*"slowModeDurationSeconds"\s*:\s*"?(\d+)',
+                r'"slowModeRenderer"\s*:\s*\{.{0,500}?"slowModeDurationSeconds"\s*:\s*"?(\d+)',
                 html,
+                re.DOTALL,
             )
             if slow_match:
                 slow_seconds = int(slow_match.group(1))

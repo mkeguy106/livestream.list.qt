@@ -891,7 +891,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         self._auth_banner = QLabel("Not logged in \u2014 chat is read-only")
         self._auth_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._auth_banner.setStyleSheet(f"""
+        self._auth_banner_style = f"""
             QLabel {{
                 background-color: {banner_bg};
                 color: {banner_text};
@@ -900,7 +900,21 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 padding: 4px 8px;
                 font-size: 11px;
             }}
-        """)
+        """
+        sc = QColor(theme.chat_system_message)
+        sc.setAlpha(50)
+        rgba = f"rgba({sc.red()}, {sc.green()}, {sc.blue()}, {sc.alpha()})"
+        self._auth_banner_error_style = f"""
+            QLabel {{
+                background-color: {rgba};
+                color: {theme.chat_system_message};
+                border: 1px solid {theme.chat_system_message};
+                border-radius: 3px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }}
+        """
+        self._auth_banner.setStyleSheet(self._auth_banner_style)
         self._auth_banner.hide()
         layout.addWidget(self._auth_banner)
 
@@ -1139,6 +1153,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 platform_name = self.livestream.channel.platform.value.title()
             self._input.setPlaceholderText(f"Log in to {platform_name} to chat")
             self._auth_banner.setText(f"Not logged in \u2014 {platform_name} chat is read-only")
+            self._auth_banner.setStyleSheet(self._auth_banner_style)
             self._auth_banner.show()
 
     def show_error(self, message: str) -> None:
@@ -1157,6 +1172,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._auth_banner.hide()
         else:
             self._auth_banner.setText(message)
+            self._auth_banner.setStyleSheet(self._auth_banner_error_style)
             self._auth_banner.show()
             self._restriction_banner.hide()
 
