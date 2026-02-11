@@ -753,6 +753,9 @@ class ChatWindow(QMainWindow):
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
         self.chat_manager.raid_received.connect(self._on_raid_received)
         self.chat_manager.badge_map_ready.connect(self._on_badge_map_ready)
+        self.chat_manager.youtube_cookies_refreshed.connect(
+            self._on_youtube_cookies_refreshed
+        )
 
     def update_livestreams(self, livestreams: list[Livestream]) -> None:
         """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""
@@ -1134,6 +1137,14 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.show_error(message)
+
+    def _on_youtube_cookies_refreshed(self) -> None:
+        """Handle successful auto-refresh of YouTube cookies."""
+        self.statusBar().showMessage("YouTube cookies refreshed automatically", 5000)
+        for key, widget in self._widgets.items():
+            ls = self._livestreams.get(key)
+            if ls and ls.channel.platform == StreamPlatform.YOUTUBE:
+                widget._auth_banner.hide()
 
     def _on_chat_disconnected(self, channel_key: str) -> None:
         """Handle a chat connection being lost."""

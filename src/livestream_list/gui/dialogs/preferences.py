@@ -997,6 +997,11 @@ class PreferencesDialog(QDialog):
         yt_buttons.addStretch()
         yt_layout.addLayout(yt_buttons)
 
+        self.yt_auto_refresh_cb = QCheckBox("Automatically refresh cookies when expired")
+        self.yt_auto_refresh_cb.setChecked(self.app.settings.youtube.cookie_auto_refresh)
+        self.yt_auto_refresh_cb.toggled.connect(self._on_yt_auto_refresh_toggled)
+        yt_layout.addWidget(self.yt_auto_refresh_cb)
+
         layout.addWidget(yt_group)
         self._update_yt_status()
 
@@ -1561,6 +1566,7 @@ class PreferencesDialog(QDialog):
         """Clear YouTube cookies."""
         self.yt_cookies_edit.setPlainText("")
         self.app.settings.youtube.cookies = ""
+        self.app.settings.youtube.cookie_browser = ""
         self.app.save_settings()
         self._update_yt_status()
         self.app.chat_manager.reconnect_youtube()
@@ -1569,13 +1575,20 @@ class PreferencesDialog(QDialog):
         """Handle YouTube cookie import from browser."""
         from ..youtube_login import import_cookies_from_browser
 
-        cookie_string = import_cookies_from_browser(self)
-        if cookie_string:
+        result = import_cookies_from_browser(self)
+        if result:
+            cookie_string, browser_id = result
             self.app.settings.youtube.cookies = cookie_string
+            self.app.settings.youtube.cookie_browser = browser_id or ""
             self.app.save_settings()
             self.yt_cookies_edit.setPlainText(cookie_string)
             self._update_yt_status()
             self.app.chat_manager.reconnect_youtube()
+
+    def _on_yt_auto_refresh_toggled(self, checked: bool):
+        """Save auto-refresh preference."""
+        self.app.settings.youtube.cookie_auto_refresh = checked
+        self.app.save_settings()
 
     def _on_yt_import_subs(self):
         """Open YouTube subscription import dialog."""
@@ -1605,6 +1618,9 @@ class PreferencesDialog(QDialog):
         self.yt_login_btn.setVisible(not is_configured)
         self.yt_import_subs_btn.setVisible(is_configured)
         self.yt_logout_btn.setVisible(is_configured)
+        # Only show auto-refresh when cookies are configured and a browser is known
+        has_browser = bool(self.app.settings.youtube.cookie_browser)
+        self.yt_auto_refresh_cb.setVisible(is_configured and has_browser)
 
     def _on_yt_cookie_help(self):
         """Show instructions for obtaining YouTube cookies."""

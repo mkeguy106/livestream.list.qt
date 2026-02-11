@@ -84,7 +84,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Auto-open chat when launching streams
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
   - YouTube chat works when stream is live
-  - YouTube expired cookie detection with clear error messaging
+  - YouTube expired cookie detection with auto-refresh from browser
 - **Import Twitch Follows** - Login to Twitch and import your followed channels
 - **Export/Import** - Backup and restore channels and settings
   - Includes app version for compatibility tracking

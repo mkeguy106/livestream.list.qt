@@ -102,6 +102,8 @@ class YouTubeSettings:
     api_key: str = ""
     cookies: str = ""  # Browser cookies for chat sending (InnerTube)
     use_ytdlp_fallback: bool = True  # Fall back to yt-dlp if HTML scraping fails
+    cookie_browser: str = ""  # Browser ID used for import (e.g. "firefox", "chrome")
+    cookie_auto_refresh: bool = True  # Auto-refresh cookies when expired
 
 
 @dataclass
@@ -504,6 +506,8 @@ class Settings:
                 api_key=yt.get("api_key", ""),
                 cookies=yt.get("cookies", ""),
                 use_ytdlp_fallback=yt.get("use_ytdlp_fallback", True),
+                cookie_browser=yt.get("cookie_browser", ""),
+                cookie_auto_refresh=yt.get("cookie_auto_refresh", True),
             )
 
         # Kick
@@ -797,6 +801,8 @@ class Settings:
             "youtube": {
                 "api_key": self.youtube.api_key,
                 "use_ytdlp_fallback": self.youtube.use_ytdlp_fallback,
+                "cookie_browser": self.youtube.cookie_browser,
+                "cookie_auto_refresh": self.youtube.cookie_auto_refresh,
                 **({"cookies": self.youtube.cookies} if not exclude_secrets else {}),
             },
             "kick": {

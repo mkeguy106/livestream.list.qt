@@ -130,7 +130,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Kick OAuth**: OAuth 2.1 + PKCE flow in `chat/auth/kick_auth.py`. Auto-refreshes expired tokens on 401.
 
-**YouTube chat**: pytchat for reading. Message sending uses InnerTube API with SAPISIDHASH authentication (requires browser cookies copied into Preferences > Accounts).
+**YouTube chat**: pytchat for reading. Message sending uses InnerTube API with SAPISIDHASH authentication (requires browser cookies copied into Preferences > Accounts). Auto-refreshes expired cookies from the same browser if imported via "Import from Browser" (`CookieRefreshWorker` in manager.py, `extract_cookies_headless()` in youtube_login.py).
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
@@ -215,6 +215,7 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 | YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
 | YouTube chat send requires cookies | Copy cookies from browser (SID, HSID, SSID, APISID, SAPISID) into Preferences > Accounts |
+| YouTube cookie auto-refresh loops | Guard flag `_yt_cookie_auto_refresh_attempted` must NOT reset in `reconnect_youtube()` — only one attempt per session |
 | Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
 

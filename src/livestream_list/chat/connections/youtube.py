@@ -370,6 +370,7 @@ class YouTubeChatConnection(BaseChatConnection):
                     "re-export from browser in Preferences > Accounts."
                 )
                 self._chat_restriction = "cookies_expired"
+                self._emit_error("cookies_expired")
                 return
 
             # Extract INNERTUBE_API_KEY

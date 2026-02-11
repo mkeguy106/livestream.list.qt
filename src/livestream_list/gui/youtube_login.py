@@ -709,8 +709,11 @@ def _run_on_host(args: list[str], timeout: int = 30) -> str | None:
     return None
 
 
-def _import_cookies_flatpak(parent: QWidget) -> str | None:
-    """Import cookies by running extraction on the host via flatpak-spawn."""
+def _import_cookies_flatpak(parent: QWidget) -> tuple[str, str] | None:
+    """Import cookies by running extraction on the host via flatpak-spawn.
+
+    Returns (cookie_string, browser_id) on success, or None.
+    """
     # Detect browsers on the host
     output = _run_on_host(["python3", "-c", _HOST_SCRIPT, "detect"])
     if not output:
@@ -784,13 +787,13 @@ def _import_cookies_flatpak(parent: QWidget) -> str | None:
         QMessageBox.warning(parent, "Error", "No cookies were extracted.")
         return None
 
-    return cookie_string
+    return cookie_string, selected_id
 
 
-def import_cookies_from_browser(parent: QWidget) -> str | None:
+def import_cookies_from_browser(parent: QWidget) -> tuple[str, str] | None:
     """Import YouTube cookies from an installed browser.
 
-    Returns the cookie string on success, or None if cancelled/failed.
+    Returns (cookie_string, browser_id) on success, or None if cancelled/failed.
     """
     # In Flatpak, run extraction on the host via flatpak-spawn
     if _is_flatpak():
@@ -874,4 +877,87 @@ def import_cookies_from_browser(parent: QWidget) -> str | None:
 
     # Build cookie string
     parts = [f"{k}={v}" for k, v in sorted(filtered.items())]
-    return "; ".join(parts)
+    return "; ".join(parts), selected_id
+
+
+def extract_cookies_headless(browser_id: str) -> tuple[str | None, str | None]:
+    """Extract YouTube cookies from a browser without any UI interaction.
+
+    Args:
+        browser_id: The browser ID (e.g. "firefox", "chrome") to extract from.
+
+    Returns:
+        (cookie_string, None) on success, or (None, error_message) on failure.
+    """
+    if _is_flatpak():
+        return _extract_cookies_headless_flatpak(browser_id)
+
+    # Find the browser in our known list
+    browsers = _detect_available_browsers()
+    browser_info = None
+    for entry in browsers:
+        if entry[0] == browser_id:
+            browser_info = entry
+            break
+
+    if not browser_info:
+        return None, f"Browser '{browser_id}' not found or has no cookie store"
+
+    _, display_name, browser_type, db_path, keyring_label = browser_info
+
+    try:
+        cookie_dict = _extract_cookies(browser_type, db_path, keyring_label)
+    except DecryptionKeyError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"Failed to read cookies from {display_name}: {e}"
+
+    if not REQUIRED_COOKIE_KEYS.issubset(cookie_dict.keys()):
+        missing = REQUIRED_COOKIE_KEYS - cookie_dict.keys()
+        return None, (
+            f"Missing required cookies: {', '.join(sorted(missing))}. "
+            "Make sure you are logged into YouTube."
+        )
+
+    filtered = {
+        k: v
+        for k, v in cookie_dict.items()
+        if k in _YOUTUBE_COOKIE_NAMES or k.startswith(_YOUTUBE_COOKIE_PREFIXES)
+    }
+    parts = [f"{k}={v}" for k, v in sorted(filtered.items())]
+    return "; ".join(parts), None
+
+
+def _extract_cookies_headless_flatpak(browser_id: str) -> tuple[str | None, str | None]:
+    """Headless cookie extraction for Flatpak environment."""
+    output = _run_on_host(["python3", "-c", _HOST_SCRIPT, "detect"])
+    if not output:
+        return None, "Could not detect browsers on the host system"
+
+    try:
+        browsers = json.loads(output)
+    except json.JSONDecodeError:
+        return None, "Failed to parse browser detection output from host"
+
+    selected = next((b for b in browsers if b["id"] == browser_id), None)
+    if not selected:
+        return None, f"Browser '{browser_id}' not found on host system"
+
+    browser_json = json.dumps(selected)
+    output = _run_on_host(["python3", "-c", _HOST_SCRIPT, "extract", browser_json], timeout=15)
+    if not output:
+        return None, f"Failed to extract cookies from {selected['name']}"
+
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        return None, "Failed to parse cookie extraction output from host"
+
+    if "error" in result:
+        return None, result["error"]
+
+    cookie_string = result.get("cookies", "")
+    if not cookie_string:
+        return None, "No cookies were extracted"
+
+    return cookie_string, None

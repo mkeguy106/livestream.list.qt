@@ -388,6 +388,26 @@ class EmoteFetchWorker(QThread):
         return badge_map
 
 
+class CookieRefreshWorker(QThread):
+    """Worker thread that re-extracts YouTube cookies from the browser headlessly."""
+
+    success = Signal(str)  # cookie_string
+    failed = Signal(str)  # error_message
+
+    def __init__(self, browser_id: str, parent=None):
+        super().__init__(parent)
+        self._browser_id = browser_id
+
+    def run(self):
+        from ..gui.youtube_login import extract_cookies_headless
+
+        cookie_string, error = extract_cookies_headless(self._browser_id)
+        if cookie_string:
+            self.success.emit(cookie_string)
+        else:
+            self.failed.emit(error or "Unknown error during cookie refresh")
+
+
 class SocialsFetchWorker(QThread):
     """Worker thread that fetches channel social links from platform APIs."""
 
@@ -1409,6 +1429,8 @@ class ChatManager(QObject):
     mention_received = Signal(str, object)
     # Emitted when badge URL map is ready for a channel (widgets should re-resolve)
     badge_map_ready = Signal(str)  # channel_key
+    # Emitted when YouTube cookies are auto-refreshed successfully
+    youtube_cookies_refreshed = Signal()
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1487,6 +1509,10 @@ class ChatManager(QObject):
         self._chat_log_enforce_timer.timeout.connect(self._enforce_chat_log_limits)
         if settings.chat.logging.enabled:
             self._chat_log_enforce_timer.start()
+
+        # YouTube cookie auto-refresh state
+        self._yt_cookie_refresh_worker: CookieRefreshWorker | None = None
+        self._yt_cookie_auto_refresh_attempted: bool = False
 
         # Kick off global/user emote fetch in background
         self._ensure_global_emotes()
@@ -2060,8 +2086,67 @@ class ChatManager(QObject):
 
     def _on_connection_error(self, channel_key: str, message: str) -> None:
         """Handle connection error - log and forward to UI."""
+        # Intercept YouTube cookie expiry for auto-refresh
+        if message == "cookies_expired":
+            if self._try_auto_refresh_youtube_cookies():
+                logger.info("YouTube cookie auto-refresh started, suppressing error")
+                return
+            # Can't auto-refresh — emit the user-facing error instead
+            message = (
+                "YouTube login expired — update cookies in Preferences > Accounts"
+            )
+
         logger.error(f"Chat error for {channel_key}: {message}")
         self.chat_error.emit(channel_key, message)
+
+    def _try_auto_refresh_youtube_cookies(self) -> bool:
+        """Attempt to auto-refresh YouTube cookies from the stored browser.
+
+        Returns True if a refresh worker was started (error should be suppressed),
+        False if auto-refresh is not possible (error should propagate).
+        """
+        if self._yt_cookie_auto_refresh_attempted:
+            return False
+        if not self.settings.youtube.cookie_auto_refresh:
+            return False
+        if not self.settings.youtube.cookie_browser:
+            return False
+        if self._yt_cookie_refresh_worker is not None:
+            return True  # Already running, suppress duplicate errors
+
+        self._yt_cookie_auto_refresh_attempted = True
+        logger.info(
+            f"Auto-refreshing YouTube cookies from browser: "
+            f"{self.settings.youtube.cookie_browser}"
+        )
+
+        worker = CookieRefreshWorker(self.settings.youtube.cookie_browser, parent=self)
+        worker.success.connect(self._on_cookie_refresh_success)
+        worker.failed.connect(self._on_cookie_refresh_failed)
+        worker.finished.connect(self._on_cookie_refresh_finished)
+        self._yt_cookie_refresh_worker = worker
+        worker.start()
+        return True
+
+    def _on_cookie_refresh_success(self, cookie_string: str) -> None:
+        """Handle successful cookie auto-refresh."""
+        logger.info("YouTube cookies auto-refreshed successfully")
+        self.settings.youtube.cookies = cookie_string
+        self.settings.save()
+        self.reconnect_youtube()
+        self.youtube_cookies_refreshed.emit()
+
+    def _on_cookie_refresh_failed(self, error: str) -> None:
+        """Handle failed cookie auto-refresh — emit errors for all YouTube channels."""
+        logger.warning(f"YouTube cookie auto-refresh failed: {error}")
+        message = "YouTube login expired — update cookies in Preferences > Accounts"
+        for key, ls in self._livestreams.items():
+            if ls.channel.platform == StreamPlatform.YOUTUBE:
+                self.chat_error.emit(key, message)
+
+    def _on_cookie_refresh_finished(self) -> None:
+        """Clean up the cookie refresh worker reference."""
+        self._yt_cookie_refresh_worker = None
 
     def _bind_emote_image_set(self, emote: ChatEmote) -> ImageSet | None:
         """Ensure an emote has an ImageSet bound to the shared cache."""
