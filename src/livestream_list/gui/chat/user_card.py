@@ -1,6 +1,8 @@
 """User card popup showing user info, badges, and actions."""
 
+import json
 import logging
+import re
 import webbrowser
 
 import aiohttp
@@ -195,6 +197,124 @@ class UserCardFetchWorker:
             logger.debug(f"Failed to fetch pronouns for {login}: {e}")
         return ""
 
+    @staticmethod
+    async def fetch_youtube_user_info(channel_id: str) -> dict | None:
+        """Fetch YouTube channel info by scraping the /about page.
+
+        Returns dict with: description, subscriber_count_text, joined_date_text,
+        country, avatar_url. Uses the same ytInitialData technique as SocialsFetchWorker.
+        """
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        if channel_id.startswith("UC"):
+            url = f"https://www.youtube.com/channel/{channel_id}/about"
+        elif channel_id.startswith("@"):
+            url = f"https://www.youtube.com/{channel_id}/about"
+        else:
+            url = f"https://www.youtube.com/@{channel_id}/about"
+
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    html = await resp.text()
+
+            match = re.search(
+                r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL
+            )
+            if not match:
+                return None
+            data = json.loads(match.group(1))
+
+            result: dict[str, str] = {
+                "description": "",
+                "subscriber_count_text": "",
+                "joined_date_text": "",
+                "country": "",
+                "avatar_url": "",
+            }
+
+            # Avatar from channelMetadataRenderer
+            metadata = data.get("metadata", {}).get("channelMetadataRenderer", {})
+            thumbs = metadata.get("avatar", {}).get("thumbnails", [])
+            if thumbs:
+                result["avatar_url"] = thumbs[-1].get("url", "")
+
+            # About info from aboutChannelViewModel
+            about = None
+            for endpoint in data.get("onResponseReceivedEndpoints", []):
+                panel = (
+                    endpoint.get("showEngagementPanelEndpoint", {})
+                    .get("engagementPanel", {})
+                    .get("engagementPanelSectionListRenderer", {})
+                    .get("content", {})
+                    .get("sectionListRenderer", {})
+                    .get("contents", [])
+                )
+                for section in panel:
+                    about = (
+                        section.get("itemSectionRenderer", {})
+                        .get("contents", [{}])[0]
+                        .get("aboutChannelRenderer", {})
+                        .get("metadata", {})
+                        .get("aboutChannelViewModel", {})
+                    )
+                    if about:
+                        break
+                if about:
+                    break
+
+            # Fallback: try tabs path (older layout)
+            if not about:
+                tabs = (
+                    data.get("contents", {})
+                    .get("twoColumnBrowseResultsRenderer", {})
+                    .get("tabs", [])
+                )
+                for tab in tabs:
+                    tab_content = (
+                        tab.get("tabRenderer", {})
+                        .get("content", {})
+                        .get("sectionListRenderer", {})
+                        .get("contents", [])
+                    )
+                    for section in tab_content:
+                        about = (
+                            section.get("itemSectionRenderer", {})
+                            .get("contents", [{}])[0]
+                            .get("channelAboutFullMetadataRenderer", {})
+                        )
+                        if about:
+                            break
+                    if about:
+                        break
+
+            if about:
+                result["description"] = about.get("description", "")
+                result["subscriber_count_text"] = about.get(
+                    "subscriberCountText", ""
+                )
+                joined = about.get("joinedDateText", {})
+                if isinstance(joined, dict):
+                    result["joined_date_text"] = joined.get("content", "")
+                elif isinstance(joined, str):
+                    result["joined_date_text"] = joined
+                result["country"] = about.get("country", "")
+
+            return result
+        except Exception as e:
+            logger.debug(f"Failed to fetch YouTube user info for {channel_id}: {e}")
+            return None
+
 
 class UserCardPopup(QFrame):
     """Popup showing user info when clicking a username in chat."""
@@ -374,9 +494,14 @@ class UserCardPopup(QFrame):
         self._bio_label.hide()
         layout.addWidget(self._bio_label)
 
-        # Account created (Twitch only, loaded async)
-        if user.platform == StreamPlatform.TWITCH:
-            self._created_label = QLabel("Account created: Loading...")
+        # Account created / joined date (Twitch and YouTube, loaded async)
+        if user.platform in (StreamPlatform.TWITCH, StreamPlatform.YOUTUBE):
+            loading_text = (
+                "Joined: Loading..."
+                if user.platform == StreamPlatform.YOUTUBE
+                else "Account created: Loading..."
+            )
+            self._created_label = QLabel(loading_text)
             self._created_label.setStyleSheet(info_style)
             self._created_label.setTextInteractionFlags(
                 Qt.TextInteractionFlag.TextSelectableByMouse
@@ -386,13 +511,21 @@ class UserCardPopup(QFrame):
         else:
             self._created_label = None
 
-        # Followers (Twitch only, loaded async)
+        # Followers / subscribers (Twitch and YouTube, loaded async)
         self._followers_label = QLabel()
         self._followers_label.setStyleSheet(info_style)
         self._followers_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._text_labels.append(self._followers_label)
         self._followers_label.hide()
         layout.addWidget(self._followers_label)
+
+        # Country (YouTube only, loaded async)
+        self._country_label = QLabel()
+        self._country_label.setStyleSheet(info_style)
+        self._country_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._text_labels.append(self._country_label)
+        self._country_label.hide()
+        layout.addWidget(self._country_label)
 
         # Follow age (Twitch only, loaded async)
         self._follow_age_label = QLabel()
@@ -461,17 +594,25 @@ class UserCardPopup(QFrame):
             self.adjustSize()
 
     def update_created_at(self, created_at_str: str) -> None:
-        """Update the account creation date label after async fetch."""
-        if self._created_label and created_at_str:
-            # Parse ISO format: "2015-06-21T15:40:00.000Z"
-            try:
-                from datetime import datetime
+        """Update the account creation date label after async fetch.
 
-                dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                formatted = dt.astimezone().strftime("%B %d, %Y")
-                self._created_label.setText(f"Account created: {formatted}")
-            except Exception:
-                self._created_label.setText(f"Account created: {created_at_str}")
+        Handles both ISO format (Twitch: "2015-06-21T15:40:00.000Z") and
+        pre-formatted strings (YouTube: "Joined Mar 5, 2021").
+        """
+        if self._created_label and created_at_str:
+            # YouTube returns pre-formatted "Joined Mar 5, 2021"
+            if created_at_str.startswith("Joined"):
+                self._created_label.setText(created_at_str)
+            else:
+                # Parse ISO format from Twitch
+                try:
+                    from datetime import datetime
+
+                    dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                    formatted = dt.astimezone().strftime("%B %d, %Y")
+                    self._created_label.setText(f"Account created: {formatted}")
+                except Exception:
+                    self._created_label.setText(f"Account created: {created_at_str}")
         elif self._created_label:
             self._created_label.setText("Account created: Unknown")
 
@@ -495,6 +636,20 @@ class UserCardPopup(QFrame):
                 text = str(count)
             self._followers_label.setText(f"Followers: {text}")
             self._followers_label.show()
+            self.adjustSize()
+
+    def update_subscribers(self, text: str) -> None:
+        """Update the followers label with YouTube subscriber count text."""
+        if text:
+            self._followers_label.setText(f"Subscribers: {text}")
+            self._followers_label.show()
+            self.adjustSize()
+
+    def update_country(self, text: str) -> None:
+        """Update the country label (YouTube)."""
+        if text:
+            self._country_label.setText(f"Country: {text}")
+            self._country_label.show()
             self.adjustSize()
 
     def update_follow_age(self, followed_at_str: str) -> None:

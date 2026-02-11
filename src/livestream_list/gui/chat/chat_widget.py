@@ -2670,9 +2670,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
         card.show_at(pos)
         self._active_user_card = card
 
-        # Async fetch for Twitch users
+        # Async fetch for Twitch and YouTube users
         if user.platform == StreamPlatform.TWITCH:
             self._fetch_user_card_info(card, user.name)
+        elif user.platform == StreamPlatform.YOUTUBE:
+            self._fetch_youtube_user_card_info(card, user.id)
 
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
         """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
@@ -2728,6 +2730,52 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 card.update_created_at("")
             if thread.pronouns:
                 card.update_pronouns(thread.pronouns)
+            if thread.avatar_data:
+                card.update_avatar(thread.avatar_data)
+
+        thread.finished.connect(on_finished)
+        thread.start()
+
+    def _fetch_youtube_user_card_info(self, card: UserCardPopup, channel_id: str) -> None:
+        """Fetch YouTube user card info and avatar asynchronously."""
+        import asyncio
+
+        from PySide6.QtCore import QThread
+
+        class _YTCardFetchThread(QThread):
+            def __init__(self, channel_id, parent=None):
+                super().__init__(parent)
+                self._channel_id = channel_id
+                self.result: dict | None = None
+                self.avatar_data: bytes = b""
+
+            def run(self):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self.result = loop.run_until_complete(
+                        UserCardFetchWorker.fetch_youtube_user_info(self._channel_id)
+                    )
+                    if self.result and self.result.get("avatar_url"):
+                        self.avatar_data = loop.run_until_complete(
+                            UserCardFetchWorker.fetch_avatar(self.result["avatar_url"])
+                        )
+                except Exception as e:
+                    logger.debug(f"YouTube user card fetch error for {self._channel_id}: {e}")
+                finally:
+                    loop.close()
+
+        thread = _YTCardFetchThread(channel_id, parent=self)
+
+        def on_finished():
+            if thread.result:
+                card.update_bio(thread.result.get("description", ""))
+                card.update_created_at(thread.result.get("joined_date_text", ""))
+                card.update_subscribers(thread.result.get("subscriber_count_text", ""))
+                card.update_country(thread.result.get("country", ""))
+            else:
+                if card._created_label:
+                    card._created_label.setText("Joined: Unknown")
             if thread.avatar_data:
                 card.update_avatar(thread.avatar_data)
 
