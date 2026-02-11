@@ -68,7 +68,7 @@ src/livestream_list/
 │   ├── connections/      # Per-platform WebSocket/IRC connections (BaseChatConnection subclasses)
 │   ├── emotes/           # Emote fetching, caching (two-tier LRU+disk), rendering, matching
 │   ├── auth/             # Kick OAuth 2.1+PKCE, YouTube auth helpers
-│   ├── spellcheck/       # Spellcheck integration
+│   ├── spellcheck/       # Spellcheck integration + autocorrect
 │   ├── manager.py        # ChatManager - orchestrates connections, emotes, EventSub, routing
 │   ├── models.py         # ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses
 │   └── chat_log_store.py # JSONL/text per-channel logging with disk rotation
@@ -145,6 +145,8 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 **Banners**: `DismissibleBanner` in `chat_widget.py` uses overlay X button pattern (button as child widget, NOT in layout, repositioned in `resizeEvent`). Used for title banner, socials banner. Hype Chat banner is a simpler inline widget.
 
 **Socials Banner**: Fetched via `SocialsFetchWorker`. Twitch uses GraphQL, YouTube scrapes `/about` page (note: `UC...` IDs need `/channel/UC.../about` format), Kick uses REST API.
+
+**Spellcheck & Autocorrect**: `SpellChecker` in `chat/spellcheck/checker.py` wraps pyspellchecker with chat-aware skip rules (emotes, URLs, mentions, all-caps). Red wavy underlines drawn in `ChatInput.paintEvent()`. `SpellCompleter` shows click-to-correct popup. Autocorrect (`get_confident_correction`) auto-replaces obvious typos when the user moves past a misspelled word (space + next letter). Confidence rule: correct if only 1 candidate exists OR top candidate frequency >= 5x the second. Corrected words show a green underline for 3 seconds. Both features togglable in Preferences > Chat.
 
 **Chat Logging**: `ChatLogWriter` in `chat/chat_log_store.py` writes buffered JSONL + plain text per-channel logs. Date-based files with configurable disk limit and LRU deletion. History loads from JSONL on channel open.
 

@@ -188,6 +188,13 @@ class ChatInput(QLineEdit):
         self._check_timer.setSingleShot(True)
         self._check_timer.setInterval(150)
         self._check_timer.timeout.connect(self._run_check)
+        # Autocorrect state
+        self._autocorrect_enabled: bool = True
+        self._green_highlights: list[tuple[int, int, str]] = []  # (start, end, corrected_word)
+        self._green_timer = QTimer(self)
+        self._green_timer.setSingleShot(True)
+        self._green_timer.setInterval(3000)
+        self._green_timer.timeout.connect(self._clear_green_highlights)
         # Message history for up/down arrow cycling
         self._message_history: list[str] = []
         self._history_index: int = -1
@@ -223,22 +230,102 @@ class ChatInput(QLineEdit):
         """Enable or disable spellcheck rendering."""
         if not enabled:
             self._misspelled_ranges.clear()
+            self._green_highlights.clear()
             self.update()
         else:
             self._run_check()
+
+    def set_autocorrect_enabled(self, enabled: bool) -> None:
+        """Enable or disable autocorrect."""
+        self._autocorrect_enabled = enabled
+        if not enabled:
+            self._green_highlights.clear()
+            self._green_timer.stop()
+            self.update()
+
+    def _clear_green_highlights(self) -> None:
+        """Clear green correction highlights after timeout."""
+        self._green_highlights.clear()
+        self.update()
 
     def _schedule_check(self) -> None:
         """Schedule a debounced spellcheck."""
         if self._spell_checker:
             self._check_timer.start()
 
+    @staticmethod
+    def _match_case(original: str, replacement: str) -> str:
+        """Match the casing of the original word to the replacement."""
+        if original.isupper():
+            return replacement.upper()
+        if original and original[0].isupper():
+            return replacement.capitalize()
+        return replacement
+
     def _run_check(self) -> None:
-        """Run spellcheck on the current text and cache results."""
+        """Run spellcheck on the current text, applying autocorrect for confident fixes."""
         if not self._spell_checker:
             return
         text = self.text()
         results = self._spell_checker.check_text(text)
-        self._misspelled_ranges = [(s, e) for s, e, _w in results]
+
+        if not self._autocorrect_enabled:
+            self._misspelled_ranges = [(s, e) for s, e, _w in results]
+            self.update()
+            return
+
+        # Separate words into: auto-correctable (past + confident) vs keep-red
+        corrections: list[tuple[int, int, str, str]] = []  # (start, end, original, replacement)
+        keep_red: list[tuple[int, int]] = []
+
+        for start, end, word in results:
+            # "past" = user has moved on: text after word starts with space + alpha
+            is_past = (
+                end < len(text)
+                and text[end] == " "
+                and end + 1 < len(text)
+                and text[end + 1].isalpha()
+            )
+            if is_past:
+                correction = self._spell_checker.get_confident_correction(word)
+                if correction:
+                    cased = self._match_case(word, correction)
+                    corrections.append((start, end, word, cased))
+                    continue
+            keep_red.append((start, end))
+
+        if not corrections:
+            self._misspelled_ranges = keep_red
+            self.update()
+            return
+
+        # Apply corrections from end to start to preserve positions
+        corrections.sort(key=lambda c: c[0], reverse=True)
+        cursor_pos = self.cursorPosition()
+
+        self.blockSignals(True)
+        new_text = text
+        new_greens: list[tuple[int, int, str]] = []
+        for start, end, original, replacement in corrections:
+            new_text = new_text[:start] + replacement + new_text[end:]
+            diff = len(replacement) - len(original)
+            if cursor_pos > end:
+                cursor_pos += diff
+            elif cursor_pos > start:
+                cursor_pos = start + len(replacement)
+            new_greens.append((start, start + len(replacement), replacement))
+
+        self.setText(new_text)
+        self.setCursorPosition(cursor_pos)
+        self.blockSignals(False)
+
+        # Re-run spellcheck on corrected text (without autocorrect to avoid recursion)
+        new_results = self._spell_checker.check_text(new_text)
+        self._misspelled_ranges = [(s, e) for s, e, _w in new_results]
+
+        # Set green highlights and restart timer
+        self._green_highlights = new_greens
+        self._green_timer.start()
         self.update()
 
     def event(self, event: QEvent) -> bool:  # noqa: N802
@@ -293,10 +380,12 @@ class ChatInput(QLineEdit):
         return self.style().subElementRect(QStyle.SubElement.SE_LineEditContents, opt, self)
 
     def paintEvent(self, event) -> None:  # noqa: N802
-        """Draw the default text, then overlay wavy red underlines."""
+        """Draw the default text, then overlay wavy red and straight green underlines."""
         super().paintEvent(event)
 
-        if not self._misspelled_ranges:
+        has_red = bool(self._misspelled_ranges)
+        has_green = bool(self._green_highlights)
+        if not has_red and not has_green:
             return
 
         text = self.text()
@@ -319,16 +408,32 @@ class ChatInput(QLineEdit):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        pen = QPen(QColor(255, 60, 60, 200))
-        pen.setWidthF(1.2)
-        painter.setPen(pen)
+        # Red wavy underlines for misspelled words
+        if has_red:
+            pen = QPen(QColor(255, 60, 60, 200))
+            pen.setWidthF(1.2)
+            painter.setPen(pen)
 
-        for start, end in self._misspelled_ranges:
-            x_start = text_origin_x + fm.horizontalAdvance(text[:start])
-            x_end = text_origin_x + fm.horizontalAdvance(text[:end])
-            if x_end < 0 or x_start > self.width():
-                continue
-            self._draw_wavy_line(painter, x_start, x_end, baseline_y)
+            for start, end in self._misspelled_ranges:
+                x_start = text_origin_x + fm.horizontalAdvance(text[:start])
+                x_end = text_origin_x + fm.horizontalAdvance(text[:end])
+                if x_end < 0 or x_start > self.width():
+                    continue
+                self._draw_wavy_line(painter, x_start, x_end, baseline_y)
+
+        # Green straight underlines for autocorrected words
+        if has_green:
+            green_pen = QPen(QColor(60, 200, 60, 200))
+            green_pen.setWidthF(1.5)
+            painter.setPen(green_pen)
+
+            for start, end, corrected_word in self._green_highlights:
+                if end <= len(text) and text[start:end] == corrected_word:
+                    x_start = text_origin_x + fm.horizontalAdvance(text[:start])
+                    x_end = text_origin_x + fm.horizontalAdvance(text[:end])
+                    if x_end < 0 or x_start > self.width():
+                        continue
+                    painter.drawLine(int(x_start), int(baseline_y), int(x_end), int(baseline_y))
 
         painter.end()
 
@@ -849,6 +954,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._spell_completer = None
         if self.settings.spellcheck_enabled:
             self._init_spellcheck()
+        # Autocorrect state (depends on spellcheck being enabled)
+        self._input.set_autocorrect_enabled(
+            self.settings.autocorrect_enabled and self.settings.spellcheck_enabled
+        )
 
         # Auth gating
         self.set_authenticated(self._authenticated)
@@ -893,6 +1002,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if enabled and not self._spell_checker:
             self._init_spellcheck()
         self._input.set_spellcheck_enabled(enabled)
+
+    def set_autocorrect_enabled(self, enabled: bool) -> None:
+        """Enable or disable autocorrect at runtime."""
+        self._input.set_autocorrect_enabled(enabled)
 
     def add_messages(self, messages: list[ChatMessage]) -> None:
         """Add messages to the chat.
@@ -2186,6 +2299,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Toggle spellcheck on the input field."""
         self.settings.spellcheck_enabled = checked
         self.set_spellcheck_enabled(checked)
+        self.set_autocorrect_enabled(checked and self.settings.autocorrect_enabled)
         self.settings_changed.emit()
 
     def _toggle_user_card_hover(self, checked: bool) -> None:

@@ -124,6 +124,37 @@ class SpellChecker:
             return correction
         return None
 
+    def get_confident_correction(self, word: str) -> str | None:
+        """Get a correction only when confidence is high.
+
+        Returns the top candidate if:
+        - Only 1 candidate exists (unambiguous), or
+        - Top candidate frequency is >= 5x the second candidate.
+        Returns None if ambiguous or no candidates.
+        """
+        if self._should_skip(word):
+            return None
+        candidates = self._spell.candidates(word)
+        if not candidates:
+            return None
+        # Remove the original word itself from candidates
+        candidates = {c for c in candidates if c != word.lower()}
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates.pop()
+        # Sort by frequency descending
+        ranked = sorted(
+            candidates,
+            key=lambda c: self._spell.word_usage_frequency(c) or 0,
+            reverse=True,
+        )
+        freq_top = self._spell.word_usage_frequency(ranked[0]) or 0
+        freq_second = self._spell.word_usage_frequency(ranked[1]) or 0
+        if freq_second > 0 and freq_top / freq_second >= 5.0:
+            return ranked[0]
+        return None
+
     def add_words(self, words: set[str]) -> None:
         """Whitelist words in the custom dictionary (emotes/usernames)."""
         self._dict.set_emote_names(words)

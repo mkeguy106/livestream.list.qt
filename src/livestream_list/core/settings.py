@@ -191,6 +191,7 @@ class BuiltinChatSettings:
     show_stream_title: bool = True
     show_socials_banner: bool = True
     spellcheck_enabled: bool = True
+    autocorrect_enabled: bool = True
     moderated_message_display: str = "strikethrough"  # strikethrough, truncated, hidden
     user_card_hover: bool = True
     always_on_top: bool = False
@@ -688,6 +689,7 @@ class Settings:
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
+                autocorrect_enabled=builtin_data.get("autocorrect_enabled", True),
                 user_card_hover=builtin_data.get("user_card_hover", True),
                 always_on_top=builtin_data.get("always_on_top", False),
                 moderated_message_display=builtin_data.get(
@@ -879,6 +881,7 @@ class Settings:
                     "show_stream_title": self.chat.builtin.show_stream_title,
                     "show_socials_banner": self.chat.builtin.show_socials_banner,
                     "spellcheck_enabled": self.chat.builtin.spellcheck_enabled,
+                    "autocorrect_enabled": self.chat.builtin.autocorrect_enabled,
                     "user_card_hover": self.chat.builtin.user_card_hover,
                     "always_on_top": self.chat.builtin.always_on_top,
                     "moderated_message_display": self.chat.builtin.moderated_message_display,

@@ -51,7 +51,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - @mention autocomplete (type @ to suggest usernames)
   - @mention highlighting with tab flashing for notifications
   - Conversation view (click @mention or reply to see back-and-forth)
-  - Real-time spellcheck with custom dictionary
+  - Real-time spellcheck with custom dictionary and auto-correct
   - Chat scroll pause in busy channels (auto-resumes after 5 min)
   - Recent chat history on channel join (Twitch)
   - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")

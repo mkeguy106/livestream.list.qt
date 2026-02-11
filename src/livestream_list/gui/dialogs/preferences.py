@@ -661,6 +661,15 @@ class PreferencesDialog(QDialog):
         self.chat_spellcheck_cb.stateChanged.connect(self._on_chat_changed)
         builtin_layout.addRow(self.chat_spellcheck_cb)
 
+        self.chat_autocorrect_cb = QCheckBox("Auto-correct misspelled words")
+        self.chat_autocorrect_cb.setChecked(self.app.settings.chat.builtin.autocorrect_enabled)
+        self.chat_autocorrect_cb.setEnabled(self.app.settings.chat.builtin.spellcheck_enabled)
+        self.chat_autocorrect_cb.stateChanged.connect(self._on_chat_changed)
+        self.chat_spellcheck_cb.stateChanged.connect(
+            lambda state: self.chat_autocorrect_cb.setEnabled(bool(state))
+        )
+        builtin_layout.addRow(self.chat_autocorrect_cb)
+
         self.chat_user_card_hover_cb = QCheckBox("Show user card on hover")
         self.chat_user_card_hover_cb.setChecked(self.app.settings.chat.builtin.user_card_hover)
         self.chat_user_card_hover_cb.stateChanged.connect(self._on_chat_changed)
@@ -1246,6 +1255,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.chat.builtin.show_alternating_rows = self.chat_alt_rows_cb.isChecked()
         self.app.settings.chat.builtin.show_metrics = self.chat_metrics_cb.isChecked()
         self.app.settings.chat.builtin.spellcheck_enabled = self.chat_spellcheck_cb.isChecked()
+        self.app.settings.chat.builtin.autocorrect_enabled = self.chat_autocorrect_cb.isChecked()
         self.app.settings.chat.builtin.user_card_hover = self.chat_user_card_hover_cb.isChecked()
         self.app.settings.chat.builtin.moderated_message_display = (
             self.moderated_display_combo.currentData()
@@ -1425,6 +1435,7 @@ class PreferencesDialog(QDialog):
             self.chat_alt_rows_cb.setChecked(builtin.show_alternating_rows)
             self.chat_metrics_cb.setChecked(builtin.show_metrics)
             self.chat_spellcheck_cb.setChecked(builtin.spellcheck_enabled)
+            self.chat_autocorrect_cb.setChecked(builtin.autocorrect_enabled)
             self.chat_user_card_hover_cb.setChecked(builtin.user_card_hover)
             idx = self.moderated_display_combo.findData(builtin.moderated_message_display)
             if idx >= 0:
