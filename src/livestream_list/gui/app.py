@@ -381,6 +381,9 @@ class Application(QApplication):
         def on_finished(result):
             self._refresh_in_progress = False
             self.refresh_complete.emit()
+            # Push updated livestream data to chat window (viewer count, uptime, etc.)
+            if self._chat_window and self.monitor:
+                self._chat_window.update_livestreams(self.monitor.livestreams)
             # Emit error signal if there were any errors
             if result and isinstance(result, dict):
                 errors = result.get("errors", [])

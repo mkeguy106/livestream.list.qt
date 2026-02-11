@@ -754,6 +754,15 @@ class ChatWindow(QMainWindow):
         self.chat_manager.raid_received.connect(self._on_raid_received)
         self.chat_manager.badge_map_ready.connect(self._on_badge_map_ready)
 
+    def update_livestreams(self, livestreams: list[Livestream]) -> None:
+        """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""
+        ls_map = {ls.channel.unique_key: ls for ls in livestreams}
+        for channel_key, widget in self._widgets.items():
+            fresh = ls_map.get(channel_key)
+            if fresh:
+                self._livestreams[channel_key] = fresh
+                widget.update_livestream(fresh)
+
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
         channel_key = livestream.channel.unique_key

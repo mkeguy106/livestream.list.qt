@@ -535,6 +535,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._slow_mode_timer = QTimer(self)
         self._slow_mode_timer.setInterval(1000)
         self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
+        self._title_refresh_timer = QTimer(self)
+        self._title_refresh_timer.setInterval(60_000)
+        self._title_refresh_timer.timeout.connect(self._update_stream_title)
         self._emotes_by_provider: dict[str, list] = {}
         self._channel_emote_names: set[str] = set()
         self._locked_emote_names: set[str] = set()
@@ -1860,6 +1863,20 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if title and self.settings.show_stream_title and not self._title_dismissed:
             # Convert !commands to clickable links
             html_title = self._format_title_with_commands(title)
+            # Append viewer count and uptime on a second line
+            meta_parts: list[str] = []
+            if self.livestream and self.livestream.live:
+                if self.livestream.viewers:
+                    meta_parts.append(f"\U0001f464 {self.livestream.viewers_str}")
+                uptime = self.livestream.uptime_str
+                if uptime:
+                    meta_parts.append(f"\U0001f550 {uptime}")
+            if meta_parts:
+                meta_html = " &nbsp;\u00b7&nbsp; ".join(meta_parts)
+                html_title += (
+                    f'<br><span style="font-size: 10px; opacity: 0.7;">'
+                    f"{meta_html}</span>"
+                )
             self._title_banner.setText(html_title)
             self._title_banner.setToolTip(title)  # Full title on hover (plain text)
             self._title_banner.show()
@@ -1869,6 +1886,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _on_title_dismissed(self) -> None:
         """Handle title banner dismissal."""
         self._title_dismissed = True
+        self._title_refresh_timer.stop()
 
     def _on_socials_dismissed(self) -> None:
         """Handle socials banner dismissal."""
@@ -1898,6 +1916,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Update the livestream data and refresh the title."""
         self.livestream = livestream
         self._update_stream_title()
+        if livestream and livestream.live:
+            self._title_refresh_timer.start()
+        else:
+            self._title_refresh_timer.stop()
 
     def set_socials(self, socials: dict[str, str]) -> None:
         """Set channel socials and update the banner.
