@@ -961,7 +961,7 @@ class ChatWindow(QMainWindow):
                 self.chat_manager.get_channel_emote_names(widget.channel_key),
                 user_emote_names,
             )
-            widget.repaint_messages()
+            widget.invalidate_message_layout()
             # Refresh emote picker icons if it's currently visible
             if widget._emote_picker.isVisible():
                 widget._emote_picker.refresh_icons()
