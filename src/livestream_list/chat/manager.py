@@ -1407,6 +1407,8 @@ class ChatManager(QObject):
     raid_received = Signal(str, object)
     # Emitted on @mention of our user (channel_key, ChatMessage)
     mention_received = Signal(str, object)
+    # Emitted when badge URL map is ready for a channel (widgets should re-resolve)
+    badge_map_ready = Signal(str)  # channel_key
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -2464,6 +2466,27 @@ class ChatManager(QObject):
 
         if requeue_count:
             logger.debug(f"Re-queued {requeue_count} badges with correct URLs")
+
+        # Notify widgets so they can re-resolve badges on already-displayed messages
+        self.badge_map_ready.emit(channel_key)
+
+    def resolve_badges_on_messages(
+        self, channel_key: str, messages: list[ChatMessage]
+    ) -> int:
+        """Re-resolve badge ImageSets on existing messages after badge map arrives.
+
+        Returns the number of badges that were newly resolved.
+        """
+        resolved = 0
+        for msg in messages:
+            for badge in msg.user.badges:
+                if badge.image_set:
+                    continue
+                image_set = self._ensure_badge_image_set(badge, channel_key)
+                if image_set:
+                    image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
+                    resolved += 1
+        return resolved
 
     def on_emote_settings_changed(self) -> None:
         """Handle changes to emote provider settings."""

@@ -752,6 +752,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
         self.chat_manager.raid_received.connect(self._on_raid_received)
+        self.chat_manager.badge_map_ready.connect(self._on_badge_map_ready)
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -916,6 +917,19 @@ class ChatWindow(QMainWindow):
         popout = self._popout_windows.get(channel_key)
         if popout and popout._widget:
             popout._widget.show_raid_banner(message)
+
+    def _on_badge_map_ready(self, channel_key: str) -> None:
+        """Re-resolve badges on existing messages after badge data arrives."""
+        widget = self._widgets.get(channel_key)
+        if not widget:
+            return
+        messages = widget.get_all_messages()
+        if not messages:
+            return
+        resolved = self.chat_manager.resolve_badges_on_messages(channel_key, messages)
+        if resolved:
+            logger.info(f"Retroactively resolved {resolved} badges for {channel_key}")
+            widget.repaint_messages()
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - debounce repaint requests."""
