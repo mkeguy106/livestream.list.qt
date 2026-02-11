@@ -2270,6 +2270,22 @@ class ChatWidget(QWidget, ChatSearchMixin):
         hover_action.setChecked(self.settings.user_card_hover)
         hover_action.toggled.connect(self._toggle_user_card_hover)
 
+        menu.addSeparator()
+
+        # Title banner toggle
+        title_action = menu.addAction("Show Title Banner")
+        title_action.setCheckable(True)
+        title_action.setChecked(self.settings.show_stream_title)
+        title_action.toggled.connect(self._toggle_title_banner)
+
+        # Socials banner toggle
+        socials_action = menu.addAction("Show Socials Banner")
+        socials_action.setCheckable(True)
+        socials_action.setChecked(self.settings.show_socials_banner)
+        socials_action.toggled.connect(self._toggle_socials_banner)
+
+        menu.addSeparator()
+
         # Always on top toggle
         aot_action = menu.addAction("Always on Top")
         aot_action.setCheckable(True)
@@ -2330,6 +2346,18 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if not checked:
             self._card_hover_timer.stop()
             self._card_hover_user = None
+        self.settings_changed.emit()
+
+    def _toggle_title_banner(self, checked: bool) -> None:
+        """Toggle title banner visibility."""
+        self.settings.show_stream_title = checked
+        self.update_banner_settings()
+        self.settings_changed.emit()
+
+    def _toggle_socials_banner(self, checked: bool) -> None:
+        """Toggle socials banner visibility."""
+        self.settings.show_socials_banner = checked
+        self.update_banner_settings()
         self.settings_changed.emit()
 
     def _toggle_always_on_top(self, checked: bool) -> None:

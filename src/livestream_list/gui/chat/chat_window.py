@@ -1059,6 +1059,9 @@ class ChatWindow(QMainWindow):
         """Persist chat setting toggles and relayout active widget."""
         self.settings.save()
         self.chat_manager.on_emote_settings_changed()
+        # Update banner visibility on all widgets (shared settings object)
+        for widget in self._widgets.values():
+            widget.update_banner_settings()
         # Only relayout the active widget to avoid lockups
         # Other widgets will be relayouted when they become active
         current_widget = self._tab_widget.currentWidget()
