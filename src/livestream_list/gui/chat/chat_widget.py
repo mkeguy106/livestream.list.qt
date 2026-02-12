@@ -191,6 +191,7 @@ class ChatInput(QLineEdit):
         # Autocorrect state
         self._autocorrect_enabled: bool = True
         self._green_highlights: list[tuple[int, int, str]] = []  # (start, end, corrected_word)
+        self._corrected_words: set[str] = set()  # words already autocorrected (one attempt only)
         self._green_timer = QTimer(self)
         self._green_timer.setSingleShot(True)
         self._green_timer.setInterval(3000)
@@ -279,6 +280,11 @@ class ChatInput(QLineEdit):
         keep_red: list[tuple[int, int]] = []
 
         for start, end, word in results:
+            # Only autocorrect each word once per message — if the user changes it
+            # back, respect their intent and don't correct again
+            if word.lower() in self._corrected_words:
+                keep_red.append((start, end))
+                continue
             # "past" = user has moved on: text after word starts with space + alpha
             is_past = (
                 end < len(text)
@@ -314,6 +320,7 @@ class ChatInput(QLineEdit):
             elif cursor_pos > start:
                 cursor_pos = start + len(replacement)
             new_greens.append((start, start + len(replacement), replacement))
+            self._corrected_words.add(original.lower())
 
         self.setText(new_text)
         self.setCursorPosition(cursor_pos)
@@ -1386,6 +1393,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             reply_id = self._reply_to_msg.id if self._reply_to_msg else ""
             self.message_sent.emit(self.channel_key, text, reply_id)
             self._input.clear()
+            self._input._corrected_words.clear()
             self._cancel_reply()
             # Start slow mode countdown if active
             if self._room_state and self._room_state.slow > 0:
