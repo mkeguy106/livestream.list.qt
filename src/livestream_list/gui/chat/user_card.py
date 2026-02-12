@@ -198,6 +198,41 @@ class UserCardFetchWorker:
         return ""
 
     @staticmethod
+    async def fetch_kick_user_info(slug: str) -> dict | None:
+        """Fetch Kick user info from the public channel API.
+
+        Returns dict with: bio, followers_count, verified, profile_pic_url, country.
+        """
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+        }
+        try:
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(
+                    f"https://kick.com/api/v2/channels/{slug}",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    data = await resp.json()
+
+            user_data = data.get("user", {})
+            return {
+                "bio": user_data.get("bio") or "",
+                "followers_count": data.get("followers_count", 0),
+                "verified": data.get("verified", False),
+                "profile_pic_url": user_data.get("profile_pic") or "",
+                "country": user_data.get("country") or "",
+            }
+        except Exception as e:
+            logger.debug(f"Failed to fetch Kick user info for {slug}: {e}")
+            return None
+
+    @staticmethod
     async def fetch_youtube_user_info(channel_id: str) -> dict | None:
         """Fetch YouTube channel info by scraping the /about page.
 
@@ -405,13 +440,13 @@ class UserCardPopup(QFrame):
             StreamPlatform.YOUTUBE: "YouTube",
             StreamPlatform.KICK: "Kick",
         }
-        platform_label = QLabel(platform_names.get(user.platform, ""))
-        platform_label.setStyleSheet(
+        self._platform_label = QLabel(platform_names.get(user.platform, ""))
+        self._platform_label.setStyleSheet(
             f"color: {theme.text_muted}; font-size: 11px; background: transparent; border: none;"
         )
-        platform_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._text_labels.append(platform_label)
-        header_layout.addWidget(platform_label)
+        self._platform_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._text_labels.append(self._platform_label)
+        header_layout.addWidget(self._platform_label)
         name_col.addLayout(header_layout)
 
         # @username (login name if different from display name)
@@ -494,8 +529,8 @@ class UserCardPopup(QFrame):
         self._bio_label.hide()
         layout.addWidget(self._bio_label)
 
-        # Account created / joined date (Twitch and YouTube, loaded async)
-        if user.platform in (StreamPlatform.TWITCH, StreamPlatform.YOUTUBE):
+        # Account created / joined date (Twitch, YouTube, Kick — loaded async)
+        if user.platform in (StreamPlatform.TWITCH, StreamPlatform.YOUTUBE, StreamPlatform.KICK):
             loading_text = (
                 "Joined: Loading..."
                 if user.platform == StreamPlatform.YOUTUBE
@@ -651,6 +686,11 @@ class UserCardPopup(QFrame):
             self._country_label.setText(f"Country: {text}")
             self._country_label.show()
             self.adjustSize()
+
+    def update_verified(self, verified: bool) -> None:
+        """Append a checkmark to the platform label if verified."""
+        if verified and not self._platform_label.text().endswith(" \u2713"):
+            self._platform_label.setText(self._platform_label.text() + " \u2713")
 
     def update_follow_age(self, followed_at_str: str) -> None:
         """Update the follow age label."""

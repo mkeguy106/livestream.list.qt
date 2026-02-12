@@ -2670,11 +2670,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
         card.show_at(pos)
         self._active_user_card = card
 
-        # Async fetch for Twitch and YouTube users
+        # Async fetch for Twitch, YouTube, and Kick users
         if user.platform == StreamPlatform.TWITCH:
             self._fetch_user_card_info(card, user.name)
         elif user.platform == StreamPlatform.YOUTUBE:
             self._fetch_youtube_user_card_info(card, user.id)
+        elif user.platform == StreamPlatform.KICK:
+            self._fetch_kick_user_card_info(card, user.name)
 
     def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
         """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
@@ -2776,6 +2778,57 @@ class ChatWidget(QWidget, ChatSearchMixin):
             else:
                 if card._created_label:
                     card._created_label.setText("Joined: Unknown")
+            if thread.avatar_data:
+                card.update_avatar(thread.avatar_data)
+
+        thread.finished.connect(on_finished)
+        thread.start()
+
+    def _fetch_kick_user_card_info(self, card: UserCardPopup, slug: str) -> None:
+        """Fetch Kick user card info and avatar asynchronously."""
+        import asyncio
+
+        from PySide6.QtCore import QThread
+
+        class _KickCardFetchThread(QThread):
+            def __init__(self, slug, parent=None):
+                super().__init__(parent)
+                self._slug = slug
+                self.result: dict | None = None
+                self.avatar_data: bytes = b""
+
+            def run(self):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    self.result = loop.run_until_complete(
+                        UserCardFetchWorker.fetch_kick_user_info(self._slug)
+                    )
+                    if self.result and self.result.get("profile_pic_url"):
+                        self.avatar_data = loop.run_until_complete(
+                            UserCardFetchWorker.fetch_avatar(
+                                self.result["profile_pic_url"]
+                            )
+                        )
+                except Exception as e:
+                    logger.debug(f"Kick user card fetch error for {self._slug}: {e}")
+                finally:
+                    loop.close()
+
+        thread = _KickCardFetchThread(slug, parent=self)
+
+        def on_finished():
+            if thread.result:
+                card.update_bio(thread.result.get("bio", ""))
+                card.update_followers(thread.result.get("followers_count", 0))
+                card.update_country(thread.result.get("country", ""))
+                card.update_verified(thread.result.get("verified", False))
+                # Kick API doesn't expose account creation date
+                if card._created_label:
+                    card._created_label.hide()
+            else:
+                if card._created_label:
+                    card._created_label.hide()
             if thread.avatar_data:
                 card.update_avatar(thread.avatar_data)
 
