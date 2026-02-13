@@ -3,6 +3,7 @@
 import logging
 import re
 import time
+import unicodedata
 import webbrowser
 
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
@@ -1935,6 +1936,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Handle clicks on !command links in the title."""
         if url.startswith("cmd:"):
             command = url[4:]  # Remove "cmd:" prefix
+            # Normalize Unicode fancy text (italic/bold/script) to plain ASCII
+            command = unicodedata.normalize("NFKC", command)
             self._input.setText(command)
             self._input.setFocus()
 
