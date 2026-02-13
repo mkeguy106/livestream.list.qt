@@ -62,6 +62,9 @@ class StreamlinkSettings:
     youtube_launch_method: LaunchMethod = LaunchMethod.YT_DLP
     kick_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
 
+    # Pass Twitch OAuth token to streamlink for Turbo/subscriber ad-free viewing
+    twitch_turbo: bool = False
+
 
 @dataclass
 class NotificationSettings:

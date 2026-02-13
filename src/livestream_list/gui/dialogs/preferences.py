@@ -424,6 +424,14 @@ class PreferencesDialog(QDialog):
         self.sl_args_edit.textChanged.connect(self._on_streamlink_changed)
         sl_layout.addRow("Arguments:", self.sl_args_edit)
 
+        self.twitch_turbo_cb = QCheckBox("Include Twitch OAuth for Turbo/subscriber benefits")
+        self.twitch_turbo_cb.setChecked(self.app.settings.streamlink.twitch_turbo)
+        if not self.app.settings.twitch.access_token:
+            self.twitch_turbo_cb.setEnabled(False)
+            self.twitch_turbo_cb.setToolTip("Login to Twitch in Accounts tab first")
+        self.twitch_turbo_cb.toggled.connect(self._on_streamlink_changed)
+        sl_layout.addRow("", self.twitch_turbo_cb)
+
         layout.addWidget(sl_group)
 
         # Player group
@@ -1059,6 +1067,13 @@ class PreferencesDialog(QDialog):
         self.twitch_import_btn.setVisible(is_logged_in)
         self.twitch_logout_btn.setVisible(is_logged_in)
 
+        # Update Twitch Turbo checkbox availability
+        self.twitch_turbo_cb.setEnabled(is_logged_in)
+        if is_logged_in:
+            self.twitch_turbo_cb.setToolTip("")
+        else:
+            self.twitch_turbo_cb.setToolTip("Login to Twitch in Accounts tab first")
+
         # Kick
         kick_logged_in = bool(self.app.settings.kick.access_token)
         self.kick_login_btn.setVisible(not kick_logged_in)
@@ -1208,6 +1223,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.streamlink.additional_args = self.sl_args_edit.text()
         self.app.settings.streamlink.player = self.player_path_edit.text()
         self.app.settings.streamlink.player_args = self.player_args_edit.text()
+        self.app.settings.streamlink.twitch_turbo = self.twitch_turbo_cb.isChecked()
         self.app.save_settings()
 
     def _on_launch_method_changed(self):
@@ -1401,6 +1417,7 @@ class PreferencesDialog(QDialog):
             self.sl_args_edit.setText(defaults.additional_args)
             self.player_path_edit.setText(defaults.player)
             self.player_args_edit.setText(defaults.player_args)
+            self.twitch_turbo_cb.setChecked(defaults.twitch_turbo)
             for combo, value in (
                 (self.twitch_launch_combo, defaults.twitch_launch_method.value),
                 (self.youtube_launch_combo, defaults.youtube_launch_method.value),

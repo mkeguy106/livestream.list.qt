@@ -59,18 +59,29 @@ def _validate_additional_args(args_str: str) -> list[str]:
 class StreamlinkLauncher:
     """Launches streams using streamlink."""
 
-    def __init__(self, settings: StreamlinkSettings) -> None:
+    def __init__(
+        self,
+        settings: StreamlinkSettings,
+        twitch_token: Callable[[], str] | None = None,
+    ) -> None:
         self.settings = settings
+        self._twitch_token = twitch_token
         # Track active streams: {channel_key: (process, livestream)}
         self._active_streams: dict[str, tuple[subprocess.Popen, Livestream]] = {}
         # Callbacks for when a stream stops
         self._on_stream_stopped: list[Callable[[str], None]] = []
+        # Callbacks for when a turbo-authenticated launch fails
+        self._on_turbo_auth_failed: list[Callable[[Livestream], None]] = []
         # Lock to protect _active_streams from concurrent access
         self._lock = threading.Lock()
 
     def on_stream_stopped(self, callback: Callable[[str], None]) -> None:
         """Register callback for when a stream stops playing."""
         self._on_stream_stopped.append(callback)
+
+    def on_turbo_auth_failed(self, callback: Callable[[Livestream], None]) -> None:
+        """Register callback for when a turbo-authenticated launch fails quickly."""
+        self._on_turbo_auth_failed.append(callback)
 
     def is_playing(self, channel_key: str) -> bool:
         """Check if a stream is currently playing."""
@@ -200,6 +211,16 @@ class StreamlinkLauncher:
         if self.settings.additional_args:
             cmd.extend(_validate_additional_args(self.settings.additional_args))
 
+        # Twitch Turbo: pass OAuth token for ad-free viewing
+        if (
+            self.settings.twitch_turbo
+            and livestream.channel.platform == StreamPlatform.TWITCH
+            and self._twitch_token
+        ):
+            token = self._twitch_token()
+            if token:
+                cmd.append(f"--twitch-api-header=Authorization=Bearer {token}")
+
         # Stream URL
         cmd.append(livestream.stream_url)
 
@@ -224,6 +245,20 @@ class StreamlinkLauncher:
         cmd.append(livestream.stream_url)
 
         return cmd
+
+    def _monitor_turbo_launch(self, process: subprocess.Popen, livestream: Livestream) -> None:
+        """Monitor a turbo-enabled launch for early failure (runs in daemon thread)."""
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            return  # Still running after 3s — stream is working
+        # Process exited almost immediately — likely auth rejection
+        logger.warning("Turbo-authenticated streamlink exited within 3s, likely auth failure")
+        for callback in self._on_turbo_auth_failed:
+            try:
+                callback(livestream)
+            except Exception as e:
+                logger.error(f"Turbo auth failed callback error: {e}")
 
     def _get_launch_method(self, platform: StreamPlatform) -> LaunchMethod:
         """Get the configured launch method for a platform."""
@@ -276,6 +311,19 @@ class StreamlinkLauncher:
             # Track this stream
             with self._lock:
                 self._active_streams[channel_key] = (process, livestream)
+
+            # Monitor turbo-enabled Twitch launches for early auth failure
+            if (
+                self.settings.twitch_turbo
+                and livestream.channel.platform == StreamPlatform.TWITCH
+                and launch_method == LaunchMethod.STREAMLINK
+            ):
+                threading.Thread(
+                    target=self._monitor_turbo_launch,
+                    args=(process, livestream),
+                    daemon=True,
+                ).start()
+
             return process
         except Exception as e:
             logger.error(f"Failed to launch stream: {e}")

@@ -200,6 +200,7 @@ class Application(QApplication):
     refresh_error = Signal(str)  # Error message for failed refreshes
     status_changed = Signal(str)
     open_stream_requested = Signal(object)  # Livestream - for notification Watch button
+    turbo_auth_failed = Signal(object)  # Livestream - streamlink turbo auth rejected
 
     def __init__(self, argv=None):
         super().__init__(argv or sys.argv)
@@ -273,7 +274,12 @@ class Application(QApplication):
 
         # Initialize core services
         self.monitor = StreamMonitor(self.settings)
-        self.streamlink = StreamlinkLauncher(self.settings.streamlink)
+        self.streamlink = StreamlinkLauncher(
+            self.settings.streamlink,
+            twitch_token=lambda: self.settings.twitch.access_token,
+        )
+        self.streamlink.on_turbo_auth_failed(lambda ls: self.turbo_auth_failed.emit(ls))
+        self.turbo_auth_failed.connect(self._on_turbo_auth_failed)
         self.notifier = Notifier(
             self.settings.notifications,
             on_open_stream=self._on_notification_watch_clicked,
@@ -509,6 +515,31 @@ class Application(QApplication):
             and self.settings.chat.mode == "builtin"
         ):
             self.open_builtin_chat(livestream)
+
+    def _on_turbo_auth_failed(self, livestream):
+        """Handle turbo-authenticated streamlink launch failure (main thread)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        msg = QMessageBox(self.main_window)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Streamlink Authentication Failed")
+        msg.setText(
+            f"Streamlink exited immediately for {livestream.channel.display_name}.\n\n"
+            "This is likely because the Twitch OAuth token was rejected by streamlink. "
+            "You can disable the Turbo authentication and retry."
+        )
+        disable_btn = msg.addButton(
+            "Disable Turbo && Retry", QMessageBox.ButtonRole.AcceptRole
+        )
+        msg.addButton("Close", QMessageBox.ButtonRole.RejectRole)
+        msg.exec()
+
+        if msg.clickedButton() == disable_btn:
+            self.settings.streamlink.twitch_turbo = False
+            self.save_settings()
+            self.streamlink.launch(livestream)
+            if self.main_window:
+                self.main_window.refresh_stream_list()
 
     def _check_processes(self):
         """Check for dead stream processes and update UI."""
