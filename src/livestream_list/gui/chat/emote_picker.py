@@ -263,8 +263,17 @@ class EmotePickerWidget(QWidget):
         Builds the first tab immediately for fast display, then defers
         remaining tabs via timer to keep the UI responsive.
         """
+        # Disconnect gif timer before destroying buttons to prevent
+        # _on_gif_tick from accessing stale C++ button pointers (SIGSEGV)
+        if self._gif_timer and self._gif_connected:
+            try:
+                self._gif_timer.tick.disconnect(self._on_gif_tick)
+            except Exception:
+                pass
+            self._gif_connected = False
         self._tabs.clear()
         self._all_buttons.clear()
+        self._animated_buttons.clear()
         self._build_timer.stop()
         self._scan_timer.stop()
 
@@ -516,20 +525,24 @@ class EmotePickerWidget(QWidget):
             try:
                 if not btn.isVisible():
                     continue
+                # Check if button is within the scroll viewport
+                btn_pos = btn.mapTo(viewport, btn.rect().topLeft())
+                if not vp_rect.intersects(btn.rect().translated(btn_pos)):
+                    continue
             except RuntimeError:
-                continue
-            # Check if button is within the scroll viewport
-            btn_pos = btn.mapTo(viewport, btn.rect().topLeft())
-            if not vp_rect.intersects(btn.rect().translated(btn_pos)):
+                # Button's C++ object was destroyed — skip it
                 continue
             frames = cache.get_frames(key)
             if not frames:
                 continue
             frame = self._pick_frame(frames, key)
             if frame:
-                btn.setIcon(QIcon(frame))
-                btn.setIconSize(icon_size)
-                btn.setText("")
+                try:
+                    btn.setIcon(QIcon(frame))
+                    btn.setIconSize(icon_size)
+                    btn.setText("")
+                except RuntimeError:
+                    continue
 
     def _pick_frame(self, frames: list[QPixmap], key: str) -> QPixmap | None:
         """Select the correct animation frame based on per-frame delays."""

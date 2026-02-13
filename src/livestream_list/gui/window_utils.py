@@ -11,6 +11,19 @@ from PySide6.QtWidgets import QMainWindow
 logger = logging.getLogger(__name__)
 
 
+def _is_flatpak() -> bool:
+    """Check if running inside a Flatpak sandbox."""
+    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
+
+
+def _qdbus6(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run qdbus6, wrapping with flatpak-spawn --host if in Flatpak."""
+    cmd = ["qdbus6", *args]
+    if _is_flatpak():
+        cmd = ["flatpak-spawn", "--host", *cmd]
+    return subprocess.run(cmd, **kwargs)
+
+
 def is_kde_plasma() -> bool:
     """Check if running on KDE Plasma (works for both X11 and Wayland)."""
     desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
@@ -21,6 +34,7 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
     """Use KWin scripting via D-Bus to set keepAbove on windows.
 
     This works on both KDE X11 and Wayland without recreating the window.
+    In Flatpak, qdbus6 runs on the host via flatpak-spawn.
     """
     titles = [w.windowTitle() for w in windows if w.isVisible()]
     if not titles:
@@ -34,21 +48,30 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
         "for (var i = 0; i < clients.length; i++) {\n"
         "    var c = clients[i];\n"
         f"    if ({conditions}) {{\n"
+        f'        console.log("LLQT AoT: matched [" + c.caption + "] keepAbove=" '
+        f'            + c.keepAbove + " -> {value}");\n'
         f"        c.keepAbove = {value};\n"
         "    }\n"
         "}\n"
     )
 
-    fd, script_path = tempfile.mkstemp(suffix=".js", prefix="llqt_aot_")
-    try:
+    if _is_flatpak():
+        # Flatpak: write to shared config dir so host-side KWin can read it
+        config_dir = os.path.expanduser("~/.config/livestream-list-qt")
+        os.makedirs(config_dir, exist_ok=True)
+        script_path = os.path.join(config_dir, "_kwin_aot.js")
+        with open(script_path, "w") as f:
+            f.write(script_content)
+    else:
+        fd, script_path = tempfile.mkstemp(suffix=".js", prefix="llqt_aot_")
         with os.fdopen(fd, "w") as f:
             f.write(script_content)
 
+    try:
         plugin_name = "llqt_always_on_top"
         # Unload any previous instance
-        subprocess.run(
+        _qdbus6(
             [
-                "qdbus6",
                 "org.kde.KWin",
                 "/Scripting",
                 "org.kde.kwin.Scripting.unloadScript",
@@ -58,9 +81,8 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
             timeout=3,
         )
         # Load and run the script
-        result = subprocess.run(
+        result = _qdbus6(
             [
-                "qdbus6",
                 "org.kde.KWin",
                 "/Scripting",
                 "org.kde.kwin.Scripting.loadScript",
@@ -72,8 +94,8 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
             text=True,
         )
         if result.returncode == 0:
-            subprocess.run(
-                ["qdbus6", "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
+            _qdbus6(
+                ["org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
                 capture_output=True,
                 timeout=3,
             )
@@ -93,9 +115,8 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
 def _kwin_unload_script(plugin_name: str) -> None:
     """Unload a KWin script by plugin name (cleanup)."""
     try:
-        subprocess.run(
+        _qdbus6(
             [
-                "qdbus6",
                 "org.kde.KWin",
                 "/Scripting",
                 "org.kde.kwin.Scripting.unloadScript",
