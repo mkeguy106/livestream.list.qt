@@ -2290,6 +2290,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
         spell_action.setChecked(self.settings.spellcheck_enabled)
         spell_action.toggled.connect(self._toggle_spellcheck)
 
+        # Autocorrect toggle
+        autocorrect_action = menu.addAction("Auto-Correct")
+        autocorrect_action.setCheckable(True)
+        autocorrect_action.setChecked(self.settings.autocorrect_enabled)
+        autocorrect_action.setEnabled(self.settings.spellcheck_enabled)
+        autocorrect_action.toggled.connect(self._toggle_autocorrect)
+        spell_action.toggled.connect(autocorrect_action.setEnabled)
+
         # User card hover toggle
         hover_action = menu.addAction("User Card on Hover")
         hover_action.setCheckable(True)
@@ -2364,6 +2372,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self.settings.spellcheck_enabled = checked
         self.set_spellcheck_enabled(checked)
         self.set_autocorrect_enabled(checked and self.settings.autocorrect_enabled)
+        self.settings_changed.emit()
+
+    def _toggle_autocorrect(self, checked: bool) -> None:
+        """Toggle autocorrect on the input field."""
+        self.settings.autocorrect_enabled = checked
+        self.set_autocorrect_enabled(checked and self.settings.spellcheck_enabled)
         self.settings_changed.emit()
 
     def _toggle_user_card_hover(self, checked: bool) -> None:

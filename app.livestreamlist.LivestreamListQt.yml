@@ -36,6 +36,14 @@ modules:
   - name: livestream-list-qt
     buildsystem: simple
     build-commands:
+      # KDE SDK ships versioned libhunspell in read-only /usr/lib — create symlink in writable /app/lib
+      - |
+        target=$(find /usr/lib* -name 'libhunspell*.so*' 2>/dev/null | head -1)
+        if [ -n "$target" ]; then
+          mkdir -p /app/lib
+          ln -sf "$target" /app/lib/libhunspell.so
+          echo "Created symlink: /app/lib/libhunspell.so -> $target"
+        fi
       - pip3 install --prefix=${FLATPAK_DEST} --no-cache-dir .
       - install -Dm644 data/app.livestreamlist.LivestreamListQt.desktop ${FLATPAK_DEST}/share/applications/app.livestreamlist.LivestreamListQt.desktop
       - install -Dm644 data/app.livestreamlist.LivestreamListQt.svg ${FLATPAK_DEST}/share/icons/hicolor/scalable/apps/app.livestreamlist.LivestreamListQt.svg

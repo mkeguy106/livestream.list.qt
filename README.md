@@ -51,7 +51,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - @mention autocomplete (type @ to suggest usernames)
   - @mention highlighting with tab flashing for notifications
   - Conversation view (click @mention or reply to see back-and-forth)
-  - Real-time spellcheck with custom dictionary and auto-correct
+  - Real-time spellcheck (hunspell) with custom dictionary and auto-correct
   - Chat scroll pause in busy channels (auto-resumes after 5 min)
   - Recent chat history on channel join (Twitch)
   - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")
@@ -113,6 +113,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 - Python 3.10+
 - PySide6 (Qt6)
+- hunspell + hunspell-en-us dictionary (spellcheck)
 - yt-dlp (bundled in Flatpak, for YouTube stream detection)
 - Streamlink (optional, for launching streams)
 - mpv (optional, default player)
