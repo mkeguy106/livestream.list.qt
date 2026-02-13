@@ -1019,7 +1019,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._input.add_completer(self._spell_completer)
             self._input.set_spell_checker(self._spell_checker, self._spell_completer)
         except ImportError:
-            logger.warning("pyspellchecker not installed, spellcheck disabled")
+            logger.warning("pyhunspell not installed, spellcheck disabled")
+        except (FileNotFoundError, OSError) as e:
+            logger.warning(f"Spellcheck unavailable: {e}")
 
     def set_spellcheck_enabled(self, enabled: bool) -> None:
         """Enable or disable spellcheck at runtime."""

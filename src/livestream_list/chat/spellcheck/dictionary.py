@@ -1,6 +1,7 @@
 """Custom dictionary management for spellcheck."""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 from ...core.settings import get_data_dir
@@ -21,7 +22,12 @@ class CustomDictionary:
         self._user_words: set[str] = set()
         self._emote_names: set[str] = set()
         self._usernames: set[str] = set()
+        self._on_words_added: Callable[[set[str]], None] | None = None
         self._load_user_words()
+
+    def set_on_words_added(self, callback: Callable[[set[str]], None]) -> None:
+        """Register a callback invoked when new words are added."""
+        self._on_words_added = callback
 
     @property
     def all_words(self) -> set[str]:
@@ -53,17 +59,29 @@ class CustomDictionary:
 
     def add_user_word(self, word: str) -> None:
         """Add a word to the user dictionary (persisted)."""
-        self._user_words.add(word.lower())
-        self._save_user_words()
+        lower = word.lower()
+        if lower not in self._user_words:
+            self._user_words.add(lower)
+            self._save_user_words()
+            if self._on_words_added:
+                self._on_words_added({lower})
 
     def set_emote_names(self, names: set[str]) -> None:
         """Replace the emote name set."""
-        self._emote_names = {n.lower() for n in names}
+        new_names = {n.lower() for n in names}
+        added = new_names - self._emote_names
+        self._emote_names = new_names
+        if added and self._on_words_added:
+            self._on_words_added(added)
 
     def add_username(self, name: str) -> None:
         """Add a username to the dynamic dictionary."""
         if name:
-            self._usernames.add(name.lower())
+            lower = name.lower()
+            if lower not in self._usernames:
+                self._usernames.add(lower)
+                if self._on_words_added:
+                    self._on_words_added({lower})
 
     def contains(self, word: str) -> bool:
         """Check if a word is in any custom dictionary layer."""
