@@ -274,9 +274,21 @@ class Application(QApplication):
 
         # Initialize core services
         self.monitor = StreamMonitor(self.settings)
+        # Extract browser auth-token if logged in but missing it
+        if (
+            self.settings.twitch.access_token
+            and not self.settings.twitch.browser_auth_token
+        ):
+            from .youtube_login import extract_twitch_auth_token
+
+            token = extract_twitch_auth_token()
+            if token:
+                self.settings.twitch.browser_auth_token = token
+                self.save_settings()
+
         self.streamlink = StreamlinkLauncher(
             self.settings.streamlink,
-            twitch_token=lambda: self.settings.twitch.access_token,
+            twitch_auth_token=lambda: self.settings.twitch.browser_auth_token,
         )
         self.streamlink.on_turbo_auth_failed(lambda ls: self.turbo_auth_failed.emit(ls))
         self.turbo_auth_failed.connect(self._on_turbo_auth_failed)

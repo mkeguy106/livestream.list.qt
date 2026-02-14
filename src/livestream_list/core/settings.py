@@ -63,7 +63,10 @@ class StreamlinkSettings:
     kick_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
 
     # Pass Twitch OAuth token to streamlink for Turbo/subscriber ad-free viewing
-    twitch_turbo: bool = False
+    twitch_turbo: bool = True
+
+    # Show a console window with streamlink/yt-dlp output
+    show_console: bool = False
 
 
 @dataclass
@@ -97,6 +100,7 @@ class TwitchSettings:
     access_token: str = ""
     refresh_token: str = ""
     login_name: str = ""  # Twitch username of the logged-in account
+    browser_auth_token: str = ""  # Browser auth-token cookie for streamlink Turbo
 
 
 @dataclass
@@ -327,6 +331,7 @@ class Settings:
             KEY_KICK_ACCESS_TOKEN,
             KEY_KICK_REFRESH_TOKEN,
             KEY_TWITCH_ACCESS_TOKEN,
+            KEY_TWITCH_BROWSER_AUTH_TOKEN,
             KEY_TWITCH_REFRESH_TOKEN,
             KEY_YOUTUBE_COOKIES,
             get_secret,
@@ -351,6 +356,7 @@ class Settings:
         if is_available():
             kr_twitch_at = get_secret(KEY_TWITCH_ACCESS_TOKEN)
             kr_twitch_rt = get_secret(KEY_TWITCH_REFRESH_TOKEN)
+            kr_twitch_bat = get_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN)
             kr_yt_cookies = get_secret(KEY_YOUTUBE_COOKIES)
             kr_kick_at = get_secret(KEY_KICK_ACCESS_TOKEN)
             kr_kick_rt = get_secret(KEY_KICK_REFRESH_TOKEN)
@@ -368,6 +374,12 @@ class Settings:
                 needs_resave = True
             elif kr_twitch_rt:
                 settings.twitch.refresh_token = kr_twitch_rt
+
+            if settings.twitch.browser_auth_token and not kr_twitch_bat:
+                store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, settings.twitch.browser_auth_token)
+                needs_resave = True
+            elif kr_twitch_bat:
+                settings.twitch.browser_auth_token = kr_twitch_bat
 
             if settings.youtube.cookies and not kr_yt_cookies:
                 store_secret(KEY_YOUTUBE_COOKIES, settings.youtube.cookies)
@@ -399,6 +411,7 @@ class Settings:
             KEY_KICK_ACCESS_TOKEN,
             KEY_KICK_REFRESH_TOKEN,
             KEY_TWITCH_ACCESS_TOKEN,
+            KEY_TWITCH_BROWSER_AUTH_TOKEN,
             KEY_TWITCH_REFRESH_TOKEN,
             KEY_YOUTUBE_COOKIES,
             is_available,
@@ -416,6 +429,7 @@ class Settings:
         if use_keyring:
             store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token)
             store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token)
+            store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, self.twitch.browser_auth_token)
             store_secret(KEY_YOUTUBE_COOKIES, self.youtube.cookies)
             store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token)
             store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token)
@@ -501,6 +515,7 @@ class Settings:
                 access_token=t.get("access_token", ""),
                 refresh_token=t.get("refresh_token", ""),
                 login_name=t.get("login_name", ""),
+                browser_auth_token=t.get("browser_auth_token", ""),
             )
 
         # YouTube
@@ -538,6 +553,8 @@ class Settings:
                 twitch_launch_method=LaunchMethod(s.get("twitch_launch_method", "streamlink")),
                 youtube_launch_method=LaunchMethod(s.get("youtube_launch_method", "yt-dlp")),
                 kick_launch_method=LaunchMethod(s.get("kick_launch_method", "streamlink")),
+                twitch_turbo=s.get("twitch_turbo", False),
+                show_console=s.get("show_console", False),
             )
 
         # Notifications
@@ -797,6 +814,7 @@ class Settings:
                     {
                         "access_token": self.twitch.access_token,
                         "refresh_token": self.twitch.refresh_token,
+                        "browser_auth_token": self.twitch.browser_auth_token,
                     }
                     if not exclude_secrets
                     else {}
@@ -832,6 +850,8 @@ class Settings:
                 "twitch_launch_method": self.streamlink.twitch_launch_method.value,
                 "youtube_launch_method": self.streamlink.youtube_launch_method.value,
                 "kick_launch_method": self.streamlink.kick_launch_method.value,
+                "twitch_turbo": self.streamlink.twitch_turbo,
+                "show_console": self.streamlink.show_console,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,

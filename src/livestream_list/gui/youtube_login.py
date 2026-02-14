@@ -961,3 +961,286 @@ def _extract_cookies_headless_flatpak(browser_id: str) -> tuple[str | None, str 
         return None, "No cookies were extracted"
 
     return cookie_string, None
+
+
+# ---------------------------------------------------------------------------
+# Twitch auth-token cookie extraction
+# ---------------------------------------------------------------------------
+
+_TWITCH_DOMAINS = {".twitch.tv", "twitch.tv"}
+
+
+def _read_twitch_firefox(db_path: str) -> str | None:
+    """Read auth-token cookie from a Firefox cookie database for .twitch.tv."""
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(tmp_fd)
+    try:
+        shutil.copy2(db_path, tmp_path)
+        conn = sqlite3.connect(tmp_path)
+        cursor = conn.cursor()
+        clauses = " OR ".join(f"host LIKE '%{d}'" for d in _TWITCH_DOMAINS)
+        cursor.execute(
+            f"SELECT value FROM moz_cookies WHERE name = 'auth-token' AND ({clauses})"  # noqa: S608
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0]:
+            return row[0]
+    except Exception as e:
+        logger.error(f"Failed to read Twitch cookie from Firefox: {e}")
+    finally:
+        os.unlink(tmp_path)
+    return None
+
+
+def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
+    """Read auth-token cookie from a Chromium cookie database for .twitch.tv."""
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".sqlite")
+    os.close(tmp_fd)
+    try:
+        key = _get_chromium_key(keyring_label)
+        shutil.copy2(db_path, tmp_path)
+        conn = sqlite3.connect(tmp_path)
+        cursor = conn.cursor()
+        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in _TWITCH_DOMAINS)
+        cursor.execute(
+            f"SELECT encrypted_value, value FROM cookies "  # noqa: S608
+            f"WHERE name = 'auth-token' AND ({clauses})"
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            encrypted_value, plain_value = row
+            if plain_value:
+                return plain_value
+            if encrypted_value:
+                decrypted = _decrypt_chromium_value(encrypted_value, key)
+                if decrypted:
+                    return decrypted
+    except Exception as e:
+        logger.error(f"Failed to read Twitch cookie from Chromium: {e}")
+    finally:
+        os.unlink(tmp_path)
+    return None
+
+
+def extract_twitch_auth_token() -> str | None:
+    """Extract the Twitch auth-token cookie from any available browser.
+
+    Tries all detected browsers and returns the first valid token found.
+    Returns None if no token could be found.
+    """
+    if _is_flatpak():
+        return _extract_twitch_auth_token_flatpak()
+
+    browsers = _detect_available_browsers()
+    for _browser_id, _display_name, browser_type, db_path, keyring_label in browsers:
+        try:
+            if browser_type == "firefox":
+                token = _read_twitch_firefox(db_path)
+            else:
+                token = _read_twitch_chromium(db_path, keyring_label)
+            if token:
+                logger.info(f"Found Twitch auth-token in {_display_name}")
+                return token
+        except Exception as e:
+            logger.debug(f"Could not read Twitch cookie from {_display_name}: {e}")
+    return None
+
+
+_TWITCH_HOST_SCRIPT = r"""
+import json
+import os
+import shutil
+import sqlite3
+import sys
+import tempfile
+import configparser
+
+TWITCH_DOMAINS = {".twitch.tv", "twitch.tv"}
+BROWSERS = [
+    ("chrome", "Google Chrome", "chromium",
+     [".config/google-chrome/Default/Cookies",
+      ".config/google-chrome/Profile 1/Cookies"],
+     "Chrome Safe Storage"),
+    ("chromium", "Chromium", "chromium",
+     [".config/chromium/Default/Cookies"], "Chromium Safe Storage"),
+    ("brave", "Brave", "chromium",
+     [".config/BraveSoftware/Brave-Browser/Default/Cookies"],
+     "Brave Safe Storage"),
+    ("vivaldi", "Vivaldi", "chromium",
+     [".config/vivaldi/Default/Cookies"], "Vivaldi Safe Storage"),
+    ("opera", "Opera", "chromium",
+     [".config/opera/Cookies"], "Opera Safe Storage"),
+    ("firefox", "Firefox", "firefox", [], ""),
+    ("librewolf", "LibreWolf", "firefox", [], ""),
+]
+
+def find_firefox_cookies(browser_id):
+    home = os.path.expanduser("~")
+    if browser_id == "firefox":
+        profiles_dir = os.path.join(home, ".mozilla/firefox")
+    elif browser_id == "librewolf":
+        profiles_dir = os.path.join(home, ".librewolf")
+    else:
+        return None
+    if not os.path.isdir(profiles_dir):
+        return None
+    profiles_ini = os.path.join(profiles_dir, "profiles.ini")
+    candidates = []
+    if os.path.exists(profiles_ini):
+        config = configparser.ConfigParser()
+        config.read(profiles_ini)
+        for section in config.sections():
+            if section.startswith("Install"):
+                path = config.get(section, "Default", fallback="")
+                if path:
+                    candidates.append(os.path.join(profiles_dir, path))
+        for section in config.sections():
+            if section.startswith("Profile"):
+                if config.get(section, "Default", fallback="0") == "1":
+                    path = config.get(section, "Path", fallback="")
+                    is_rel = config.get(section, "IsRelative", fallback="1") == "1"
+                    if path:
+                        full = os.path.join(profiles_dir, path) if is_rel else path
+                        if full not in candidates:
+                            candidates.append(full)
+    try:
+        for entry in sorted(os.listdir(profiles_dir)):
+            full = os.path.join(profiles_dir, entry)
+            if os.path.isdir(full) and (
+                entry.endswith(".default-release") or entry.endswith(".default")
+            ):
+                if full not in candidates:
+                    candidates.append(full)
+    except OSError:
+        pass
+    for profile_dir in candidates:
+        cookies_path = os.path.join(profile_dir, "cookies.sqlite")
+        if os.path.exists(cookies_path):
+            return cookies_path
+    return None
+
+def find_chromium_cookies(cookie_paths):
+    home = os.path.expanduser("~")
+    for rel_path in cookie_paths:
+        full = os.path.join(home, rel_path)
+        if os.path.exists(full):
+            return full
+    return None
+
+def read_firefox_token(db_path):
+    fd, tmp = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    try:
+        shutil.copy2(db_path, tmp)
+        conn = sqlite3.connect(tmp)
+        cur = conn.cursor()
+        clauses = " OR ".join(f"host LIKE '%{d}'" for d in TWITCH_DOMAINS)
+        cur.execute(f"SELECT value FROM moz_cookies WHERE name='auth-token' AND ({clauses})")
+        row = cur.fetchone()
+        conn.close()
+        if row and row[0]:
+            return row[0]
+    finally:
+        os.unlink(tmp)
+    return None
+
+import hashlib
+
+def read_chromium_token(db_path, keyring_label):
+    try:
+        password = None
+        try:
+            import secretstorage
+            connection = secretstorage.dbus_init()
+            collection = secretstorage.get_default_collection(connection)
+            if collection.is_locked():
+                collection.unlock()
+            for item in collection.get_all_items():
+                label = item.get_label()
+                if label == keyring_label or label.endswith(f"/{keyring_label}"):
+                    password = item.get_secret().decode("utf-8")
+                    break
+        except Exception:
+            pass
+        if password is None:
+            try:
+                import keyring as kr
+                browser_name = keyring_label.replace(" Safe Storage", "")
+                password = kr.get_password(keyring_label, browser_name)
+            except Exception:
+                pass
+        if password is None:
+            return None
+        key = hashlib.pbkdf2_hmac("sha1", password.encode("utf-8"), b"saltysalt", 1, dklen=16)
+    except Exception:
+        return None
+    fd, tmp = tempfile.mkstemp(suffix=".sqlite")
+    os.close(fd)
+    try:
+        shutil.copy2(db_path, tmp)
+        conn = sqlite3.connect(tmp)
+        cur = conn.cursor()
+        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in TWITCH_DOMAINS)
+        cur.execute(
+            f"SELECT encrypted_value, value FROM cookies "
+            f"WHERE name='auth-token' AND ({clauses})"
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row:
+            enc_val, plain_val = row
+            if plain_val:
+                return plain_val
+            if enc_val and enc_val[:3] in (b"v10", b"v11"):
+                version = enc_val[:3]
+                enc_val = enc_val[3:]
+                if len(enc_val) >= 16:
+                    from cryptography.hazmat.primitives.ciphers import (
+                        Cipher, algorithms, modes,
+                    )
+                    iv = b" " * 16
+                    cipher = Cipher(algorithms.AES(key), modes.CBC(iv))
+                    dec = cipher.decryptor()
+                    decrypted = dec.update(enc_val) + dec.finalize()
+                    if decrypted:
+                        pad_len = decrypted[-1]
+                        if 0 < pad_len <= 16:
+                            decrypted = decrypted[:-pad_len]
+                    if version == b"v11" and len(decrypted) > 32:
+                        decrypted = decrypted[32:]
+                    return decrypted.decode("utf-8", errors="replace")
+    finally:
+        os.unlink(tmp)
+    return None
+
+for bid, name, btype, paths, klabel in BROWSERS:
+    if btype == "firefox":
+        db = find_firefox_cookies(bid)
+        if db:
+            token = read_firefox_token(db)
+            if token:
+                print(json.dumps({"token": token}))
+                sys.exit(0)
+    else:
+        db = find_chromium_cookies(paths)
+        if db:
+            token = read_chromium_token(db, klabel)
+            if token:
+                print(json.dumps({"token": token}))
+                sys.exit(0)
+print(json.dumps({"token": None}))
+"""
+
+
+def _extract_twitch_auth_token_flatpak() -> str | None:
+    """Extract Twitch auth-token in Flatpak by running script on host."""
+    output = _run_on_host(["python3", "-c", _TWITCH_HOST_SCRIPT], timeout=15)
+    if not output:
+        return None
+    try:
+        result = json.loads(output)
+        return result.get("token")
+    except (json.JSONDecodeError, KeyError):
+        return None

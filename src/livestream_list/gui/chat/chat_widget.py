@@ -707,8 +707,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_train_banner = QWidget()
         self._hype_train_banner.setStyleSheet("""
             QWidget {
-                background-color: #2d1b69;
-                border: 1px solid #6441a5;
+                background-color: #3b1f8a;
+                border: 1px solid #9146ff;
                 border-radius: 4px;
             }
         """)
@@ -720,7 +720,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         ht_top.setSpacing(4)
         self._hype_train_level_label = QLabel()
         self._hype_train_level_label.setStyleSheet(
-            "color: #b9a3e3; font-size: 11px; font-weight: bold; border: none;"
+            "color: #d4b8ff; font-size: 12px; font-weight: bold; border: none;"
         )
         ht_top.addWidget(self._hype_train_level_label, 1)
         ht_dismiss = QPushButton("\u2715")
@@ -743,7 +743,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._hype_train_progress.setTextVisible(False)
         self._hype_train_progress.setStyleSheet("""
             QProgressBar {
-                background-color: #1a0f3d;
+                background-color: #231052;
                 border: none;
                 border-radius: 4px;
             }
@@ -755,7 +755,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         ht_outer.addWidget(self._hype_train_progress)
         # Countdown label
         self._hype_train_countdown = QLabel()
-        self._hype_train_countdown.setStyleSheet("color: #8b7ab8; font-size: 10px; border: none;")
+        self._hype_train_countdown.setStyleSheet("color: #b9a3e3; font-size: 11px; border: none;")
         ht_outer.addWidget(self._hype_train_countdown)
         self._hype_train_banner.hide()
         layout.addWidget(self._hype_train_banner)
@@ -1783,7 +1783,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._hype_train_auto_hide_timer.stop()
 
         if event.type in ("begin", "progress"):
-            self._hype_train_level_label.setText(f"Hype Train \u2014 Level {event.level}")
+            self._hype_train_level_label.setText(
+                f"\U0001f682 Hype Train \u2014 Level {event.level}"
+            )
             self._hype_train_progress.setMaximum(max(event.goal, 1))
             self._hype_train_progress.setValue(min(event.total, event.goal))
             self._hype_train_expires_at = event.expires_at
@@ -1792,7 +1794,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._hype_train_banner.show()
         elif event.type == "end":
             self._hype_train_timer.stop()
-            self._hype_train_level_label.setText(f"Hype Train Complete! Level {event.level}")
+            self._hype_train_level_label.setText(
+                f"\U0001f682 Hype Train Complete! Level {event.level}"
+            )
             self._hype_train_progress.setMaximum(1)
             self._hype_train_progress.setValue(1)
             self._hype_train_countdown.setText("")

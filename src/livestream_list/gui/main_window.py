@@ -173,6 +173,8 @@ class _WhisperBanner(QWidget):
 class MainWindow(QMainWindow):
     """Main application window."""
 
+    _console_requested = Signal(str, str, object)  # channel_key, channel_name, process
+
     def __init__(self, app: "Application"):
         super().__init__()
         self.app = app
@@ -185,6 +187,8 @@ class MainWindow(QMainWindow):
         self._chat_launcher = ChatLauncher(app.settings.chat)
         self._force_quit = False  # When True, closeEvent quits instead of minimizing
         self._last_clicked_index = None  # Anchor for shift+click range selection
+        self._console_windows: dict = {}  # channel_key -> StreamlinkConsoleWindow
+        self._console_requested.connect(self._open_console_window)
 
         # Debounce mechanism for refresh_stream_list to prevent rapid successive calls
         self._refresh_pending = False
@@ -1026,7 +1030,17 @@ class MainWindow(QMainWindow):
         # Launch in background
         def launch():
             try:
-                self.app.streamlink.launch(livestream)
+                process = self.app.streamlink.launch(livestream)
+                if (
+                    process
+                    and process.stdout
+                    and self.app.settings.streamlink.show_console
+                ):
+                    self._console_requested.emit(
+                        livestream.channel.unique_key,
+                        livestream.channel.display_name,
+                        process,
+                    )
                 # Open browser chat if auto-open enabled and in browser mode
                 if (
                     self.app.settings.chat.auto_open
@@ -1056,10 +1070,22 @@ class MainWindow(QMainWindow):
         name = livestream.channel.display_name
         QTimer.singleShot(1000, lambda: self.set_status(f"Playing {name}"))
 
+    def _open_console_window(self, channel_key: str, channel_name: str, process):
+        """Open a console window for streamlink output (called via signal on main thread)."""
+        from .streamlink_console import StreamlinkConsoleWindow
+
+        if channel_key in self._console_windows:
+            self._console_windows[channel_key].close()
+        console = StreamlinkConsoleWindow(channel_name, process)
+        self._console_windows[channel_key] = console
+        console.show()
+
     def _on_stop_stream(self, channel_key: str):
         """Handle stopping a stream."""
         if self.app.streamlink:
             self.app.streamlink.stop_stream(channel_key)
+            if channel_key in self._console_windows:
+                self._console_windows.pop(channel_key).close()
             self.refresh_stream_list()
             self.set_status("Playback stopped")
 

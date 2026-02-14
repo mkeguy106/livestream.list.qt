@@ -42,7 +42,7 @@ ruff format src/
 # Type check
 mypy src/
 
-# Run tests (currently empty)
+# Run tests
 pytest tests/
 
 # Run single test
@@ -180,6 +180,9 @@ Core architecture files (most other files follow patterns established in these):
 | `core/settings.py` | Settings persistence (JSON), all app preferences |
 | `core/theme_data.py` | Theme definitions, built-in themes, theme file I/O |
 | `api/twitch.py` | Twitch Helix + GraphQL client |
+| `core/credential_store.py` | Keyring-based secret storage (tokens, cookies) |
+| `core/streamlink.py` | StreamlinkLauncher, subprocess management, Turbo auth |
+| `gui/streamlink_console.py` | Console window for streamlink/yt-dlp output |
 
 All paths relative to `src/livestream_list/`.
 
@@ -218,6 +221,8 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | YouTube cookie auto-refresh loops | Guard flag `_yt_cookie_auto_refresh_attempted` must NOT reset in `reconnect_youtube()` — only one attempt per session |
 | Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
+| Twitch Turbo token "invalid" | Must use browser `auth-token` cookie (not OAuth access token) with `Authorization=OAuth` prefix. Token is client-ID-bound. |
+| Streamlink args dropping values like `debug` | `_validate_additional_args` must allow non-flag values after flags (e.g., `--loglevel debug`) |
 
 ## CI/CD - Self-Hosted Runner
 

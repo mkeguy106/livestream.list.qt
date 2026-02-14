@@ -43,16 +43,19 @@ def _validate_additional_args(args_str: str) -> list[str]:
         return []
 
     validated = []
+    prev_was_flag = False
     for arg in args:
-        # Allow args starting with - or --
-        # Also allow = in the middle of an arg (e.g., --player-args=foo)
         if arg.startswith("-"):
             validated.append(arg)
-        elif "=" in arg and not arg.startswith("="):
-            # This could be a value from a previous arg, skip validation
+            # Flag that takes a value (no =, so next arg is likely its value)
+            prev_was_flag = "=" not in arg
+        elif prev_was_flag:
+            # Value for the previous flag (e.g., "debug" after "--loglevel")
             validated.append(arg)
+            prev_was_flag = False
         else:
             logger.warning(f"Skipping invalid argument (must start with -): {arg}")
+            prev_was_flag = False
     return validated
 
 
@@ -62,10 +65,10 @@ class StreamlinkLauncher:
     def __init__(
         self,
         settings: StreamlinkSettings,
-        twitch_token: Callable[[], str] | None = None,
+        twitch_auth_token: Callable[[], str] | None = None,
     ) -> None:
         self.settings = settings
-        self._twitch_token = twitch_token
+        self._twitch_auth_token = twitch_auth_token
         # Track active streams: {channel_key: (process, livestream)}
         self._active_streams: dict[str, tuple[subprocess.Popen, Livestream]] = {}
         # Callbacks for when a stream stops
@@ -211,15 +214,15 @@ class StreamlinkLauncher:
         if self.settings.additional_args:
             cmd.extend(_validate_additional_args(self.settings.additional_args))
 
-        # Twitch Turbo: pass OAuth token for ad-free viewing
+        # Twitch Turbo: pass browser auth-token for ad-free viewing
         if (
             self.settings.twitch_turbo
             and livestream.channel.platform == StreamPlatform.TWITCH
-            and self._twitch_token
+            and self._twitch_auth_token
         ):
-            token = self._twitch_token()
+            token = self._twitch_auth_token()
             if token:
-                cmd.append(f"--twitch-api-header=Authorization=Bearer {token}")
+                cmd.extend(["--twitch-api-header", f"Authorization=OAuth {token}"])
 
         # Stream URL
         cmd.append(livestream.stream_url)
@@ -302,10 +305,16 @@ class StreamlinkLauncher:
             logger.info(f"Launching via streamlink: {' '.join(cmd)}")
 
         try:
+            if self.settings.show_console:
+                stdout_target = subprocess.PIPE
+                stderr_target = subprocess.STDOUT
+            else:
+                stdout_target = subprocess.DEVNULL
+                stderr_target = subprocess.DEVNULL
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=stdout_target,
+                stderr=stderr_target,
                 start_new_session=True,
             )
             # Track this stream

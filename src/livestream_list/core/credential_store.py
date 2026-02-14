@@ -16,6 +16,7 @@ SERVICE_NAME = "livestream-list-qt"
 # Keys for stored secrets
 KEY_TWITCH_ACCESS_TOKEN = "twitch_access_token"
 KEY_TWITCH_REFRESH_TOKEN = "twitch_refresh_token"
+KEY_TWITCH_BROWSER_AUTH_TOKEN = "twitch_browser_auth_token"
 KEY_YOUTUBE_COOKIES = "youtube_cookies"
 KEY_KICK_ACCESS_TOKEN = "kick_access_token"
 KEY_KICK_REFRESH_TOKEN = "kick_refresh_token"

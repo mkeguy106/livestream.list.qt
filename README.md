@@ -32,8 +32,9 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - First-launch prompt to choose behavior (quit or run in background)
 - **Launch on Startup** - Option to start automatically when you log in
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
-  - Twitch Turbo ad-free viewing (passes OAuth token to streamlink)
-  - Low-latency defaults for Twitch streams
+  - Console window for viewing streamlink/yt-dlp output in real-time
+  - Twitch Turbo ad-free viewing (auto-extracts browser auth-token, enabled by default)
+  - Low-latency defaults for Twitch and Kick streams
 - **Built-in Chat Client** - Native multi-channel chat with tabbed interface
   - Twitch and Kick chat with full emote and badge rendering
   - Emote support: Twitch, Kick native, 7TV, BTTV, FFZ

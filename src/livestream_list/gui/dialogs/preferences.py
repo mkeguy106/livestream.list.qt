@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -37,6 +38,8 @@ from .youtube_import import YouTubeImportDialog
 
 if TYPE_CHECKING:
     from ..app import Application
+
+logger = logging.getLogger(__name__)
 
 # UI style configurations
 UI_STYLES = {
@@ -431,6 +434,14 @@ class PreferencesDialog(QDialog):
             self.twitch_turbo_cb.setToolTip("Login to Twitch in Accounts tab first")
         self.twitch_turbo_cb.toggled.connect(self._on_streamlink_changed)
         sl_layout.addRow("", self.twitch_turbo_cb)
+
+        self.show_console_cb = QCheckBox("Show streamlink console output")
+        self.show_console_cb.setChecked(self.app.settings.streamlink.show_console)
+        self.show_console_cb.setToolTip(
+            "Open a window showing streamlink/yt-dlp output when launching a stream"
+        )
+        self.show_console_cb.toggled.connect(self._on_streamlink_changed)
+        sl_layout.addRow("", self.show_console_cb)
 
         layout.addWidget(sl_group)
 
@@ -1224,6 +1235,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.streamlink.player = self.player_path_edit.text()
         self.app.settings.streamlink.player_args = self.player_args_edit.text()
         self.app.settings.streamlink.twitch_turbo = self.twitch_turbo_cb.isChecked()
+        self.app.settings.streamlink.show_console = self.show_console_cb.isChecked()
         self.app.save_settings()
 
     def _on_launch_method_changed(self):
@@ -1418,6 +1430,7 @@ class PreferencesDialog(QDialog):
             self.player_path_edit.setText(defaults.player)
             self.player_args_edit.setText(defaults.player_args)
             self.twitch_turbo_cb.setChecked(defaults.twitch_turbo)
+            self.show_console_cb.setChecked(defaults.show_console)
             for combo, value in (
                 (self.twitch_launch_combo, defaults.twitch_launch_method.value),
                 (self.youtube_launch_combo, defaults.youtube_launch_method.value),
@@ -1487,6 +1500,16 @@ class PreferencesDialog(QDialog):
         self._update_twitch_status()
         self._update_account_buttons()
 
+        # Extract browser auth-token cookie for streamlink Turbo
+        if self.app.settings.twitch.access_token:
+            from ..youtube_login import extract_twitch_auth_token
+
+            token = extract_twitch_auth_token()
+            if token:
+                self.app.settings.twitch.browser_auth_token = token
+                self.app.save_settings()
+                logger.info("Extracted Twitch browser auth-token for streamlink")
+
         # Reconnect chat with new token/scopes
         if self.app.settings.twitch.access_token and self.app.chat_manager:
             self.app.chat_manager.reconnect_twitch()
@@ -1510,6 +1533,7 @@ class PreferencesDialog(QDialog):
         """Handle Twitch logout."""
         self.app.settings.twitch.access_token = None
         self.app.settings.twitch.user_id = None
+        self.app.settings.twitch.browser_auth_token = ""
         self.app.settings.twitch.login_name = ""
         self.app.save_settings()
         self._update_twitch_status()
