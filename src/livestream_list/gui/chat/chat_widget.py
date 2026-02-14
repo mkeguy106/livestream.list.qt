@@ -544,7 +544,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._slow_mode_timer.setInterval(1000)
         self._slow_mode_timer.timeout.connect(self._slow_mode_tick)
         self._title_refresh_timer = QTimer(self)
-        self._title_refresh_timer.setInterval(60_000)
+        self._title_refresh_timer.setInterval(30_000)
         self._title_refresh_timer.timeout.connect(self._update_stream_title)
         self._emotes_by_provider: dict[str, list] = {}
         self._channel_emote_names: set[str] = set()
