@@ -994,6 +994,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Connect scroll tracking
         scrollbar = self._list_view.verticalScrollBar()
         scrollbar.valueChanged.connect(self._on_scroll_changed)
+        scrollbar.rangeChanged.connect(self._on_scroll_range_changed)
 
         # Copy shortcut (Ctrl+C)
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self._list_view)
@@ -1771,6 +1772,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._new_msg_button.setText("New messages (5:00)")
             self._scroll_pause_timer.start()
             self._countdown_timer.start()
+
+    def _on_scroll_range_changed(self, _min: int, _max: int) -> None:
+        """Keep the view pinned to the bottom when content height changes."""
+        if self._auto_scroll and _max > 0:
+            self._list_view.scrollToBottom()
 
     def _dismiss_hype_banner(self) -> None:
         """Dismiss the hype chat pinned banner."""
