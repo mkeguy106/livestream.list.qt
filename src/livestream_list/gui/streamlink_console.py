@@ -32,10 +32,17 @@ class ProcessReaderThread(QThread):
 class StreamlinkConsoleWindow(QMainWindow):
     """Window displaying streamlink/yt-dlp console output for a stream."""
 
-    def __init__(self, channel_name: str, process: subprocess.Popen, parent=None):
+    def __init__(
+        self,
+        channel_name: str,
+        process: subprocess.Popen,
+        auto_close: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(f"Streamlink — {channel_name}")
         self.resize(600, 400)
+        self._auto_close = auto_close
 
         self._text = QPlainTextEdit()
         self._text.setReadOnly(True)
@@ -53,6 +60,8 @@ class StreamlinkConsoleWindow(QMainWindow):
 
     def _on_exit(self, exit_code: int):
         self._text.appendPlainText(f"\n--- Process exited with code {exit_code} ---")
+        if self._auto_close:
+            self.close()
 
     def closeEvent(self, event):  # noqa: N802
         self._reader.wait(2000)

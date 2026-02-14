@@ -443,6 +443,14 @@ class PreferencesDialog(QDialog):
         self.show_console_cb.toggled.connect(self._on_streamlink_changed)
         sl_layout.addRow("", self.show_console_cb)
 
+        self.auto_close_console_cb = QCheckBox("Auto-close console when stream ends")
+        self.auto_close_console_cb.setChecked(self.app.settings.streamlink.auto_close_console)
+        self.auto_close_console_cb.setToolTip(
+            "Automatically close the console window when the streamlink process exits"
+        )
+        self.auto_close_console_cb.toggled.connect(self._on_streamlink_changed)
+        sl_layout.addRow("", self.auto_close_console_cb)
+
         layout.addWidget(sl_group)
 
         # Player group
@@ -1236,6 +1244,7 @@ class PreferencesDialog(QDialog):
         self.app.settings.streamlink.player_args = self.player_args_edit.text()
         self.app.settings.streamlink.twitch_turbo = self.twitch_turbo_cb.isChecked()
         self.app.settings.streamlink.show_console = self.show_console_cb.isChecked()
+        self.app.settings.streamlink.auto_close_console = self.auto_close_console_cb.isChecked()
         self.app.save_settings()
 
     def _on_launch_method_changed(self):
@@ -1431,6 +1440,7 @@ class PreferencesDialog(QDialog):
             self.player_args_edit.setText(defaults.player_args)
             self.twitch_turbo_cb.setChecked(defaults.twitch_turbo)
             self.show_console_cb.setChecked(defaults.show_console)
+            self.auto_close_console_cb.setChecked(defaults.auto_close_console)
             for combo, value in (
                 (self.twitch_launch_combo, defaults.twitch_launch_method.value),
                 (self.youtube_launch_combo, defaults.youtube_launch_method.value),

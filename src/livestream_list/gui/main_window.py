@@ -1076,8 +1076,10 @@ class MainWindow(QMainWindow):
 
         if channel_key in self._console_windows:
             self._console_windows[channel_key].close()
-        console = StreamlinkConsoleWindow(channel_name, process)
+        auto_close = self.app.settings.streamlink.auto_close_console
+        console = StreamlinkConsoleWindow(channel_name, process, auto_close=auto_close)
         self._console_windows[channel_key] = console
+        console.destroyed.connect(lambda _key=channel_key: self._console_windows.pop(_key, None))
         console.show()
 
     def _on_stop_stream(self, channel_key: str):
@@ -1392,6 +1394,10 @@ class MainWindow(QMainWindow):
             # Close the chat window if it's open
             if hasattr(self.app, "_chat_window") and self.app._chat_window:
                 self.app._chat_window.close()
+            # Close all streamlink console windows
+            for console in list(self._console_windows.values()):
+                console.close()
+            self._console_windows.clear()
             # Save window geometry before quitting
             self._save_window_geometry()
             event.accept()

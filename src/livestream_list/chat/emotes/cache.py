@@ -588,6 +588,25 @@ class EmoteCache(QObject):
         raw_path = self._cache_dir / raw_filename
         return _is_nonempty_file(raw_path)
 
+    def is_emote_animated(self, key: str) -> bool | None:
+        """Check if an emote is actually animated.
+
+        Returns True if animated, False if static, None if unknown.
+        """
+        if key in self._animated:
+            return True
+        if key in self._no_animation:
+            return False
+        raw_filename = _cache_key_to_raw_filename(key)
+        raw_path = self._cache_dir / raw_filename
+        if _is_nonempty_file(raw_path):
+            try:
+                data = raw_path.read_bytes()
+                return _is_animated(data)
+            except OSError:
+                pass
+        return None
+
     def request_animation_frames(self, key: str) -> None:
         """Decode animation frames in the background if raw data is available."""
         if key in self._animated:

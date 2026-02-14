@@ -426,13 +426,14 @@ class EmotePickerWidget(QWidget):
                 emote.image_set = image_set
                 image_ref = image_set.get_image_or_loaded(scale=scale)
                 if image_ref:
-                    is_animated = cache.has_animation_data(image_ref.key)
-                    if filter_idx == 1 and not is_animated:
-                        btn.setVisible(False)
-                        continue
-                    if filter_idx == 2 and is_animated:
-                        btn.setVisible(False)
-                        continue
+                    is_animated = cache.is_emote_animated(image_ref.key)
+                    if is_animated is not None:
+                        if filter_idx == 1 and not is_animated:
+                            btn.setVisible(False)
+                            continue
+                        if filter_idx == 2 and is_animated:
+                            btn.setVisible(False)
+                            continue
 
             btn.setVisible(True)
 

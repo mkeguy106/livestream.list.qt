@@ -68,6 +68,9 @@ class StreamlinkSettings:
     # Show a console window with streamlink/yt-dlp output
     show_console: bool = False
 
+    # Auto-close the console window when the process exits
+    auto_close_console: bool = True
+
 
 @dataclass
 class NotificationSettings:
@@ -555,6 +558,7 @@ class Settings:
                 kick_launch_method=LaunchMethod(s.get("kick_launch_method", "streamlink")),
                 twitch_turbo=s.get("twitch_turbo", False),
                 show_console=s.get("show_console", False),
+                auto_close_console=s.get("auto_close_console", True),
             )
 
         # Notifications
@@ -852,6 +856,7 @@ class Settings:
                 "kick_launch_method": self.streamlink.kick_launch_method.value,
                 "twitch_turbo": self.streamlink.twitch_turbo,
                 "show_console": self.streamlink.show_console,
+                "auto_close_console": self.streamlink.auto_close_console,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,
