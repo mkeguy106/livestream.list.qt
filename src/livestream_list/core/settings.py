@@ -72,6 +72,10 @@ class StreamlinkSettings:
     # Auto-close the console window when the process exits
     auto_close_console: bool = True
 
+    # Record streams to disk while watching
+    record_streams: bool = False
+    record_directory: str = ""
+
 
 @dataclass
 class NotificationSettings:
@@ -560,6 +564,8 @@ class Settings:
                 twitch_turbo=s.get("twitch_turbo", False),
                 show_console=s.get("show_console", False),
                 auto_close_console=s.get("auto_close_console", True),
+                record_streams=s.get("record_streams", False),
+                record_directory=s.get("record_directory", ""),
             )
 
         # Notifications
@@ -858,6 +864,8 @@ class Settings:
                 "twitch_turbo": self.streamlink.twitch_turbo,
                 "show_console": self.streamlink.show_console,
                 "auto_close_console": self.streamlink.auto_close_console,
+                "record_streams": self.streamlink.record_streams,
+                "record_directory": self.streamlink.record_directory,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,

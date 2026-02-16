@@ -3,11 +3,13 @@
 import asyncio
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import threading
 from collections.abc import Callable
+from datetime import datetime, timezone
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
 from .settings import StreamlinkSettings
@@ -223,6 +225,17 @@ class StreamlinkLauncher:
             token = self._twitch_auth_token()
             if token:
                 cmd.extend(["--twitch-api-header", f"Authorization=OAuth {token}"])
+
+        # Record to disk
+        if self.settings.record_streams and self.settings.record_directory:
+            record_dir = os.path.expanduser(self.settings.record_directory)
+            if os.path.isdir(record_dir):
+                # Safe filename: ChannelName_2026-02-16_14-30-00.ts
+                safe_name = re.sub(r'[^\w\-.]', '_', livestream.channel.display_name)
+                timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"{safe_name}_{timestamp}.ts"
+                record_path = os.path.join(record_dir, filename)
+                cmd.extend(["--record", record_path])
 
         # Stream URL
         cmd.append(livestream.stream_url)

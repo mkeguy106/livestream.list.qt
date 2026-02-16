@@ -446,6 +446,11 @@ class TwitchChatConnection(BaseChatConnection):
         user_id = tags.get("user-id", "")
         display_name = tags.get("display-name", "")
         username = parsed["prefix"].split("!")[0] if "!" in parsed["prefix"] else ""
+
+        # Skip our own messages — we already create a local echo in ChatManager.send_message()
+        if self._nick and username == self._nick:
+            return
+
         color = tags.get("color", None)
         badges = parse_badges(tags.get("badges", ""))
 

@@ -471,6 +471,31 @@ class PreferencesDialog(QDialog):
 
         layout.addWidget(player_group)
 
+        # Recording group
+        record_group = QGroupBox("Recording")
+        record_layout = QFormLayout(record_group)
+
+        self.record_streams_cb = QCheckBox("Record streams to disk")
+        self.record_streams_cb.setChecked(self.app.settings.streamlink.record_streams)
+        self.record_streams_cb.setToolTip(
+            "Save a copy of the stream to disk while watching (streamlink only)"
+        )
+        self.record_streams_cb.toggled.connect(self._on_streamlink_changed)
+        record_layout.addRow("", self.record_streams_cb)
+
+        dir_row = QHBoxLayout()
+        self.record_dir_edit = QLineEdit()
+        self.record_dir_edit.setText(self.app.settings.streamlink.record_directory)
+        self.record_dir_edit.setPlaceholderText("Select a directory...")
+        self.record_dir_edit.textChanged.connect(self._on_streamlink_changed)
+        dir_row.addWidget(self.record_dir_edit)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_record_directory)
+        dir_row.addWidget(browse_btn)
+        record_layout.addRow("Save to:", dir_row)
+
+        layout.addWidget(record_group)
+
         # Launch Method group (per-platform)
         launch_group = QGroupBox("Launch Method")
         launch_layout = QFormLayout(launch_group)
@@ -1245,7 +1270,16 @@ class PreferencesDialog(QDialog):
         self.app.settings.streamlink.twitch_turbo = self.twitch_turbo_cb.isChecked()
         self.app.settings.streamlink.show_console = self.show_console_cb.isChecked()
         self.app.settings.streamlink.auto_close_console = self.auto_close_console_cb.isChecked()
+        self.app.settings.streamlink.record_streams = self.record_streams_cb.isChecked()
+        self.app.settings.streamlink.record_directory = self.record_dir_edit.text()
         self.app.save_settings()
+
+    def _on_browse_record_directory(self):
+        directory = QFileDialog.getExistingDirectory(
+            self, "Select Recording Directory", self.record_dir_edit.text()
+        )
+        if directory:
+            self.record_dir_edit.setText(directory)
 
     def _on_launch_method_changed(self):
         from ...core.models import LaunchMethod
@@ -1441,6 +1475,8 @@ class PreferencesDialog(QDialog):
             self.twitch_turbo_cb.setChecked(defaults.twitch_turbo)
             self.show_console_cb.setChecked(defaults.show_console)
             self.auto_close_console_cb.setChecked(defaults.auto_close_console)
+            self.record_streams_cb.setChecked(defaults.record_streams)
+            self.record_dir_edit.setText(defaults.record_directory)
             for combo, value in (
                 (self.twitch_launch_combo, defaults.twitch_launch_method.value),
                 (self.youtube_launch_combo, defaults.youtube_launch_method.value),

@@ -181,7 +181,7 @@ Core architecture files (most other files follow patterns established in these):
 | `core/theme_data.py` | Theme definitions, built-in themes, theme file I/O |
 | `api/twitch.py` | Twitch Helix + GraphQL client |
 | `core/credential_store.py` | Keyring-based secret storage (tokens, cookies) |
-| `core/streamlink.py` | StreamlinkLauncher, subprocess management, Turbo auth |
+| `core/streamlink.py` | StreamlinkLauncher, subprocess management, Turbo auth, recording |
 | `gui/streamlink_console.py` | Console window for streamlink/yt-dlp output, auto-close on exit |
 
 All paths relative to `src/livestream_list/`.
