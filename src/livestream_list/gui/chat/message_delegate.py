@@ -538,11 +538,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
             sys_text = message.system_text
             sys_width = QFontMetrics(italic_font).horizontalAdvance(sys_text)
             remaining = available_width - (x - rect.x())
-            painter.drawText(x, y, remaining, line_height * 2, ALIGN_WRAP, sys_text)
+            sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+            painter.drawText(x, y, remaining, line_height * sys_lines, ALIGN_WRAP, sys_text)
             painter.setFont(font)
             # If there's user text, move to next line
             if message.text:
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
                 y += line_height * sys_lines
                 x = rect.x()
             else:
@@ -1056,13 +1056,16 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Prefix width (timestamp + badges + username)
         prefix_width = 0
+        ts_width_only = 0
         if self.settings.show_timestamps:
             ts_font = QFont(font)
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            prefix_width += (
+            ts_w = (
                 QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
                 + TIMESTAMP_PADDING
             )
+            prefix_width += ts_w
+            ts_width_only = ts_w
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
             badge_count = 0
             for b in message.user.badges:
@@ -1117,12 +1120,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
             extra_reply_height = QFontMetrics(reply_font).height() + 2
 
         # System messages need extra lines for system_text
+        # System text is drawn after timestamp only (before badges/username), so use ts_width_only
         extra_lines = 0
         if message.is_system and message.system_text:
             sys_font = QFont(font)
             sys_font.setItalic(True)
             sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-            sys_available = max(available_width - prefix_width, 200)
+            sys_available = max(available_width - ts_width_only, 200)
             extra_lines = max(1, int(sys_width / sys_available) + 1) if sys_available > 0 else 1
             if not message.text:
                 lines = 0  # Only system text, no user message line

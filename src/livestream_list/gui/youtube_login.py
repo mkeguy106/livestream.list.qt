@@ -1,8 +1,7 @@
 """YouTube cookie import from installed browsers.
 
-Reads cookies directly from browser SQLite databases on Linux.
-- Firefox: unencrypted SQLite
-- Chromium-based: AES-CBC encrypted, key from system keyring
+Uses yt-dlp for cookie extraction (handles Firefox encryption and Chromium decryption).
+Falls back to direct SQLite reading if yt-dlp extraction fails.
 
 In Flatpak, runs the extraction on the host via flatpak-spawn.
 """
@@ -403,8 +402,39 @@ def _detect_available_browsers() -> list[tuple[str, str, str, str, str]]:
     return available
 
 
-def _extract_cookies(browser_type: str, db_path: str, keyring_label: str) -> dict[str, str]:
-    """Extract cookies from a browser's cookie database."""
+def _read_cookies_via_ytdlp(browser_name: str) -> dict[str, str]:
+    """Extract cookies using yt-dlp (handles Firefox encryption and Chromium decryption)."""
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+
+        jar = extract_cookies_from_browser(browser_name)
+        cookies: dict[str, str] = {}
+        for cookie in jar:
+            if any(cookie.domain.endswith(d) for d in (".youtube.com", ".google.com")):
+                if cookie.name and cookie.value:
+                    cookies[cookie.name] = cookie.value
+        return cookies
+    except Exception as e:
+        logger.debug(f"yt-dlp cookie extraction failed for {browser_name}: {e}")
+        return {}
+
+
+def _extract_cookies(
+    browser_type: str, db_path: str, keyring_label: str, browser_id: str = ""
+) -> dict[str, str]:
+    """Extract cookies from a browser's cookie database.
+
+    Tries yt-dlp first (handles encrypted cookies), falls back to direct SQLite.
+    """
+    # Map browser_id/type to yt-dlp browser name
+    ytdlp_name = browser_id or ("firefox" if browser_type == "firefox" else "chrome")
+    cookies = _read_cookies_via_ytdlp(ytdlp_name)
+    if cookies and REQUIRED_COOKIE_KEYS.issubset(cookies.keys()):
+        logger.info(f"Extracted {len(cookies)} cookies via yt-dlp ({ytdlp_name})")
+        return cookies
+
+    # Fallback to direct SQLite reading
+    logger.info(f"yt-dlp extraction insufficient, falling back to direct SQLite ({browser_type})")
     if browser_type == "firefox":
         return _read_firefox_cookies(db_path)
     else:
@@ -830,11 +860,11 @@ def import_cookies_from_browser(parent: QWidget) -> tuple[str, str] | None:
     if not browser_info:
         return None
 
-    _, display_name, browser_type, db_path, keyring_label = browser_info
+    browser_id_info, display_name, browser_type, db_path, keyring_label = browser_info
 
     # Extract cookies
     try:
-        cookie_dict = _extract_cookies(browser_type, db_path, keyring_label)
+        cookie_dict = _extract_cookies(browser_type, db_path, keyring_label, browser_id_info)
     except DecryptionKeyError as e:
         QMessageBox.warning(
             parent,
@@ -903,10 +933,10 @@ def extract_cookies_headless(browser_id: str) -> tuple[str | None, str | None]:
     if not browser_info:
         return None, f"Browser '{browser_id}' not found or has no cookie store"
 
-    _, display_name, browser_type, db_path, keyring_label = browser_info
+    bid, display_name, browser_type, db_path, keyring_label = browser_info
 
     try:
-        cookie_dict = _extract_cookies(browser_type, db_path, keyring_label)
+        cookie_dict = _extract_cookies(browser_type, db_path, keyring_label, bid)
     except DecryptionKeyError as e:
         return None, str(e)
     except Exception as e:
@@ -1024,6 +1054,20 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
     return None
 
 
+def _read_twitch_token_via_ytdlp(browser_name: str) -> str | None:
+    """Extract Twitch auth-token using yt-dlp (handles Firefox encryption)."""
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+
+        jar = extract_cookies_from_browser(browser_name)
+        for cookie in jar:
+            if cookie.name == "auth-token" and cookie.domain.endswith(".twitch.tv"):
+                return cookie.value
+    except Exception as e:
+        logger.debug(f"yt-dlp Twitch cookie extraction failed for {browser_name}: {e}")
+    return None
+
+
 def extract_twitch_auth_token() -> str | None:
     """Extract the Twitch auth-token cookie from any available browser.
 
@@ -1036,6 +1080,12 @@ def extract_twitch_auth_token() -> str | None:
     browsers = _detect_available_browsers()
     for _browser_id, _display_name, browser_type, db_path, keyring_label in browsers:
         try:
+            # Try yt-dlp first (handles encrypted Firefox cookies)
+            token = _read_twitch_token_via_ytdlp(_browser_id)
+            if token:
+                logger.info(f"Found Twitch auth-token in {_display_name} via yt-dlp")
+                return token
+            # Fallback to direct SQLite reading
             if browser_type == "firefox":
                 token = _read_twitch_firefox(db_path)
             else:
