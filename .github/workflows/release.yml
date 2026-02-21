@@ -10,10 +10,34 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────
-  # Job 1: Build Flatpak on self-hosted Linux runner
+  # Job 1: Create a draft release (both build jobs upload to it)
+  # ──────────────────────────────────────────────
+  create-release:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Livestream List Qt v${{ steps.version.outputs.VERSION }}
+          draft: true
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ──────────────────────────────────────────────
+  # Job 2: Build Flatpak on self-hosted Linux runner
   # ──────────────────────────────────────────────
   build-flatpak:
     name: Build Flatpak (Linux)
+    needs: create-release
     runs-on: [self-hosted, linux, x64, docker]
 
     steps:
@@ -26,16 +50,11 @@ jobs:
 
       - name: Build Flatpak in Docker
         run: |
-          # Docker-in-Docker: volume mounts don't work because paths are relative to host
-          # Use docker cp instead to copy files into/out of container
-
-          # Create container (don't start yet)
           CONTAINER_ID=$(docker create --privileged \
             -w /workspace \
             ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
             bash -c "
               set -e
-              # Create machine-id for D-Bus (required by flatpak-builder)
               dbus-uuidgen > /etc/machine-id
               echo 'Contents of /workspace:'
               ls -la /workspace/
@@ -46,30 +65,24 @@ jobs:
             ")
 
           echo "Container ID: $CONTAINER_ID"
-
-          # Copy workspace into container
           docker cp "${{ github.workspace }}/." "$CONTAINER_ID:/workspace/"
-
-          # Start container and wait for completion
           docker start -a "$CONTAINER_ID"
-
-          # Copy flatpak out of container
           docker cp "$CONTAINER_ID:/workspace/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak"
-
-          # Clean up container
           docker rm "$CONTAINER_ID"
 
-      - name: Upload Flatpak artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload Flatpak to release
+        uses: softprops/action-gh-release@v1
         with:
-          name: flatpak
-          path: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+          files: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # Job 2: Build Windows installer on GitHub-hosted runner
+  # Job 3: Build Windows installer on GitHub-hosted runner
   # ──────────────────────────────────────────────
   build-windows:
     name: Build Windows Installer
+    needs: create-release
     runs-on: windows-latest
 
     steps:
@@ -109,39 +122,26 @@ jobs:
         run: |
           "%ProgramFiles(x86)%\Inno Setup 6\iscc.exe" /DAppVersion=${{ steps.version.outputs.VERSION }} installer\livestream-list-qt.iss
 
-      - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload installer to release
+        uses: softprops/action-gh-release@v1
         with:
-          name: windows-installer
-          path: dist/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
+          files: dist/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # Job 3: Create GitHub Release with both artifacts
+  # Job 4: Publish release (undraft) after both builds succeed
   # ──────────────────────────────────────────────
-  release:
-    name: Create Release
+  publish-release:
+    name: Publish Release
     needs: [build-flatpak, build-windows]
     runs-on: ubuntu-latest
-
     steps:
       - name: Get version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Livestream List Qt v${{ steps.version.outputs.VERSION }}
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-          files: |
-            artifacts/flatpak/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
-            artifacts/windows-installer/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
-          generate_release_notes: true
+      - name: Publish release
+        run: gh release edit "v${{ steps.version.outputs.VERSION }}" --draft=false --repo "${{ github.repository }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
