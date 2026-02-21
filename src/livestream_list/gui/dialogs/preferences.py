@@ -219,10 +219,13 @@ class PreferencesDialog(QDialog):
         notif_layout.addRow(self.notif_sound_cb)
 
         # Notification backend selector
+        from ...core.platform import IS_WINDOWS
+
         self.notif_backend_combo = QComboBox()
         self.notif_backend_combo.addItem("Auto", "auto")
         self.notif_backend_combo.addItem("D-Bus", "dbus")
-        self.notif_backend_combo.addItem("notify-send", "notify-send")
+        if not IS_WINDOWS:
+            self.notif_backend_combo.addItem("notify-send", "notify-send")
         current_backend = self.app.settings.notifications.backend
         for i in range(self.notif_backend_combo.count()):
             if self.notif_backend_combo.itemData(i) == current_backend:

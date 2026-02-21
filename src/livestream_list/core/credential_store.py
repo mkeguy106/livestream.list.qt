@@ -8,6 +8,7 @@ Falls back to settings.json storage if keyring is unavailable.
 import logging
 import os
 import stat
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,12 @@ def is_available() -> bool:
 
 
 def secure_file_permissions(filepath: str) -> None:
-    """Set file permissions to owner-only (chmod 600) as fallback protection."""
+    """Set file permissions to owner-only (chmod 600) as fallback protection.
+
+    Skipped on Windows where chmod only supports the read-only flag.
+    """
+    if sys.platform == "win32":
+        return
     try:
         os.chmod(filepath, stat.S_IRUSR | stat.S_IWUSR)
     except OSError as e:

@@ -1,27 +1,15 @@
 """Chat launcher for opening stream chat in browser."""
 
 import logging
-import os
 import shutil
 import subprocess
 import webbrowser
 
 from .models import StreamPlatform
+from .platform import IS_FLATPAK, IS_WINDOWS, host_command
 from .settings import ChatSettings
 
 logger = logging.getLogger(__name__)
-
-
-def is_flatpak() -> bool:
-    """Check if running inside a Flatpak sandbox."""
-    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
-
-
-def host_command(cmd: list[str]) -> list[str]:
-    """Wrap command to run on host if inside Flatpak."""
-    if is_flatpak():
-        return ["flatpak-spawn", "--host"] + cmd
-    return cmd
 
 
 # Chat URL templates by platform
@@ -35,12 +23,20 @@ KICK_CHAT_URL = "https://kick.com/popout/{channel}/chat"
 YOUTUBE_CHAT_URL = "https://www.youtube.com/live_chat?v={video_id}"
 
 # Browser executable names by platform
-BROWSER_COMMANDS = {
-    "chrome": ["google-chrome", "google-chrome-stable", "chrome"],
-    "chromium": ["chromium", "chromium-browser"],
-    "edge": ["microsoft-edge", "microsoft-edge-stable", "msedge"],
-    "firefox": ["firefox"],
-}
+if IS_WINDOWS:
+    BROWSER_COMMANDS = {
+        "chrome": ["chrome", "google-chrome"],
+        "chromium": ["chromium"],
+        "edge": ["msedge", "microsoft-edge"],
+        "firefox": ["firefox"],
+    }
+else:
+    BROWSER_COMMANDS = {
+        "chrome": ["google-chrome", "google-chrome-stable", "chrome"],
+        "chromium": ["chromium", "chromium-browser"],
+        "edge": ["microsoft-edge", "microsoft-edge-stable", "msedge"],
+        "firefox": ["firefox"],
+    }
 
 
 class ChatLauncher:
@@ -78,7 +74,7 @@ class ChatLauncher:
 
         commands = BROWSER_COMMANDS.get(browser, [])
         for cmd in commands:
-            if is_flatpak():
+            if IS_FLATPAK:
                 # Check on host system via flatpak-spawn
                 try:
                     result = subprocess.run(
@@ -114,7 +110,7 @@ class ChatLauncher:
 
         try:
             # For Flatpak with new_window, we need to call browser directly via host
-            if is_flatpak() and self.settings.new_window:
+            if IS_FLATPAK and self.settings.new_window:
                 # Try to find a browser to use with --new-window
                 browser_to_use = None
                 if browser != "default":
@@ -165,7 +161,7 @@ class ChatLauncher:
                     if self.settings.new_window:
                         cmd.append("--new-window")
                     cmd.append(url)
-                    cmd = host_command(cmd) if is_flatpak() else cmd
+                    cmd = host_command(cmd) if IS_FLATPAK else cmd
                     subprocess.Popen(
                         cmd,
                         stdout=subprocess.DEVNULL,

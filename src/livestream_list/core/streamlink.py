@@ -12,21 +12,10 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
+from .platform import IS_FLATPAK, IS_WINDOWS, host_command
 from .settings import StreamlinkSettings
 
 logger = logging.getLogger(__name__)
-
-
-def is_flatpak() -> bool:
-    """Check if running inside a Flatpak sandbox."""
-    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
-
-
-def host_command(cmd: list[str]) -> list[str]:
-    """Wrap command to run on host if inside Flatpak."""
-    if is_flatpak():
-        return ["flatpak-spawn", "--host"] + cmd
-    return cmd
 
 
 def _validate_additional_args(args_str: str) -> list[str]:
@@ -163,7 +152,7 @@ class StreamlinkLauncher:
 
     def is_available(self) -> bool:
         """Check if streamlink is installed and accessible."""
-        if is_flatpak():
+        if IS_FLATPAK:
             # Check on host system via flatpak-spawn
             try:
                 result = subprocess.run(
@@ -231,7 +220,7 @@ class StreamlinkLauncher:
             record_dir = os.path.expanduser(self.settings.record_directory)
             if os.path.isdir(record_dir):
                 # Safe filename: ChannelName_2026-02-16_14-30-00.ts
-                safe_name = re.sub(r'[^\w\-.]', '_', livestream.channel.display_name)
+                safe_name = re.sub(r"[^\w\-.]", "_", livestream.channel.display_name)
                 timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H-%M-%S")
                 filename = f"{safe_name}_{timestamp}.ts"
                 record_path = os.path.join(record_dir, filename)
@@ -324,11 +313,18 @@ class StreamlinkLauncher:
             else:
                 stdout_target = subprocess.DEVNULL
                 stderr_target = subprocess.DEVNULL
+            popen_kwargs: dict = {}
+            if IS_WINDOWS:
+                popen_kwargs["creationflags"] = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+                )
+            else:
+                popen_kwargs["start_new_session"] = True
             process = subprocess.Popen(
                 cmd,
                 stdout=stdout_target,
                 stderr=stderr_target,
-                start_new_session=True,
+                **popen_kwargs,
             )
             # Track this stream
             with self._lock:
@@ -369,11 +365,14 @@ class StreamlinkLauncher:
         logger.info(f"Launching: {' '.join(cmd)}")
 
         try:
+            async_kwargs: dict = {}
+            if not IS_WINDOWS:
+                async_kwargs["start_new_session"] = True
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
-                start_new_session=True,
+                **async_kwargs,
             )
             return process
         except Exception as e:

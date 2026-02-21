@@ -8,18 +8,15 @@ import tempfile
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QMainWindow
 
+from ..core.platform import IS_FLATPAK
+
 logger = logging.getLogger(__name__)
-
-
-def _is_flatpak() -> bool:
-    """Check if running inside a Flatpak sandbox."""
-    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
 
 
 def _qdbus6(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     """Run qdbus6, wrapping with flatpak-spawn --host if in Flatpak."""
     cmd = ["qdbus6", *args]
-    if _is_flatpak():
+    if IS_FLATPAK:
         cmd = ["flatpak-spawn", "--host", *cmd]
     return subprocess.run(cmd, **kwargs)
 
@@ -55,7 +52,7 @@ def kwin_set_keep_above(windows: list[QMainWindow], on_top: bool) -> None:
         "}\n"
     )
 
-    if _is_flatpak():
+    if IS_FLATPAK:
         # Flatpak: write to shared config dir so host-side KWin can read it
         config_dir = os.path.expanduser("~/.config/livestream-list-qt")
         os.makedirs(config_dir, exist_ok=True)

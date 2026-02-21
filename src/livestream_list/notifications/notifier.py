@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from ..core.models import Livestream
+from ..core.platform import IS_FLATPAK, IS_WINDOWS
 from ..core.settings import NotificationSettings
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,15 @@ class Notifier:
             sound_path: Path to a sound file, or None to play the system default.
         """
         try:
+            if IS_WINDOWS:
+                import winsound
+
+                if sound_path and os.path.isfile(sound_path):
+                    winsound.PlaySound(sound_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                else:
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                return
+
             if sound_path and os.path.isfile(sound_path):
                 # Custom sound file — play directly
                 for player_cmd in [
@@ -303,7 +313,7 @@ class Notifier:
         body = "\n".join(body_parts) if body_parts else "Stream is now live"
 
         # Check if running in flatpak
-        is_flatpak = os.path.exists("/.flatpak-info")
+        is_flatpak = IS_FLATPAK
 
         # Use notify-send (via flatpak-spawn if in sandbox)
         if is_flatpak:
@@ -360,7 +370,7 @@ class Notifier:
         title = f"Raid on {channel_name}!"
         body = f"{raider_name} raided with {viewer_count:,} viewers"
 
-        is_flatpak = os.path.exists("/.flatpak-info")
+        is_flatpak = IS_FLATPAK
         if is_flatpak:
             cmd = [
                 "flatpak-spawn",
@@ -400,6 +410,11 @@ class Notifier:
         if custom and os.path.isfile(custom):
             self._play_sound(custom)
             return
+        if IS_WINDOWS:
+            import winsound
+
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+            return
         # Default: freedesktop bell sound
         for path in [
             "/usr/share/sounds/freedesktop/stereo/bell.oga",
@@ -432,7 +447,7 @@ class Notifier:
         title = f"@mention in {channel_name}"
         body = f"{sender_name}: {text_preview[:100]}"
 
-        is_flatpak = os.path.exists("/.flatpak-info")
+        is_flatpak = IS_FLATPAK
         if is_flatpak:
             cmd = [
                 "flatpak-spawn",
@@ -466,7 +481,7 @@ class Notifier:
         title = "@mention in Test Channel"
         body = "TestUser: hey @you check this out!"
 
-        is_flatpak = os.path.exists("/.flatpak-info")
+        is_flatpak = IS_FLATPAK
         if is_flatpak:
             cmd = [
                 "flatpak-spawn",

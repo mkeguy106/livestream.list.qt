@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import sys
 from pathlib import Path
 
 import hunspell
@@ -21,6 +22,17 @@ _DICT_SEARCH_PATHS = [
     "/usr/share/myspell/dicts",
     "/app/share/hunspell",  # Flatpak
 ]
+
+# PyInstaller bundled dictionaries
+if hasattr(sys, "_MEIPASS"):
+    _DICT_SEARCH_PATHS.insert(0, os.path.join(sys._MEIPASS, "hunspell"))
+
+# Windows: dictionaries next to the executable
+if sys.platform == "win32":
+    _exe_dir = os.path.dirname(sys.executable)
+    _DICT_SEARCH_PATHS.insert(0, os.path.join(_exe_dir, "hunspell"))
+    # Also check beside the package source (dev installs)
+    _DICT_SEARCH_PATHS.insert(0, str(Path(__file__).parent.parent.parent.parent / "hunspell"))
 
 
 def _find_hunspell_dict(lang: str = "en_US") -> tuple[str, str]:
@@ -61,8 +73,8 @@ def _damerau_levenshtein(a: str, b: str) -> int:
         for j in range(len_b):
             cost = 0 if a[i] == b[j] else 1
             d[i, j] = min(
-                d[i - 1, j] + 1,      # deletion
-                d[i, j - 1] + 1,      # insertion
+                d[i - 1, j] + 1,  # deletion
+                d[i, j - 1] + 1,  # insertion
                 d[i - 1, j - 1] + cost,  # substitution
             )
             # Transposition

@@ -13,6 +13,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 
 from PySide6.QtWidgets import (
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ..core.platform import IS_FLATPAK
 
 logger = logging.getLogger(__name__)
 
@@ -61,63 +64,124 @@ COOKIE_DOMAINS = {".youtube.com", ".google.com", "youtube.com", "google.com"}
 
 # Browser definitions: (id, display_name, type, cookie_paths, keyring_label)
 # type is "chromium" or "firefox"
-_BROWSERS = [
-    (
-        "chrome",
-        "Google Chrome",
-        "chromium",
-        [".config/google-chrome/Default/Cookies", ".config/google-chrome/Profile 1/Cookies"],
-        "Chrome Safe Storage",
-    ),
-    (
-        "chromium",
-        "Chromium",
-        "chromium",
-        [".config/chromium/Default/Cookies"],
-        "Chromium Safe Storage",
-    ),
-    (
-        "brave",
-        "Brave",
-        "chromium",
-        [".config/BraveSoftware/Brave-Browser/Default/Cookies"],
-        "Brave Safe Storage",
-    ),
-    (
-        "vivaldi",
-        "Vivaldi",
-        "chromium",
-        [".config/vivaldi/Default/Cookies"],
-        "Vivaldi Safe Storage",
-    ),
-    (
-        "opera",
-        "Opera",
-        "chromium",
-        [".config/opera/Cookies"],
-        "Opera Safe Storage",
-    ),
-    (
-        "firefox",
-        "Firefox",
-        "firefox",
-        [],  # Firefox uses profiles, handled separately
-        "",
-    ),
-    (
-        "librewolf",
-        "LibreWolf",
-        "firefox",
-        [],  # Uses profiles like Firefox
-        "",
-    ),
-]
+if sys.platform == "win32":
+    _LOCAL = os.environ.get("LOCALAPPDATA", "")
+    _BROWSERS = [
+        (
+            "chrome",
+            "Google Chrome",
+            "chromium",
+            [
+                os.path.join(_LOCAL, r"Google\Chrome\User Data\Default\Cookies"),
+                os.path.join(_LOCAL, r"Google\Chrome\User Data\Profile 1\Cookies"),
+            ],
+            "",
+        ),
+        (
+            "edge",
+            "Microsoft Edge",
+            "chromium",
+            [os.path.join(_LOCAL, r"Microsoft\Edge\User Data\Default\Cookies")],
+            "",
+        ),
+        (
+            "brave",
+            "Brave",
+            "chromium",
+            [os.path.join(_LOCAL, r"BraveSoftware\Brave-Browser\User Data\Default\Cookies")],
+            "",
+        ),
+        (
+            "vivaldi",
+            "Vivaldi",
+            "chromium",
+            [os.path.join(_LOCAL, r"Vivaldi\User Data\Default\Cookies")],
+            "",
+        ),
+        (
+            "opera",
+            "Opera",
+            "chromium",
+            [os.path.join(os.environ.get("APPDATA", ""), r"Opera Software\Opera Stable\Cookies")],
+            "",
+        ),
+        (
+            "firefox",
+            "Firefox",
+            "firefox",
+            [],  # Firefox uses profiles, handled separately
+            "",
+        ),
+    ]
+else:
+    _BROWSERS = [
+        (
+            "chrome",
+            "Google Chrome",
+            "chromium",
+            [
+                ".config/google-chrome/Default/Cookies",
+                ".config/google-chrome/Profile 1/Cookies",
+            ],
+            "Chrome Safe Storage",
+        ),
+        (
+            "chromium",
+            "Chromium",
+            "chromium",
+            [".config/chromium/Default/Cookies"],
+            "Chromium Safe Storage",
+        ),
+        (
+            "brave",
+            "Brave",
+            "chromium",
+            [".config/BraveSoftware/Brave-Browser/Default/Cookies"],
+            "Brave Safe Storage",
+        ),
+        (
+            "vivaldi",
+            "Vivaldi",
+            "chromium",
+            [".config/vivaldi/Default/Cookies"],
+            "Vivaldi Safe Storage",
+        ),
+        (
+            "opera",
+            "Opera",
+            "chromium",
+            [".config/opera/Cookies"],
+            "Opera Safe Storage",
+        ),
+        (
+            "firefox",
+            "Firefox",
+            "firefox",
+            [],  # Firefox uses profiles, handled separately
+            "",
+        ),
+        (
+            "librewolf",
+            "LibreWolf",
+            "firefox",
+            [],  # Uses profiles like Firefox
+            "",
+        ),
+    ]
 
 
 def _find_firefox_cookies(browser_id: str) -> str | None:
     """Find the cookies.sqlite file for Firefox or LibreWolf."""
     home = os.path.expanduser("~")
-    if browser_id == "firefox":
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "")
+        if browser_id == "firefox":
+            profiles_dir = os.path.join(appdata, r"Mozilla\Firefox\Profiles")
+        elif browser_id == "librewolf":
+            profiles_dir = os.path.join(appdata, r"LibreWolf\Profiles")
+        else:
+            return None
+    elif browser_id == "firefox":
         profiles_dir = os.path.join(home, ".mozilla/firefox")
     elif browser_id == "librewolf":
         profiles_dir = os.path.join(home, ".librewolf")
@@ -179,8 +243,9 @@ def _find_firefox_cookies(browser_id: str) -> str | None:
 def _find_chromium_cookies(cookie_paths: list[str]) -> str | None:
     """Find the first existing Chromium cookie database."""
     home = os.path.expanduser("~")
-    for rel_path in cookie_paths:
-        full = os.path.join(home, rel_path)
+    for path in cookie_paths:
+        # On Windows, paths in _BROWSERS are already absolute
+        full = path if os.path.isabs(path) else os.path.join(home, path)
         if os.path.exists(full):
             return full
     return None
@@ -483,7 +548,7 @@ class BrowserSelectDialog(QDialog):
 
 def _is_flatpak() -> bool:
     """Check if running inside a Flatpak sandbox."""
-    return os.path.exists("/.flatpak-info") or "FLATPAK_ID" in os.environ
+    return IS_FLATPAK
 
 
 # Self-contained Python script run on the host via flatpak-spawn.

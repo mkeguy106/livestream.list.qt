@@ -9,8 +9,11 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and Release
+  # ──────────────────────────────────────────────
+  # Job 1: Build Flatpak on self-hosted Linux runner
+  # ──────────────────────────────────────────────
+  build-flatpak:
+    name: Build Flatpak (Linux)
     runs-on: [self-hosted, linux, x64, docker]
 
     steps:
@@ -56,13 +59,98 @@ jobs:
           # Clean up container
           docker rm "$CONTAINER_ID"
 
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+
+  # ──────────────────────────────────────────────
+  # Job 2: Build Windows installer on GitHub-hosted runner
+  # ──────────────────────────────────────────────
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e .
+
+      - name: Download yt-dlp.exe
+        shell: pwsh
+        run: |
+          $ytdlpUrl = (Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").assets |
+            Where-Object { $_.name -eq "yt-dlp.exe" } |
+            Select-Object -ExpandProperty browser_download_url
+          Invoke-WebRequest -Uri $ytdlpUrl -OutFile yt-dlp.exe
+          Write-Host "Downloaded yt-dlp.exe"
+
+      - name: Download hunspell en_US dictionaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path hunspell | Out-Null
+          $baseUrl = "https://raw.githubusercontent.com/wooorm/dictionaries/main/dictionaries/en"
+          Invoke-WebRequest -Uri "$baseUrl/index.dic" -OutFile hunspell/en_US.dic
+          Invoke-WebRequest -Uri "$baseUrl/index.aff" -OutFile hunspell/en_US.aff
+          Write-Host "Downloaded hunspell dictionaries"
+
+      - name: Build with PyInstaller
+        run: pyinstaller livestream-list-qt.spec --noconfirm
+
+      - name: Build installer with Inno Setup
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Inno Setup 6\iscc.exe" /DAppVersion=${{ steps.version.outputs.VERSION }} installer\livestream-list-qt.iss
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
+
+  # ──────────────────────────────────────────────
+  # Job 3: Create GitHub Release with both artifacts
+  # ──────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: [build-flatpak, build-windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           name: Livestream List Qt v${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          files: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+          files: |
+            artifacts/flatpak/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
+            artifacts/windows-installer/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

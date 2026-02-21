@@ -72,7 +72,7 @@ src/livestream_list/
 │   ├── manager.py        # ChatManager - orchestrates connections, emotes, EventSub, routing
 │   ├── models.py         # ChatMessage, ChatUser, ChatEmote, ChatBadge dataclasses
 │   └── chat_log_store.py # JSONL/text per-channel logging with disk rotation
-├── core/                 # Data models, settings, theme definitions, monitor, streamlink
+├── core/                 # Data models, settings, theme definitions, monitor, streamlink, platform detection
 ├── gui/
 │   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, delegate, emote picker, etc.)
 │   ├── dialogs/          # Preferences, theme editor, add channel, import/export dialogs
@@ -184,6 +184,7 @@ Core architecture files (most other files follow patterns established in these):
 | `core/settings.py` | Settings persistence (JSON), all app preferences |
 | `core/theme_data.py` | Theme definitions, built-in themes, theme file I/O |
 | `api/twitch.py` | Twitch Helix + GraphQL client |
+| `core/platform.py` | Platform detection (`IS_WINDOWS`, `IS_LINUX`, `IS_FLATPAK`, `host_command()`) |
 | `core/credential_store.py` | Keyring-based secret storage (tokens, cookies) |
 | `core/streamlink.py` | StreamlinkLauncher, subprocess management, Turbo auth, recording |
 | `gui/streamlink_console.py` | Console window for streamlink/yt-dlp output, auto-close on exit |
@@ -196,15 +197,38 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 
 ### Configuration Paths
 
+**Linux:**
 - Settings: `~/.config/livestream-list-qt/settings.json`
 - Channels: `~/.config/livestream-list-qt/channels.json`
 - Data dir: `~/.local/share/livestream-list-qt/`
+
+**Windows:**
+- Settings: `%APPDATA%\livestream-list-qt\livestream-list-qt\settings.json`
+- Channels: `%APPDATA%\livestream-list-qt\livestream-list-qt\channels.json`
+- Data dir: `%LOCALAPPDATA%\livestream-list-qt\livestream-list-qt\`
 
 ### Key Data Structures
 
 - **Channel**: `channel_id`, `platform` (enum), `display_name`, `favorite`, `dont_notify`, `added_at`, `imported_by`
 - **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `start_time`, `last_live_time`, `video_id` (YouTube), `chatroom_id` (Kick), `thumbnail_url`
 - **unique_key**: `"{platform}:{channel_id}"` - used as dict key throughout
+
+### Windows Support
+
+Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX`, `IS_FLATPAK`, `host_command()`). Files with platform conditionals:
+
+| File | Windows behaviour |
+|------|-------------------|
+| `core/autostart.py` | Registry key (`HKCU\...\Run`) instead of `.desktop` file |
+| `core/chat.py` | Windows browser executable names (`chrome`, `msedge`) |
+| `core/streamlink.py` | `CREATE_NEW_PROCESS_GROUP \| CREATE_NO_WINDOW` instead of `start_new_session` |
+| `core/credential_store.py` | Skips `os.chmod(0o600)` on Windows |
+| `chat/spellcheck/checker.py` | Bundled hunspell dictionaries via `sys._MEIPASS` or exe-relative path |
+| `notifications/notifier.py` | `winsound` for sound playback instead of `paplay` |
+| `gui/youtube_login.py` | Windows browser cookie paths (`%LOCALAPPDATA%`, `%APPDATA%`) |
+| `gui/dialogs/preferences.py` | Hides "notify-send" notification backend option |
+
+**Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe` and hunspell `en_US` dictionaries. Users install streamlink and mpv separately.
 
 ## Known Pitfalls
 
@@ -229,12 +253,22 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | Streamlink args dropping values like `debug` | `_validate_additional_args` must allow non-flag values after flags (e.g., `--loglevel debug`) |
 | Streamlink `--record-and-play` doesn't exist | Use `--record PATH` (plays AND records when a player is configured). `--record-and-play` is not a valid flag; `--record-and-pipe` (`-R`) exists but is deprecated. |
 | Twitch shows own messages twice | `TwitchChatConnection` must skip messages from `self._nick` since `ChatManager.send_message()` creates a local echo (Twitch IRC doesn't echo back, but if it does, skip it) |
+| `start_new_session=True` on Windows | Use `creationflags=CREATE_NEW_PROCESS_GROUP \| CREATE_NO_WINDOW` instead (see `core/streamlink.py`) |
+| `os.chmod(0o600)` on Windows | No-op on Windows — skip with `IS_WINDOWS` guard (see `core/credential_store.py`) |
+| `notify-send` on Windows | Doesn't exist — `desktop-notifier` handles Windows toast notifications. Hidden from Preferences backend list. |
+| PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
 
-## CI/CD - Self-Hosted Runner
+## CI/CD
 
-Releases use a self-hosted GitHub Actions runner on `docker01.dd.local`.
+The release workflow (`.github/workflows/release.yml`) runs 3 jobs on tag push (`v*`):
 
-**Runner location**: `docker01.dd.local:/share/bsv/docker-compose/github-runner/`
+1. **build-flatpak** — Self-hosted Linux runner (`docker01.dd.local`), builds Flatpak in Docker
+2. **build-windows** — GitHub-hosted `windows-latest`, builds PyInstaller exe + Inno Setup installer
+3. **release** — Collects both artifacts and creates the GitHub Release
+
+**Flatpak runner location**: `docker01.dd.local:/share/bsv/docker-compose/github-runner/`
+
+**Windows build files**: `livestream-list-qt.spec` (PyInstaller), `installer/livestream-list-qt.iss` (Inno Setup)
 
 ### Troubleshooting Release Builds
 
