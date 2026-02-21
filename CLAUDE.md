@@ -223,6 +223,8 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
 | Twitch Turbo token "invalid" | Must use browser `auth-token` cookie (not OAuth access token) with `Authorization=OAuth` prefix. Token is client-ID-bound. |
 | Streamlink args dropping values like `debug` | `_validate_additional_args` must allow non-flag values after flags (e.g., `--loglevel debug`) |
+| Streamlink `--record-and-play` doesn't exist | Use `--record PATH` (plays AND records when a player is configured). `--record-and-play` is not a valid flag; `--record-and-pipe` (`-R`) exists but is deprecated. |
+| Twitch shows own messages twice | `TwitchChatConnection` must skip messages from `self._nick` since `ChatManager.send_message()` creates a local echo (Twitch IRC doesn't echo back, but if it does, skip it) |
 
 ## CI/CD - Self-Hosted Runner
 

@@ -78,6 +78,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def _load_theme_colors(self) -> None:
         """Load colors from the current theme."""
         theme = get_theme()
+        self._text_primary_color = QColor(theme.text_primary)
         self._url_color = QColor(theme.chat_url)
         self._url_color_selected = QColor(theme.chat_url_selected)
         self._system_message_color = QColor(theme.chat_system_message)
@@ -647,7 +648,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         elif message.is_action:
             painter.setPen(user_color)
         else:
-            painter.setPen(option.palette.text().color())
+            painter.setPen(self._text_primary_color)
 
         # Truncated mode: replace text with "<message deleted>"
         if message.is_moderated and mod_display == "truncated":

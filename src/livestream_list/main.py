@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Main entry point for Livestream List."""
 
+import faulthandler
 import logging
 import sys
+
+# Print Python traceback on SIGSEGV/SIGFPE/SIGABRT instead of silently crashing
+faulthandler.enable()
 
 
 def setup_logging() -> None:
