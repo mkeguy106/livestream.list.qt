@@ -83,6 +83,10 @@ src/livestream_list/
 └── notifications/        # Desktop notification integration
 ```
 
+### Crash Diagnostics
+
+`faulthandler` is enabled in `main.py` at startup. On SIGSEGV/SIGFPE/SIGABRT, Python prints a traceback to stderr instead of silently crashing. This is always-on and zero-cost unless a crash occurs.
+
 ### Threading Model (Critical)
 
 Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a QThread subclass that runs async coroutines in a background thread, creating its own event loop. It emits `finished(object)`, `error(str)`, and `progress(str, str)` signals.
