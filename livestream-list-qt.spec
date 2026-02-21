@@ -6,8 +6,8 @@ import sys
 
 block_cipher = None
 
-# Paths
-SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
+# Paths — SPECPATH is the directory containing the .spec file
+SPEC_DIR = SPECPATH
 SRC_DIR = os.path.join(SPEC_DIR, "src", "livestream_list")
 DATA_DIR = os.path.join(SPEC_DIR, "data")
 
