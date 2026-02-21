@@ -228,7 +228,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `gui/youtube_login.py` | Windows browser cookie paths (`%LOCALAPPDATA%`, `%APPDATA%`) |
 | `gui/dialogs/preferences.py` | Hides "notify-send" notification backend option |
 
-**Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe` and hunspell `en_US` dictionaries. Users install streamlink and mpv separately.
+**Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe`. Spellcheck unavailable on Windows (`hunspell` C extension is Linux-only). Users install streamlink and mpv separately.
 
 ## Known Pitfalls
 
@@ -256,6 +256,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `start_new_session=True` on Windows | Use `creationflags=CREATE_NEW_PROCESS_GROUP \| CREATE_NO_WINDOW` instead (see `core/streamlink.py`) |
 | `os.chmod(0o600)` on Windows | No-op on Windows — skip with `IS_WINDOWS` guard (see `core/credential_store.py`) |
 | `notify-send` on Windows | Doesn't exist — `desktop-notifier` handles Windows toast notifications. Hidden from Preferences backend list. |
+| `hunspell` package on Windows | C extension can't compile — `hunspell` is Linux-only in pyproject.toml. Spellcheck gracefully disabled on Windows. |
 | PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
 
 ## CI/CD

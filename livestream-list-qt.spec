@@ -19,11 +19,6 @@ datas = [
     (DATA_DIR, "data"),
 ]
 
-# Hunspell dictionaries (downloaded during CI)
-hunspell_dir = os.path.join(SPEC_DIR, "hunspell")
-if os.path.isdir(hunspell_dir):
-    datas.append((hunspell_dir, "hunspell"))
-
 # Bundled yt-dlp.exe (downloaded during CI)
 ytdlp_exe = os.path.join(SPEC_DIR, "yt-dlp.exe")
 if os.path.isfile(ytdlp_exe):
@@ -42,7 +37,6 @@ a = Analysis(
         "pydantic_settings",
         "pytchat",
         "aiohttp",
-        "hunspell",
     ],
     hookspath=[],
     hooksconfig={},

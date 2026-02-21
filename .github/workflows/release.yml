@@ -101,15 +101,6 @@ jobs:
           Invoke-WebRequest -Uri $ytdlpUrl -OutFile yt-dlp.exe
           Write-Host "Downloaded yt-dlp.exe"
 
-      - name: Download hunspell en_US dictionaries
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path hunspell | Out-Null
-          $baseUrl = "https://raw.githubusercontent.com/wooorm/dictionaries/main/dictionaries/en"
-          Invoke-WebRequest -Uri "$baseUrl/index.dic" -OutFile hunspell/en_US.dic
-          Invoke-WebRequest -Uri "$baseUrl/index.aff" -OutFile hunspell/en_US.aff
-          Write-Host "Downloaded hunspell dictionaries"
-
       - name: Build with PyInstaller
         run: pyinstaller livestream-list-qt.spec --noconfirm
 
