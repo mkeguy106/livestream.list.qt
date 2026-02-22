@@ -411,6 +411,9 @@ class PreferencesDialog(QDialog):
 
     def _create_streamlink_tab(self) -> QWidget:
         """Create the Streamlink settings tab."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -546,7 +549,8 @@ class PreferencesDialog(QDialog):
         layout.addWidget(reset_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
         layout.addStretch()
-        return widget
+        scroll.setWidget(widget)
+        return scroll
 
     def _create_chat_tab(self) -> QWidget:
         """Create the Chat settings tab."""

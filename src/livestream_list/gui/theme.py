@@ -429,8 +429,8 @@ def get_app_stylesheet() -> str:
         QGroupBox {{
             border: 1px solid {theme.border};
             border-radius: 4px;
-            margin-top: 8px;
-            padding-top: 8px;
+            margin-top: 16px;
+            padding-top: 14px;
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
@@ -557,6 +557,9 @@ def get_app_stylesheet() -> str:
             background-color: {theme.popup_bg};
             color: {theme.text_primary};
             border: 1px solid {theme.border};
+        }}
+        QMenu::item {{
+            padding: 4px 16px 4px 8px;
         }}
         QMenu::item:selected {{
             background-color: {theme.selection_bg};

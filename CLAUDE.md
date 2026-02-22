@@ -12,6 +12,8 @@ Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-
 
 ## Development Commands
 
+### Linux
+
 ```bash
 # Install (editable mode)
 python -m venv .venv
@@ -29,7 +31,31 @@ livestream-list-qt
 # Relaunch during development (kill existing, launch fresh)
 pkill -9 -f livestream-list-qt 2>/dev/null; sleep 0.5
 .venv/bin/livestream-list-qt 2>&1 &
+```
 
+### Windows
+
+```bash
+# Create venv (use full path to Python if not in PATH)
+/c/Users/admin/AppData/Local/Programs/Python/Python312/python.exe -m venv .venv
+
+# Install dependencies (hunspell won't build on Windows — skip it, spellcheck is optional)
+.venv/Scripts/python.exe -m pip install aiohttp PySide6 pydantic pydantic-settings desktop-notifier keyring appdirs yt-dlp pytchat
+
+# Install app in editable mode (skip deps since we installed them manually)
+.venv/Scripts/python.exe -m pip install -e . --no-deps
+
+# Run
+.venv/Scripts/livestream-list-qt.exe
+
+# Relaunch during development (kill existing, launch fresh)
+taskkill //F //IM livestream-list-qt.exe 2>/dev/null; sleep 0.5
+.venv/Scripts/livestream-list-qt.exe 2>&1 &
+```
+
+### Common (both platforms)
+
+```bash
 # Lint
 ruff check src/
 

@@ -43,6 +43,7 @@ class StreamlinkConsoleWindow(QMainWindow):
         self.setWindowTitle(f"Streamlink — {channel_name}")
         self.resize(600, 400)
         self._auto_close = auto_close
+        self._has_unrecognized_args = False
 
         self._text = QPlainTextEdit()
         self._text.setReadOnly(True)
@@ -57,9 +58,22 @@ class StreamlinkConsoleWindow(QMainWindow):
 
     def _append_line(self, line: str):
         self._text.appendPlainText(line)
+        if "error: unrecognized arguments:" in line:
+            self._has_unrecognized_args = True
 
     def _on_exit(self, exit_code: int):
         self._text.appendPlainText(f"\n--- Process exited with code {exit_code} ---")
+        if self._has_unrecognized_args and exit_code == 2:
+            self._text.appendPlainText(
+                "\n⚠ Your version of streamlink does not support one or more of the "
+                "arguments above. Please update streamlink to the latest version, or "
+                "remove the unsupported argument(s) from Preferences > Playback > "
+                "Streamlink Arguments."
+            )
+            self._auto_close = False
+            self.show()
+            self.raise_()
+            return
         if self._auto_close:
             self.close()
 

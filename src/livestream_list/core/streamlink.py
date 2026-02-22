@@ -66,6 +66,8 @@ class StreamlinkLauncher:
         self._on_stream_stopped: list[Callable[[str], None]] = []
         # Callbacks for when a turbo-authenticated launch fails
         self._on_turbo_auth_failed: list[Callable[[Livestream], None]] = []
+        # Callbacks for when streamlink fails due to unrecognized arguments
+        self._on_unrecognized_args: list[Callable[[str], None]] = []
         # Lock to protect _active_streams from concurrent access
         self._lock = threading.Lock()
 
@@ -76,6 +78,10 @@ class StreamlinkLauncher:
     def on_turbo_auth_failed(self, callback: Callable[[Livestream], None]) -> None:
         """Register callback for when a turbo-authenticated launch fails quickly."""
         self._on_turbo_auth_failed.append(callback)
+
+    def on_unrecognized_args(self, callback: Callable[[str], None]) -> None:
+        """Register callback for when streamlink exits due to unrecognized arguments."""
+        self._on_unrecognized_args.append(callback)
 
     def is_playing(self, channel_key: str) -> bool:
         """Check if a stream is currently playing."""
@@ -266,6 +272,37 @@ class StreamlinkLauncher:
             except Exception as e:
                 logger.error(f"Turbo auth failed callback error: {e}")
 
+    def _monitor_unrecognized_args(self, process: subprocess.Popen) -> None:
+        """Monitor a streamlink launch for unrecognized arguments (runs in daemon thread).
+
+        Only used when show_console is False (no console window to display the error).
+        """
+        try:
+            stderr_output = ""
+            for line in process.stderr:
+                if isinstance(line, bytes):
+                    line = line.decode("utf-8", errors="replace")
+                stderr_output += line
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            return  # Still running — no error
+        except (ValueError, OSError):
+            return  # Pipe closed
+
+        if process.returncode == 2 and "error: unrecognized arguments:" in stderr_output:
+            # Extract the unrecognized argument(s) from the error line
+            bad_args = ""
+            for err_line in stderr_output.splitlines():
+                if "error: unrecognized arguments:" in err_line:
+                    bad_args = err_line.split("error: unrecognized arguments:")[-1].strip()
+                    break
+            logger.warning(f"Streamlink unrecognized arguments: {bad_args}")
+            for callback in self._on_unrecognized_args:
+                try:
+                    callback(bad_args)
+                except Exception as e:
+                    logger.error(f"Unrecognized args callback error: {e}")
+
     def _get_launch_method(self, platform: StreamPlatform) -> LaunchMethod:
         """Get the configured launch method for a platform."""
         if platform == StreamPlatform.TWITCH:
@@ -313,7 +350,7 @@ class StreamlinkLauncher:
                 stderr_target = subprocess.STDOUT
             else:
                 stdout_target = subprocess.DEVNULL
-                stderr_target = subprocess.DEVNULL
+                stderr_target = subprocess.PIPE
             popen_kwargs: dict = {}
             if IS_WINDOWS:
                 popen_kwargs["creationflags"] = (
@@ -340,6 +377,18 @@ class StreamlinkLauncher:
                 threading.Thread(
                     target=self._monitor_turbo_launch,
                     args=(process, livestream),
+                    daemon=True,
+                ).start()
+
+            # Monitor for unrecognized arguments when console is off
+            if (
+                not self.settings.show_console
+                and launch_method == LaunchMethod.STREAMLINK
+                and process.stderr
+            ):
+                threading.Thread(
+                    target=self._monitor_unrecognized_args,
+                    args=(process,),
                     daemon=True,
                 ).start()
 

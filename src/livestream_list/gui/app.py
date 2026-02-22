@@ -198,6 +198,7 @@ class Application(QApplication):
     status_changed = Signal(str)
     open_stream_requested = Signal(object)  # Livestream - for notification Watch button
     turbo_auth_failed = Signal(object)  # Livestream - streamlink turbo auth rejected
+    streamlink_bad_args = Signal(str)  # Unrecognized streamlink arguments
 
     def __init__(self, argv=None):
         super().__init__(argv or sys.argv)
@@ -289,6 +290,8 @@ class Application(QApplication):
         )
         self.streamlink.on_turbo_auth_failed(lambda ls: self.turbo_auth_failed.emit(ls))
         self.turbo_auth_failed.connect(self._on_turbo_auth_failed)
+        self.streamlink.on_unrecognized_args(lambda args: self.streamlink_bad_args.emit(args))
+        self.streamlink_bad_args.connect(self._on_streamlink_bad_args)
         self.notifier = Notifier(
             self.settings.notifications,
             on_open_stream=self._on_notification_watch_clicked,
@@ -549,6 +552,22 @@ class Application(QApplication):
             self.streamlink.launch(livestream)
             if self.main_window:
                 self.main_window.refresh_stream_list()
+
+    def _on_streamlink_bad_args(self, bad_args: str):
+        """Handle streamlink failing due to unrecognized arguments (main thread)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        msg = QMessageBox(self.main_window)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Streamlink Update Required")
+        msg.setText(
+            f"Streamlink does not recognize the argument(s): {bad_args}\n\n"
+            "Your version of streamlink may be outdated. Please download the latest "
+            "version from https://streamlink.github.io/ or remove the unsupported "
+            "argument(s) from Preferences > Playback > Streamlink Arguments."
+        )
+        msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
+        msg.exec()
 
     def _check_processes(self):
         """Check for dead stream processes and update UI."""
