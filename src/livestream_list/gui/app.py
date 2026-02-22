@@ -131,10 +131,7 @@ class AsyncWorker(QThread):
                 loop.run_until_complete(self.monitor.close_all_sessions())
 
         except Exception as e:
-            logger.error(f"Async worker error: {e}")
-            import traceback
-
-            traceback.print_exc()
+            logger.error(f"Async worker error: {e}", exc_info=True)
             self.error.emit(str(e))
         finally:
             if self.monitor:

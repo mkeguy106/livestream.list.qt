@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from ..core.models import Channel, Livestream, StreamPlatform
+from ..core.platform import SUBPROCESS_NO_WINDOW
 from ..core.settings import YouTubeSettings
 from .base import BaseApiClient, safe_json
 
@@ -97,6 +98,7 @@ class YouTubeApiClient(BaseApiClient):
                 capture_output=True,
                 text=True,
                 timeout=30,
+                **SUBPROCESS_NO_WINDOW,
             )
             if result.returncode == 0 and result.stdout.strip():
                 # yt-dlp may output multiple JSON objects for playlists

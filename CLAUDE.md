@@ -85,7 +85,7 @@ src/livestream_list/
 
 ### Crash Diagnostics
 
-`faulthandler` is enabled in `main.py` at startup. On SIGSEGV/SIGFPE/SIGABRT, Python prints a traceback to stderr instead of silently crashing. This is always-on and zero-cost unless a crash occurs.
+`faulthandler` is enabled in `main.py` at startup (guarded by `sys.stderr is not None` for PyInstaller windowed builds). On SIGSEGV/SIGFPE/SIGABRT, Python prints a traceback to stderr instead of silently crashing. Zero-cost unless a crash occurs.
 
 ### Threading Model (Critical)
 
@@ -258,6 +258,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `notify-send` on Windows | Doesn't exist — `desktop-notifier` handles Windows toast notifications. Hidden from Preferences backend list. |
 | `hunspell` package on Windows | C extension can't compile — `hunspell` is Linux-only in pyproject.toml. Spellcheck gracefully disabled on Windows. |
 | PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
+| `sys.stderr`/`sys.stdout` is `None` in windowed builds | Guard `faulthandler.enable()`, `StreamHandler`, `traceback.print_exc()` — use `logging.NullHandler()` fallback and `logger.error(..., exc_info=True)` instead |
 
 ## CI/CD
 

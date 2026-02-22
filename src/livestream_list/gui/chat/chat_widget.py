@@ -1016,6 +1016,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         try:
             from ...chat.spellcheck import SpellChecker
 
+            if SpellChecker is None:
+                raise ImportError("hunspell not available")
             self._spell_checker = SpellChecker()
             self._spell_completer = SpellCompleter(self._input, self._spell_checker, parent=self)
             self._input.add_completer(self._spell_completer)

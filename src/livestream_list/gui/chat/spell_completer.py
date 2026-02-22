@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...chat.spellcheck.checker import SpellChecker
+from ...chat.spellcheck import SpellChecker
 from ..theme import get_theme
 
 logger = logging.getLogger(__name__)

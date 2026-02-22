@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
-from .platform import IS_FLATPAK, IS_WINDOWS, host_command
+from .platform import IS_FLATPAK, IS_WINDOWS, SUBPROCESS_NO_WINDOW, host_command
 from .settings import StreamlinkSettings
 
 logger = logging.getLogger(__name__)
@@ -175,6 +175,7 @@ class StreamlinkLauncher:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                **SUBPROCESS_NO_WINDOW,
             )
             if result.returncode == 0:
                 # Parse version from output like "streamlink 6.5.0"

@@ -6,17 +6,20 @@ import logging
 import sys
 
 # Print Python traceback on SIGSEGV/SIGFPE/SIGABRT instead of silently crashing
-faulthandler.enable()
+# sys.stderr is None in PyInstaller --windowed builds (no console)
+if sys.stderr is not None:
+    faulthandler.enable()
 
 
 def setup_logging() -> None:
     """Set up logging configuration."""
+    handlers: list[logging.Handler] = []
+    if sys.stdout is not None:
+        handlers.append(logging.StreamHandler(sys.stdout))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=handlers if handlers else [logging.NullHandler()],
     )
 
     # Suppress noisy third-party loggers
@@ -30,7 +33,7 @@ def main() -> int:
     setup_logging()
 
     try:
-        from .gui.app import run
+        from livestream_list.gui.app import run
 
         return run()
     except ImportError as e:

@@ -33,6 +33,7 @@ a = Analysis(
         "keyring.backends.Windows",
         "desktop_notifier",
         "desktop_notifier.main",
+        "desktop_notifier.resources",
         "pydantic",
         "pydantic_settings",
         "pytchat",
