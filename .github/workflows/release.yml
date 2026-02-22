@@ -141,7 +141,20 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Delete leftover draft release
+        run: |
+          # softprops/action-gh-release in upload steps can create a second
+          # (non-draft) release, leaving the original draft orphaned.
+          # Delete any draft releases for this tag.
+          gh api repos/${{ github.repository }}/releases --paginate --jq \
+            '.[] | select(.draft and .tag_name == "v${{ steps.version.outputs.VERSION }}") | .id' | \
+            xargs -I{} gh api -X DELETE repos/${{ github.repository }}/releases/{}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish release
-        run: gh release edit "v${{ steps.version.outputs.VERSION }}" --draft=false --repo "${{ github.repository }}"
+        run: |
+          # Undraft the published release (in case it's still a draft)
+          gh release edit "v${{ steps.version.outputs.VERSION }}" --draft=false --repo "${{ github.repository }}" 2>/dev/null || true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
