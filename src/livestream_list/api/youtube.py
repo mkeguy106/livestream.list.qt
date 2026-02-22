@@ -56,7 +56,15 @@ class YouTubeApiClient(BaseApiClient):
 
     def _check_ytdlp(self) -> None:
         """Check if yt-dlp is available."""
+        import os
+        import sys
+
         self._ytdlp_path = shutil.which("yt-dlp")
+        # Also check the Python venv Scripts/bin directory (yt-dlp may not be in PATH)
+        if not self._ytdlp_path:
+            self._ytdlp_path = shutil.which(
+                "yt-dlp", path=os.path.dirname(sys.executable)
+            )
         if not self._ytdlp_path:
             logger.warning("yt-dlp not found - YouTube stream detection will not work")
 

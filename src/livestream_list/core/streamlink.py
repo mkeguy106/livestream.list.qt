@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -242,10 +243,40 @@ class StreamlinkLauncher:
 
         return cmd
 
+    def _find_ytdlp(self) -> str | None:
+        """Find yt-dlp executable, checking PATH and Python venv."""
+        path = shutil.which("yt-dlp")
+        if not path:
+            path = shutil.which("yt-dlp", path=os.path.dirname(sys.executable))
+        return path
+
+    def _resolve_stream_url(self, url: str) -> str | None:
+        """Use yt-dlp to resolve a stream URL to a direct playable URL.
+
+        Returns the direct URL (e.g. HLS manifest) or None on failure.
+        """
+        ytdlp = self._find_ytdlp()
+        if not ytdlp:
+            return None
+        try:
+            result = subprocess.run(
+                [ytdlp, "-g", "-f", "best", "--no-warnings", url],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                **SUBPROCESS_NO_WINDOW,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip().splitlines()[0]
+        except Exception as e:
+            logger.warning(f"yt-dlp URL resolve failed: {e}")
+        return None
+
     def _build_ytdlp_command(self, livestream: Livestream) -> list[str]:
         """Build command to launch stream directly with player (using yt-dlp backend).
 
-        Launches the player directly and lets it use yt-dlp internally to handle the stream.
+        Resolves the stream URL via yt-dlp first, then passes the direct URL to the
+        player. This avoids relying on mpv's built-in ytdl_hook which may be outdated.
         """
         cmd = [self.settings.player or "mpv"]
 
@@ -253,8 +284,16 @@ class StreamlinkLauncher:
         if self.settings.player_args:
             cmd.extend(_validate_additional_args(self.settings.player_args))
 
-        # Stream URL - player (mpv) will use yt-dlp to handle the stream
-        cmd.append(livestream.stream_url)
+        # Resolve stream URL via yt-dlp to get a direct playable URL
+        direct_url = self._resolve_stream_url(livestream.stream_url)
+        if direct_url:
+            logger.info(f"Resolved stream URL via yt-dlp for {livestream.channel.display_name}")
+            cmd.append(f"--force-media-title={livestream.channel.display_name}")
+            cmd.append(direct_url)
+        else:
+            # Fallback: pass original URL and let mpv's ytdl_hook handle it
+            logger.warning("yt-dlp resolve failed, falling back to mpv ytdl_hook")
+            cmd.append(livestream.stream_url)
 
         return cmd
 
@@ -348,9 +387,12 @@ class StreamlinkLauncher:
             if self.settings.show_console:
                 stdout_target = subprocess.PIPE
                 stderr_target = subprocess.STDOUT
-            else:
+            elif launch_method == LaunchMethod.STREAMLINK:
                 stdout_target = subprocess.DEVNULL
                 stderr_target = subprocess.PIPE
+            else:
+                stdout_target = subprocess.DEVNULL
+                stderr_target = subprocess.DEVNULL
             popen_kwargs: dict = {}
             if IS_WINDOWS:
                 popen_kwargs["creationflags"] = (
