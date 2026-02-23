@@ -1,12 +1,12 @@
-"""Spellcheck wrapper around hunspell."""
+"""Spellcheck wrapper with hunspell (Linux) and pyspellchecker (cross-platform) backends."""
+
+from __future__ import annotations
 
 import logging
 import os
 import re
 import sys
 from pathlib import Path
-
-import hunspell
 
 from .dictionary import CustomDictionary
 
@@ -106,26 +106,81 @@ def _load_bundled_words() -> list[str]:
     return words
 
 
+class _SpellBackend:
+    """Thin wrapper providing a unified API over hunspell or pyspellchecker."""
+
+    def __init__(self) -> None:
+        self.name: str = ""
+        self._engine: object = None
+        self._init_backend()
+
+    def _init_backend(self) -> None:
+        # Try hunspell first (fast C extension, Linux/Flatpak only)
+        try:
+            import hunspell as _hunspell
+
+            dic_path, aff_path = _find_hunspell_dict()
+            self._engine = _hunspell.HunSpell(dic_path, aff_path)
+            self.name = "hunspell"
+            return
+        except (ImportError, FileNotFoundError, OSError):
+            pass
+
+        # Fall back to pyspellchecker (pure Python, cross-platform)
+        try:
+            from spellchecker import SpellChecker as PySpellChecker
+
+            self._engine = PySpellChecker()
+            self.name = "pyspellchecker"
+            return
+        except ImportError:
+            pass
+
+        raise ImportError("No spellcheck backend available (tried hunspell, pyspellchecker)")
+
+    def check(self, word: str) -> bool:
+        if self.name == "hunspell":
+            return self._engine.spell(word)  # type: ignore[union-attr]
+        # pyspellchecker: word is known if it's in the frequency dictionary
+        return word.lower() in self._engine  # type: ignore[operator]
+
+    def suggest(self, word: str) -> list[str]:
+        if self.name == "hunspell":
+            return self._engine.suggest(word)  # type: ignore[union-attr]
+        # pyspellchecker returns an unordered set or None
+        candidates = self._engine.candidates(word)  # type: ignore[union-attr]
+        if not candidates:
+            return []
+        # Sort by edit distance so get_confident_correction works correctly
+        return sorted(candidates, key=lambda s: _damerau_levenshtein(word.lower(), s.lower()))
+
+    def add(self, word: str) -> None:
+        if self.name == "hunspell":
+            self._engine.add(word)  # type: ignore[union-attr]
+        else:
+            self._engine.word_frequency.load_words([word.lower()])  # type: ignore[union-attr]
+
+
 class SpellChecker:
-    """Wraps hunspell with custom dictionary and chat-aware skip rules."""
+    """Wraps spellcheck backend with custom dictionary and chat-aware skip rules."""
 
     def __init__(self, dictionary: CustomDictionary | None = None) -> None:
-        dic_path, aff_path = _find_hunspell_dict()
-        self._spell = hunspell.HunSpell(dic_path, aff_path)
+        self._spell = _SpellBackend()
         self._dict = dictionary or CustomDictionary()
+        logger.info("Spellcheck backend: %s", self._spell.name)
 
-        # Load bundled adult words into hunspell runtime dict
+        # Load bundled adult words into backend
         bundled = _load_bundled_words()
         for word in bundled:
             self._spell.add(word)
         if bundled:
-            logger.debug("Loaded %d bundled words into hunspell", len(bundled))
+            logger.debug("Loaded %d bundled words into spellcheck backend", len(bundled))
 
-        # Sync existing custom dictionary words into hunspell
+        # Sync existing custom dictionary words into backend
         for word in self._dict.all_words:
             self._spell.add(word)
 
-        # Register callback so future dictionary additions sync to hunspell
+        # Register callback so future dictionary additions sync to backend
         self._dict.set_on_words_added(self._on_dict_words_added)
 
     def _on_dict_words_added(self, words: set[str]) -> None:
@@ -163,7 +218,7 @@ class SpellChecker:
         """Return True if the word is correctly spelled or whitelisted."""
         if self._should_skip(word):
             return True
-        return self._spell.spell(word)
+        return self._spell.check(word)
 
     def check_text(self, text: str) -> list[tuple[int, int, str]]:
         """Check text and return misspelled word ranges.
@@ -239,7 +294,7 @@ class SpellChecker:
         Returns a correction if:
         - An apostrophe expansion exists (dont→don't, youre→you're), or
         - Only 1 suggestion exists (unambiguous), or
-        - Hunspell's top suggestion is within Damerau-Levenshtein distance 1
+        - The top suggestion is within Damerau-Levenshtein distance 1
           (covers transpositions like teh→the, single-char typos).
         Returns None if no suggestions or the word should be skipped.
         """
@@ -259,7 +314,7 @@ class SpellChecker:
                 return s
         if len(suggestions) == 1:
             return suggestions[0]
-        # Trust hunspell's top-ranked suggestion if it's a close match
+        # Trust the top-ranked suggestion if it's a close match
         top = suggestions[0]
         if _damerau_levenshtein(word.lower(), top.lower()) <= 1:
             return top

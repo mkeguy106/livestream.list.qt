@@ -1017,13 +1017,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
             from ...chat.spellcheck import SpellChecker
 
             if SpellChecker is None:
-                raise ImportError("hunspell not available")
+                raise ImportError("spellcheck not available")
             self._spell_checker = SpellChecker()
             self._spell_completer = SpellCompleter(self._input, self._spell_checker, parent=self)
             self._input.add_completer(self._spell_completer)
             self._input.set_spell_checker(self._spell_checker, self._spell_completer)
         except ImportError:
-            logger.warning("pyhunspell not installed, spellcheck disabled")
+            logger.warning("Spellcheck not available, disabled")
         except (FileNotFoundError, OSError) as e:
             logger.warning(f"Spellcheck unavailable: {e}")
 

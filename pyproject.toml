@@ -37,6 +37,7 @@ dependencies = [
     "yt-dlp>=2024.0.0",  # YouTube stream detection (Unlicense)
     "pytchat>=0.5.5",  # YouTube live chat
     "hunspell>=0.5.5; sys_platform == 'linux'",  # Spellcheck (requires libhunspell-dev, Linux only)
+    "pyspellchecker>=0.8.0",  # Spellcheck fallback (pure Python, cross-platform)
 ]
 
 [project.optional-dependencies]
