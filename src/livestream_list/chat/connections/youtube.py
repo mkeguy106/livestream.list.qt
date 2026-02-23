@@ -5,6 +5,7 @@ import hashlib
 import logging
 import re
 import time
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 
@@ -41,6 +42,160 @@ def _get_superchat_tier(amount: float) -> str:
         if amount >= threshold:
             return tier
     return "BLUE"
+
+
+# Regex to match :emoji_shortcode: patterns (lowercase letters, digits, underscores)
+_EMOJI_SHORTCODE_RE = re.compile(r":([a-z][a-z0-9_]*[a-z0-9]):")
+
+# Shortcodes where YouTube name diverges from the official Unicode character name
+_EMOJI_FALLBACK: dict[str, str] = {
+    "thumbsup": "\U0001f44d", "thumbs_up": "\U0001f44d",
+    "thumbsdown": "\U0001f44e", "thumbs_down": "\U0001f44e",
+    "heart": "\u2764\ufe0f", "red_heart": "\u2764\ufe0f",
+    "broken_heart": "\U0001f494",
+    "100": "\U0001f4af",
+    "pray": "\U0001f64f",
+    "clap": "\U0001f44f",
+    "wave": "\U0001f44b",
+    "raised_hands": "\U0001f64c",
+    "muscle": "\U0001f4aa",
+    "eyes": "\U0001f440",
+    "joy": "\U0001f602",
+    "rofl": "\U0001f923",
+    "sob": "\U0001f62d",
+    "heart_eyes": "\U0001f60d",
+    "kissing_heart": "\U0001f618",
+    "thinking": "\U0001f914",
+    "flushed": "\U0001f633",
+    "scream": "\U0001f631",
+    "poop": "\U0001f4a9",
+    "skull": "\U0001f480",
+    "ghost": "\U0001f47b",
+    "tada": "\U0001f389",
+    "sparkles": "\u2728",
+    "star": "\u2b50",
+    "sunny": "\u2600\ufe0f",
+    "cloud": "\u2601\ufe0f",
+    "snowflake": "\u2744\ufe0f",
+    "zap": "\u26a1",
+    "ocean": "\U0001f30a",
+    "smiley": "\U0001f603",
+    "smile": "\U0001f604",
+    "grin": "\U0001f601",
+    "laughing": "\U0001f606",
+    "wink": "\U0001f609",
+    "blush": "\U0001f60a",
+    "yum": "\U0001f60b",
+    "sunglasses": "\U0001f60e",
+    "sweat_smile": "\U0001f605",
+    "unamused": "\U0001f612",
+    "pensive": "\U0001f614",
+    "confused": "\U0001f615",
+    "worried": "\U0001f61f",
+    "angry": "\U0001f620",
+    "rage": "\U0001f621",
+    "cry": "\U0001f622",
+    "triumph": "\U0001f624",
+    "sleeping": "\U0001f634",
+    "mask": "\U0001f637",
+    "see_no_evil": "\U0001f648",
+    "hear_no_evil": "\U0001f649",
+    "speak_no_evil": "\U0001f64a",
+    "fire": "\U0001f525",
+    "boom": "\U0001f4a5",
+    "sweat_drops": "\U0001f4a6",
+    "dash": "\U0001f4a8",
+    "warning": "\u26a0\ufe0f",
+    "no_entry": "\u26d4",
+    "x": "\u274c",
+    "o": "\u2b55",
+    "heavy_check_mark": "\u2714\ufe0f",
+    "skull_and_crossbones": "\u2620\ufe0f",
+    "rocket": "\U0001f680",
+    "rainbow": "\U0001f308",
+    "money_mouth_face": "\U0001f911",
+    "partying_face": "\U0001f973",
+    "stuck_out_tongue": "\U0001f61b",
+    "stuck_out_tongue_winking_eye": "\U0001f61c",
+    "nerd_face": "\U0001f913",
+    "face_with_monocle": "\U0001f9d0",
+    "pleading_face": "\U0001f97a",
+    "smiling_face_with_tear": "\U0001f972",
+    "saluting_face": "\U0001fae1",
+    "melting_face": "\U0001fae0",
+    "hot_face": "\U0001f975",
+    "cold_face": "\U0001f976",
+    "shushing_face": "\U0001f92b",
+    "face_with_hand_over_mouth": "\U0001f92d",
+    "lying_face": "\U0001f925",
+    "clown_face": "\U0001f921",
+    "smiling_imp": "\U0001f608",
+    "imp": "\U0001f47f",
+    "handshake": "\U0001f91d",
+    "crossed_fingers": "\U0001f91e",
+    "ok_hand": "\U0001f44c",
+    "pinching_hand": "\U0001f90f",
+    "v": "\u270c\ufe0f",
+    "point_up": "\u261d\ufe0f",
+    "point_down": "\U0001f447",
+    "point_left": "\U0001f448",
+    "point_right": "\U0001f449",
+    "middle_finger": "\U0001f595",
+    "raised_hand": "\u270b",
+    "crown": "\U0001f451",
+    "gem": "\U0001f48e",
+    "ring": "\U0001f48d",
+    "moneybag": "\U0001f4b0",
+    "dollar": "\U0001f4b5",
+    "pizza": "\U0001f355",
+    "beer": "\U0001f37a",
+    "beers": "\U0001f37b",
+    "champagne": "\U0001f37e",
+    "trophy": "\U0001f3c6",
+    "medal": "\U0001f3c5",
+    "soccer": "\u26bd",
+    "basketball": "\U0001f3c0",
+    "football": "\U0001f3c8",
+    "baseball": "\u26be",
+    "video_game": "\U0001f3ae",
+    "joystick": "\U0001f579\ufe0f",
+    "musical_note": "\U0001f3b5",
+    "notes": "\U0001f3b6",
+    "microphone": "\U0001f3a4",
+    "headphones": "\U0001f3a7",
+    "tv": "\U0001f4fa",
+    "camera": "\U0001f4f7",
+    "movie_camera": "\U0001f3a5",
+    "skull_crossbones": "\u2620\ufe0f",
+    "gg": "\U0001f1ec\U0001f1ec",
+}
+
+
+def _shortcode_to_unicode(name: str) -> str | None:
+    """Convert an emoji shortcode name (without colons) to a Unicode character."""
+    if name in _EMOJI_FALLBACK:
+        return _EMOJI_FALLBACK[name]
+    # Try unicodedata lookup: two_hearts → "TWO HEARTS"
+    unicode_name = name.upper().replace("_", " ")
+    try:
+        return unicodedata.lookup(unicode_name)
+    except KeyError:
+        pass
+    # Try with common suffixes that Unicode names use
+    for suffix in (" FACE", " SIGN", " MARK"):
+        try:
+            return unicodedata.lookup(unicode_name + suffix)
+        except KeyError:
+            pass
+    return None
+
+
+def _replace_emoji_shortcodes(text: str) -> str:
+    """Replace :emoji_name: patterns in text with Unicode characters."""
+    def _replace(m: re.Match) -> str:
+        char = _shortcode_to_unicode(m.group(1))
+        return char if char else m.group(0)
+    return _EMOJI_SHORTCODE_RE.sub(_replace, text)
 
 
 def _generate_sapisidhash(sapisid: str, origin: str = "https://www.youtube.com") -> str:
@@ -106,6 +261,8 @@ class YouTubeChatConnection(BaseChatConnection):
         self._chat_restriction: str = ""  # e.g. "Subscribers-only mode"
         self._params_extracted_at: float = 0.0
         self._extract_lock: asyncio.Lock = asyncio.Lock()
+        self._slow_mode_seconds: int = 0  # Known slow mode interval from room state
+        self._last_send_time: float = 0.0  # monotonic timestamp of last successful send
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a YouTube channel's live chat.
@@ -191,6 +348,13 @@ class YouTubeChatConnection(BaseChatConnection):
             self._emit_error("YouTube login expired — update cookies to send")
             return False
 
+        # Client-side slow mode prevention: block if we're still in the cooldown
+        if self._slow_mode_seconds > 0 and self._last_send_time > 0:
+            remaining = self._get_slow_mode_remaining()
+            if remaining > 0:
+                self._emit_error(f"Slow mode: wait {remaining}s before sending again.")
+                return False
+
         result = await self._do_send_yt(text)
         if result is True:
             return True
@@ -217,16 +381,79 @@ class YouTubeChatConnection(BaseChatConnection):
             self._emit_error("YouTube rate limit reached. Wait a moment before sending again.")
             return False
 
+        if result == "slow_mode":
+            if self._slow_mode_seconds > 0:
+                self._emit_error(
+                    f"Slow mode: wait {self._slow_mode_seconds}s before sending again."
+                )
+            else:
+                self._emit_error("Slow mode is active. Please wait before sending again.")
+            return False
+
         # Generic failure
         self._emit_error("Failed to send YouTube message")
         return False
+
+    def _get_slow_mode_remaining(self) -> int:
+        """Calculate approximate seconds remaining before next send is allowed."""
+        if self._slow_mode_seconds <= 0 or self._last_send_time <= 0:
+            return 0
+        elapsed = time.monotonic() - self._last_send_time
+        remaining = self._slow_mode_seconds - int(elapsed)
+        return max(remaining, 0)
+
+    @staticmethod
+    def _is_slow_mode_error(text: str) -> bool:
+        """Check if an API response indicates a slow mode / rate limit violation."""
+        lower = text.lower()
+        return any(
+            kw in lower
+            for kw in (
+                "slow mode",
+                "slowmode",
+                "too quickly",
+                "too fast",
+                "livechatslowmode",
+                "wait before sending",
+                "sending messages too",
+                "rate limit exceeded",
+                "failed_precondition",
+            )
+        )
+
+    @staticmethod
+    def _parse_slow_mode_from_response(data: dict) -> int:
+        """Extract slow mode seconds from a YouTube send_message response.
+
+        Searches all string values in the response for a number followed by
+        "second"/"sec", and also checks timeoutDurationUsec.
+
+        Returns seconds (>0) if found, 0 otherwise.
+        """
+        import json as _json
+
+        # Walk the entire response looking for seconds in text fields
+        resp_str = _json.dumps(data)
+        sec_match = re.search(r"(\d+)\s*(?:second|sec)", resp_str, re.IGNORECASE)
+        if sec_match:
+            return int(sec_match.group(1))
+
+        # Fallback: use timeoutDurationUsec (microseconds → seconds)
+        timeout_usec = data.get("timeoutDurationUsec")
+        if timeout_usec:
+            try:
+                return int(timeout_usec) // 1_000_000
+            except (ValueError, TypeError):
+                pass
+        return 0
 
     async def _do_send_yt(self, text: str) -> bool | str:
         """Perform the actual YouTube send HTTP request.
 
         Returns:
             True on success, or a string indicating the failure type:
-            "auth_expired", "rate_limited", "server_error", or False.
+            "auth_expired", "rate_limited", "slow_mode", "server_error",
+            or False.
         """
         try:
             import aiohttp
@@ -275,8 +502,67 @@ class YouTubeChatConnection(BaseChatConnection):
                     timeout=aiohttp.ClientTimeout(total=15),
                 ) as resp:
                     if resp.status == 200:
+                        # Parse response to detect slow mode rejection.
+                        # YouTube returns 200 even when rejecting messages:
+                        #   Success → actions contain "addChatItemAction"
+                        #   Rejected → "dimChatItemAction" + "errorMessage"
+                        try:
+                            import json as _json
+
+                            resp_text = await resp.text()
+                            data = _json.loads(resp_text)
+
+                            actions = data.get("actions", [])
+                            has_add = any("addChatItemAction" in a for a in actions)
+                            has_dim = any("dimChatItemAction" in a for a in actions)
+                            error_msg_obj = data.get("errorMessage")
+
+                            if has_dim or error_msg_obj or not has_add:
+                                # Message was rejected (slow mode / rate limit)
+                                logger.warning("YouTube send rejected (slow mode)")
+                                slow_sec = self._parse_slow_mode_from_response(data)
+                                if slow_sec > 0:
+                                    self._slow_mode_seconds = slow_sec
+                                    self._emit_room_state(
+                                        ChatRoomState(slow=slow_sec)
+                                    )
+                                return "slow_mode"
+
+                            # Success — extract slow mode interval from response
+                            # timeoutDurationUsec is present when slow mode is active
+                            timeout_usec = data.get("timeoutDurationUsec")
+                            if timeout_usec:
+                                timeout_sec = int(timeout_usec) // 1_000_000
+                                if timeout_sec > 0:
+                                    self._slow_mode_seconds = timeout_sec
+                                    self._emit_room_state(
+                                        ChatRoomState(slow=timeout_sec)
+                                    )
+
+                        except Exception as e:
+                            logger.debug(f"YouTube send response parse error: {e}")
+                        self._last_send_time = time.monotonic()
                         return True
+                    elif resp.status in (400, 409):
+                        error_text = await resp.text()
+                        if self._is_slow_mode_error(error_text):
+                            logger.warning(
+                                f"YouTube send rejected: slow mode ({resp.status})"
+                            )
+                            return "slow_mode"
+                        logger.warning(
+                            f"YouTube send_message failed ({resp.status}): "
+                            f"{error_text[:200]}"
+                        )
+                        return False
                     elif resp.status in (401, 403):
+                        error_text = await resp.text()
+                        # Check for slow mode before treating as auth failure
+                        if self._is_slow_mode_error(error_text):
+                            logger.warning(
+                                f"YouTube send rejected: slow mode ({resp.status})"
+                            )
+                            return "slow_mode"
                         logger.warning(f"YouTube send auth failed ({resp.status})")
                         return "auth_expired"
                     elif resp.status == 429:
@@ -287,8 +573,14 @@ class YouTubeChatConnection(BaseChatConnection):
                         return "server_error"
                     else:
                         error_text = await resp.text()
+                        if self._is_slow_mode_error(error_text):
+                            logger.warning(
+                                f"YouTube send rejected: slow mode ({resp.status})"
+                            )
+                            return "slow_mode"
                         logger.warning(
-                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
+                            f"YouTube send_message failed ({resp.status}): "
+                            f"{error_text[:200]}"
                         )
                         return False
 
@@ -434,6 +726,7 @@ class YouTubeChatConnection(BaseChatConnection):
                     self._emit_room_state(ChatRoomState(subs_only=True))
 
             # Check for slow mode in initial page data
+            slow_seconds = 0
             slow_match = re.search(
                 r'"slowModeRenderer"\s*:\s*\{.{0,500}?"slowModeDurationSeconds"\s*:\s*"?(\d+)',
                 html,
@@ -441,8 +734,18 @@ class YouTubeChatConnection(BaseChatConnection):
             )
             if slow_match:
                 slow_seconds = int(slow_match.group(1))
+            else:
+                # Fallback: search for slowModeDurationSeconds anywhere
+                slow_match2 = re.search(
+                    r'"?slowModeDurationSeconds"?\s*[:=]\s*"?(\d+)', html
+                )
+                if slow_match2:
+                    slow_seconds = int(slow_match2.group(1))
+
+            if slow_seconds > 0:
+                self._slow_mode_seconds = slow_seconds
                 self._emit_room_state(ChatRoomState(slow=slow_seconds))
-                logger.info(f"YouTube slow mode detected: {slow_seconds}s")
+                logger.info(f"YouTube slow mode detected from page: {slow_seconds}s")
 
             if self._innertube_api_key and self._send_params:
                 self._params_extracted_at = time.monotonic()
@@ -509,6 +812,8 @@ class YouTubeChatConnection(BaseChatConnection):
 
         # Emit room state changes (slow mode, members-only)
         for state in self._processor.pop_room_state_changes():
+            if state.slow >= 0:
+                self._slow_mode_seconds = state.slow
             self._emit_room_state(state)
 
         # Add mode change system messages to the batch
@@ -569,32 +874,36 @@ class YouTubeChatConnection(BaseChatConnection):
         - A string (text segment)
         - A dict with 'id', 'txt', 'url' (emoji/emote)
 
+        Emoji shortcodes (e.g. :two_hearts:) without image URLs are converted
+        to Unicode characters so they render natively in the chat.
+
         Returns:
             Tuple of (full text, list of (start, end, ChatEmote))
         """
         message_ex = getattr(item, "messageEx", None)
         if not message_ex or not isinstance(message_ex, list):
-            # Fall back to plain message
+            # Fall back to plain message, converting any emoji shortcodes
             text = getattr(item, "message", "") or ""
-            return text, []
+            return _replace_emoji_shortcodes(text), []
 
         full_text = ""
         emote_positions: list[tuple[int, int, ChatEmote]] = []
 
         for segment in message_ex:
             if isinstance(segment, str):
-                full_text += segment
+                # Convert any :emoji_shortcode: patterns in text segments
+                full_text += _replace_emoji_shortcodes(segment)
             elif isinstance(segment, dict):
                 emote_id = segment.get("id", "")
                 emote_txt = segment.get("txt", "")
                 emote_url = segment.get("url", "")
 
                 if emote_txt:
-                    start = len(full_text)
-                    full_text += emote_txt
-                    end = len(full_text)
-
                     if emote_url:
+                        start = len(full_text)
+                        full_text += emote_txt
+                        end = len(full_text)
+
                         specs: dict[int, ImageSpec] = {}
                         for scale in (1, 2, 3):
                             key = f"emote:youtube:{emote_id or emote_txt}@{scale}x"
@@ -611,6 +920,11 @@ class YouTubeChatConnection(BaseChatConnection):
                             image_set=ImageSet(specs),
                         )
                         emote_positions.append((start, end, emote))
+                    else:
+                        # No image URL — convert shortcode to Unicode emoji
+                        name = emote_txt.strip(":")
+                        unicode_char = _shortcode_to_unicode(name) if name else None
+                        full_text += unicode_char if unicode_char else emote_txt
 
         return full_text, emote_positions
 

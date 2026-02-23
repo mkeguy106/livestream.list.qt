@@ -1171,6 +1171,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def show_error(self, message: str) -> None:
         """Show an error message in the appropriate banner."""
+        # Slow mode rejection — start the countdown timer in the input field
+        if "Slow mode" in message and "wait" in message.lower():
+            self._handle_slow_mode_rejection(message)
+            return
         # For YouTube restriction errors, show the banner with "Open in Browser" button
         if (
             self.livestream
@@ -1188,6 +1192,29 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._auth_banner.setStyleSheet(self._auth_banner_error_style)
             self._auth_banner.show()
             self._restriction_banner.hide()
+
+    def _handle_slow_mode_rejection(self, message: str) -> None:
+        """Handle a slow mode rejection by starting the countdown in the input field."""
+        import re as _re
+
+        # Try to extract seconds from the error message (e.g. "wait 15s")
+        m = _re.search(r"(\d+)s", message)
+        seconds = int(m.group(1)) if m else (self._room_state.slow if self._room_state else 0)
+
+        if seconds > 0:
+            # Start (or restart) the slow mode countdown
+            self._slow_mode_remaining = seconds
+            self._input.setEnabled(False)
+            self._send_button.setEnabled(False)
+            self._input.setPlaceholderText(f"Slow mode ({self._slow_mode_remaining}s)...")
+            self._slow_mode_timer.start()
+        else:
+            # No known interval — show a brief error in the placeholder
+            self._input.setPlaceholderText("Slow mode active \u2014 wait before sending...")
+            self._input.setEnabled(False)
+            self._send_button.setEnabled(False)
+            # Re-enable after a conservative 10s default
+            QTimer.singleShot(10_000, self._restore_input_after_slow_mode)
 
     def _open_chat_in_browser(self) -> None:
         """Open the YouTube chat popout in the default browser."""
@@ -2030,6 +2057,23 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if self._room_state and self._room_state.slow > 0 and state.slow == 0:
             if self._slow_mode_timer.isActive():
                 self._restore_input_after_slow_mode()
+
+        # Slow mode newly discovered (e.g. from first send response) — start countdown
+        # if we just sent a message (input is empty) and timer isn't already running
+        old_slow = self._room_state.slow if self._room_state else 0
+        if (
+            state.slow > 0
+            and old_slow == 0
+            and not self._slow_mode_timer.isActive()
+            and not self._input.text().strip()
+            and self._authenticated
+        ):
+            self._slow_mode_remaining = state.slow
+            self._input.setEnabled(False)
+            self._send_button.setEnabled(False)
+            self._input.setPlaceholderText(f"Slow mode ({self._slow_mode_remaining}s)...")
+            self._slow_mode_timer.start()
+
         self._room_state = state
         parts: list[str] = []
         if state.subs_only:
