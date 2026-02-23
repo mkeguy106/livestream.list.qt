@@ -2275,6 +2275,22 @@ class ChatManager(QObject):
                 if image_set:
                     image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
+        # Learn emote names from incoming messages (e.g. Kick native emotes from
+        # [emote:ID:name] tokens) so they appear in the spellcheck dictionary and
+        # autocomplete.  Only emotes not already in the resolved map are added.
+        channel_map = self._channel_emote_maps.get(channel_key, {})
+        new_emote_count = 0
+        for msg in messages:
+            for _start, _end, emote in msg.emote_positions:
+                if emote.name and emote.name not in emote_map and emote.name not in channel_map:
+                    channel_map[emote.name] = emote
+                    new_emote_count += 1
+        if new_emote_count:
+            self._channel_emote_maps[channel_key] = channel_map
+            self._resolved_emote_maps.pop(channel_key, None)
+            emote_map = self._rebuild_emote_map(channel_key)
+            self.emote_map_updated.emit(channel_key)
+
         # Detect @mentions of our username
         nick_variants = self._get_our_nick_variants(channel_key)
         if nick_variants:

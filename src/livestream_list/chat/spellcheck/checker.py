@@ -144,8 +144,9 @@ class SpellChecker:
         # Mentions, emote triggers, commands
         if word[0] in ("@", ":", "!"):
             return True
-        # All digits
-        if word.isdigit():
+        # Contains any digit — emote names (callsi4Fireanim), numbers, etc.
+        # Real English words never contain digits.
+        if any(c.isdigit() for c in word):
             return True
         # All caps (LOL, GG, LMAO, etc.)
         if word.isupper():
@@ -183,7 +184,7 @@ class SpellChecker:
         length = len(text)
         while i < length:
             # Skip non-word characters
-            if not text[i].isalpha() and text[i] not in ("@", ":", "!"):
+            if not text[i].isalpha() and not text[i].isdigit() and text[i] not in ("@", ":", "!"):
                 i += 1
                 continue
 
@@ -195,8 +196,9 @@ class SpellChecker:
                 if i >= length or not text[i].isalpha():
                     continue
 
-            # Find word end (allow apostrophes within words like "don't")
-            while i < length and (text[i].isalpha() or text[i] == "'"):
+            # Find word end (digits included so emote names like
+            # "callsi4Fireanim" stay as one token)
+            while i < length and (text[i].isalpha() or text[i].isdigit() or text[i] == "'"):
                 i += 1
 
             word = text[start:i]

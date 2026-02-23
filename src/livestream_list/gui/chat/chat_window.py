@@ -968,7 +968,7 @@ class ChatWindow(QMainWindow):
         self.update_animation_state()
 
     def _on_emote_map_updated(self, channel_key: str) -> None:
-        """Backfill third-party emotes for recent messages after emote map updates."""
+        """Update widget emote maps and backfill third-party emotes."""
         widgets = []
         if channel_key:
             widget = self._widgets.get(channel_key)
@@ -977,7 +977,16 @@ class ChatWindow(QMainWindow):
         else:
             widgets = list(self._widgets.values())
 
+        user_emote_names = self.chat_manager.get_user_emote_names()
         for widget in widgets:
+            # Push the updated emote map to the widget so autocomplete and
+            # spellcheck dictionary stay in sync (e.g. Kick native emotes
+            # learned from incoming messages).
+            widget.set_emote_map(
+                self.chat_manager.get_emote_map(widget.channel_key),
+                self.chat_manager.get_channel_emote_names(widget.channel_key),
+                user_emote_names,
+            )
             self._schedule_emote_backfill(widget)
 
     def _schedule_emote_backfill(self, widget: ChatWidget) -> None:
