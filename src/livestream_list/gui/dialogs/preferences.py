@@ -1061,6 +1061,14 @@ class PreferencesDialog(QDialog):
         self.yt_auto_refresh_cb.toggled.connect(self._on_yt_auto_refresh_toggled)
         yt_layout.addWidget(self.yt_auto_refresh_cb)
 
+        # YouTube handle (auto-detected on first chat connection)
+        yt_handle_row = QFormLayout()
+        yt_handle = self.app.settings.youtube.login_name
+        self.yt_login_name_label = QLabel(f"@{yt_handle}" if yt_handle else "Not detected yet")
+        self.yt_login_name_label.setStyleSheet("color: gray;")
+        yt_handle_row.addRow("YouTube handle:", self.yt_login_name_label)
+        yt_layout.addLayout(yt_handle_row)
+
         layout.addWidget(yt_group)
         self._update_yt_status()
 

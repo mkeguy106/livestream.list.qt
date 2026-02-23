@@ -235,6 +235,70 @@ def validate_cookies(cookie_str: str) -> bool:
     return REQUIRED_COOKIE_KEYS.issubset(parsed.keys())
 
 
+def _build_nick_variants(display_name: str, login_name: str = "") -> list[str]:
+    """Build a list of lowercase name variants for YouTube mention matching.
+
+    YouTube @mentions use the channel handle (e.g. ``@angeloftheodd``), which
+    may differ from the display name (e.g. "Angel Of The Odd").  We generate
+    normalised forms so that mentions are detected regardless of spacing or
+    casing.
+
+    Args:
+        display_name: The user's YouTube display name (from page HTML).
+        login_name: Optional explicit YouTube handle/username from settings.
+    """
+    variants: set[str] = set()
+
+    # Explicit handle from settings is the most reliable source
+    if login_name:
+        handle = login_name.strip().lstrip("@")
+        if handle:
+            variants.add(handle.lower())
+            # Without dots/underscores/hyphens
+            normalised = re.sub(r"[._-]", "", handle).lower()
+            if normalised != handle.lower():
+                variants.add(normalised)
+
+    if display_name:
+        dn = display_name.strip().lstrip("@")
+        variants.add(dn.lower())
+        # Without spaces (covers "Angel Of The Odd" -> "angeloftheodd")
+        no_spaces = dn.replace(" ", "")
+        if no_spaces.lower() != dn.lower():
+            variants.add(no_spaces.lower())
+        # Without spaces AND special chars (covers punctuation differences)
+        alpha_only = re.sub(r"[^a-z0-9]", "", dn.lower())
+        if alpha_only and alpha_only not in variants:
+            variants.add(alpha_only)
+
+    # Discard empty / too-short variants (avoid false positives)
+    result = [v for v in variants if len(v) >= 2]
+    if result:
+        logger.debug(f"YouTube mention variants: {result}")
+    return result
+
+
+def _extract_handle_for_channel(channel_id: str, html: str) -> str:
+    """Extract the channel handle for a specific channel ID from page HTML.
+
+    Searches for ``browseEndpoint`` objects that pair the given channel ID
+    with a ``canonicalBaseUrl`` containing the handle.
+    """
+    escaped = re.escape(channel_id)
+    # {"browseId":"UCxxx","canonicalBaseUrl":"/@handle"}
+    m = re.search(
+        rf'"browseId"\s*:\s*"{escaped}"\s*,\s*"canonicalBaseUrl"\s*:\s*"/@([^"]+)"',
+        html,
+    )
+    if not m:
+        # Reverse field order
+        m = re.search(
+            rf'"canonicalBaseUrl"\s*:\s*"/@([^"]+)"\s*,\s*"browseId"\s*:\s*"{escaped}"',
+            html,
+        )
+    return m.group(1).strip() if m else ""
+
+
 class YouTubeChatConnection(BaseChatConnection):
     """YouTube live chat connection.
 
@@ -263,6 +327,7 @@ class YouTubeChatConnection(BaseChatConnection):
         self._extract_lock: asyncio.Lock = asyncio.Lock()
         self._slow_mode_seconds: int = 0  # Known slow mode interval from room state
         self._last_send_time: float = 0.0  # monotonic timestamp of last successful send
+        self._nick_variants: list[str] = []  # All name forms for mention matching
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a YouTube channel's live chat.
@@ -292,6 +357,12 @@ class YouTubeChatConnection(BaseChatConnection):
             self._cookies = parse_cookie_string(yt_settings.cookies)
             if REQUIRED_COOKIE_KEYS.issubset(self._cookies.keys()):
                 await self._extract_send_params(video_id)
+
+        # Build mention variants from login_name even without cookies
+        if not self._nick_variants and yt_settings:
+            login = getattr(yt_settings, "login_name", "")
+            if login:
+                self._nick_variants = _build_nick_variants("", login)
 
         try:
             self._processor = LivestreamListProcessor()
@@ -709,7 +780,31 @@ class YouTubeChatConnection(BaseChatConnection):
             )
             if author_match:
                 self._nick = author_match.group(1)
-                logger.debug(f"YouTube user: {self._nick}")
+                logger.debug(f"YouTube display name: {self._nick}")
+
+            # Detect channel handle
+            detected_handle = ""
+            # YouTube often returns the handle (with @) as the authorName
+            if self._nick and self._nick.startswith("@"):
+                detected_handle = self._nick[1:]
+            # Fallback: try browseEndpoint pairing with datasyncId (UC channel IDs)
+            if not detected_handle and self._datasync_id:
+                channel_id = self._datasync_id.split("||")[0].strip()
+                if channel_id.startswith("UC"):
+                    detected_handle = _extract_handle_for_channel(channel_id, html)
+            if detected_handle:
+                logger.info(f"YouTube handle detected: @{detected_handle}")
+
+            # Auto-save detected handle to settings (first time only)
+            yt_s = self._youtube_settings
+            if detected_handle and yt_s and not getattr(yt_s, "login_name", ""):
+                yt_s.login_name = detected_handle
+
+            # Build mention-matching name variants
+            login = getattr(yt_s, "login_name", "") if yt_s else ""
+            self._nick_variants = _build_nick_variants(
+                self._nick if author_match else "", login
+            )
 
             # Check for chat restrictions (e.g. subscribers-only mode)
             restriction_match = re.search(

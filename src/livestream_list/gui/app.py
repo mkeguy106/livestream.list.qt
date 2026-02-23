@@ -306,6 +306,7 @@ class Application(QApplication):
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
         self.chat_manager.raid_received.connect(self._on_raid_received)
         self.chat_manager.mention_received.connect(self._on_mention_received)
+        self.chat_manager.settings_changed.connect(self.save_settings)
 
         # Set up monitor callbacks
         self.monitor.on_stream_online(self._on_stream_online)

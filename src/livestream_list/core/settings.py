@@ -120,6 +120,7 @@ class YouTubeSettings:
     use_ytdlp_fallback: bool = True  # Fall back to yt-dlp if HTML scraping fails
     cookie_browser: str = ""  # Browser ID used for import (e.g. "firefox", "chrome")
     cookie_auto_refresh: bool = True  # Auto-refresh cookies when expired
+    login_name: str = ""  # YouTube handle for @mention matching (e.g. "angeloftheodd")
 
 
 @dataclass
@@ -535,6 +536,7 @@ class Settings:
                 use_ytdlp_fallback=yt.get("use_ytdlp_fallback", True),
                 cookie_browser=yt.get("cookie_browser", ""),
                 cookie_auto_refresh=yt.get("cookie_auto_refresh", True),
+                login_name=yt.get("login_name", ""),
             )
 
         # Kick
@@ -836,6 +838,7 @@ class Settings:
                 "use_ytdlp_fallback": self.youtube.use_ytdlp_fallback,
                 "cookie_browser": self.youtube.cookie_browser,
                 "cookie_auto_refresh": self.youtube.cookie_auto_refresh,
+                "login_name": self.youtube.login_name,
                 **({"cookies": self.youtube.cookies} if not exclude_secrets else {}),
             },
             "kick": {

@@ -1431,6 +1431,8 @@ class ChatManager(QObject):
     badge_map_ready = Signal(str)  # channel_key
     # Emitted when YouTube cookies are auto-refreshed successfully
     youtube_cookies_refreshed = Signal()
+    # Emitted when settings were modified and need saving
+    settings_changed = Signal()
 
     def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
         super().__init__(parent)
@@ -1624,7 +1626,7 @@ class ChatManager(QObject):
             lambda evt, key=channel_key: (self.moderation_received.emit(key, evt))
         )
         connection.error.connect(lambda msg, key=channel_key: (self._on_connection_error(key, msg)))
-        connection.connected.connect(lambda key=channel_key: self.chat_connected.emit(key))
+        connection.connected.connect(lambda key=channel_key: self._on_chat_connected(key))
         connection.disconnected.connect(lambda key=channel_key: self.chat_disconnected.emit(key))
         connection.room_state_changed.connect(
             lambda state, key=channel_key: self.room_state_changed.emit(key, state)
@@ -2084,6 +2086,13 @@ class ChatManager(QObject):
         conn = self._connections.get(channel_key)
         return conn.is_connected if conn else False
 
+    def _on_chat_connected(self, channel_key: str) -> None:
+        """Handle a chat connection being established."""
+        self.chat_connected.emit(channel_key)
+        # Persist auto-detected YouTube handle
+        if channel_key.startswith("youtube:") and self.settings.youtube.login_name:
+            self.settings_changed.emit()
+
     def _on_connection_error(self, channel_key: str, message: str) -> None:
         """Handle connection error - log and forward to UI."""
         # Intercept YouTube cookie expiry for auto-refresh
@@ -2267,15 +2276,16 @@ class ChatManager(QObject):
                     image_set.prefetch(scale=2.0, priority=DOWNLOAD_PRIORITY_HIGH)
 
         # Detect @mentions of our username
-        our_nick = self._get_our_nick(channel_key)
-        if our_nick:
-            mention_pattern = f"@{our_nick}".lower()
-            our_nick_lower = our_nick.lower()
+        nick_variants = self._get_our_nick_variants(channel_key)
+        if nick_variants:
+            mention_patterns = [f"@{v}" for v in nick_variants]
             for msg in messages:
-                if mention_pattern in msg.text.lower():
+                text_lower = msg.text.lower()
+                if any(p in text_lower for p in mention_patterns):
                     msg.is_mention = True
                     # Emit mention signal (skip our own messages)
-                    if msg.user.name.lower() != our_nick_lower:
+                    sender = msg.user.name.lower()
+                    if sender not in nick_variants:
                         self.mention_received.emit(channel_key, msg)
 
         # Detect custom highlight keywords
@@ -2317,14 +2327,27 @@ class ChatManager(QObject):
             self._chat_log_flush_timer.stop()
             self._chat_log_enforce_timer.stop()
 
-    def _get_our_nick(self, channel_key: str) -> str | None:
-        """Get the authenticated user's display name for the given channel's connection."""
+    def _get_our_nick_variants(self, channel_key: str) -> list[str]:
+        """Get all lowercase name variants for mention matching.
+
+        For YouTube this includes the display name, channel handle, and
+        normalised forms (without spaces, etc.).  For Twitch/Kick it returns
+        the single login name.
+        """
         connection = self._connections.get(channel_key)
-        if connection:
-            nick = getattr(connection, "_nick", None)
-            if nick and not nick.startswith("justinfan"):
-                return nick
-        return None
+        if not connection:
+            return []
+
+        # YouTube connections carry a pre-built list of name variants
+        variants = getattr(connection, "_nick_variants", None)
+        if variants:
+            return variants
+
+        # Twitch / Kick: single nick
+        nick = getattr(connection, "_nick", None)
+        if nick and not nick.startswith("justinfan"):
+            return [nick.lower()]
+        return []
 
     def _rebuild_emote_map(self, channel_key: str) -> dict[str, ChatEmote]:
         """Build and cache a per-channel emote map."""
