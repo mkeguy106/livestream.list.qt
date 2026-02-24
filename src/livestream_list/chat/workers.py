@@ -20,9 +20,16 @@ class AsyncTaskWorker(QThread):
     result_ready = Signal(object)
     error_occurred = Signal(str)
 
-    def __init__(self, task: Callable[[], Any], *, parent=None):
+    def __init__(
+        self,
+        task: Callable[[], Any],
+        *,
+        parent=None,
+        error_log_level: int = logging.ERROR,
+    ):
         super().__init__(parent)
         self._task = task
+        self._error_log_level = error_log_level
 
     def run(self):
         try:
@@ -37,5 +44,5 @@ class AsyncTaskWorker(QThread):
                 result = self._task()
             self.result_ready.emit(result)
         except Exception as e:
-            logger.error(f"AsyncTaskWorker error: {e}", exc_info=True)
+            logger.log(self._error_log_level, f"AsyncTaskWorker error: {e}", exc_info=True)
             self.error_occurred.emit(str(e))

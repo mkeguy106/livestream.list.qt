@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from ...chat.emotes.cache import EmoteCache
 from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, HypeTrainEvent, ModerationEvent
+from ...chat.workers import AsyncTaskWorker
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
 from ..theme import get_theme
@@ -1939,10 +1940,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     meta_parts.append(f"\U0001f550 {uptime}")
             if meta_parts:
                 meta_html = " &nbsp;\u00b7&nbsp; ".join(meta_parts)
-                html_title += (
-                    f'<br><span style="font-size: 10px; opacity: 0.7;">'
-                    f"{meta_html}</span>"
-                )
+                html_title += f'<br><span style="font-size: 10px; opacity: 0.7;">{meta_html}</span>'
             self._title_banner.setText(html_title)
             self._title_banner.setToolTip(title)  # Full title on hover (plain text)
             self._title_banner.show()
@@ -2753,170 +2751,97 @@ class ChatWidget(QWidget, ChatSearchMixin):
         card.show_at(pos)
         self._active_user_card = card
 
-        # Async fetch for Twitch, YouTube, and Kick users
-        if user.platform == StreamPlatform.TWITCH:
-            self._fetch_user_card_info(card, user.name)
-        elif user.platform == StreamPlatform.YOUTUBE:
-            self._fetch_youtube_user_card_info(card, user.id)
-        elif user.platform == StreamPlatform.KICK:
-            self._fetch_kick_user_card_info(card, user.name)
+        # Async fetch user card data (all platforms)
+        self._fetch_user_card_data(card, user)
 
-    def _fetch_user_card_info(self, card: UserCardPopup, login: str) -> None:
-        """Fetch Twitch user card info, pronouns, and avatar asynchronously."""
+    def _fetch_user_card_data(self, card: UserCardPopup, user) -> None:
+        """Fetch user card info and avatar asynchronously for any platform."""
         import asyncio
+        import logging as _logging
 
-        from PySide6.QtCore import QThread
+        from ...chat.models import ChatUser
 
-        # Extract channel login from channel_key (format: "twitch:channelname")
-        channel_login = ""
-        if ":" in self.channel_key:
-            channel_login = self.channel_key.split(":", 1)[-1]
+        if not isinstance(user, ChatUser):
+            return
 
-        class _CardFetchThread(QThread):
-            def __init__(self, login, channel_login, parent=None):
-                super().__init__(parent)
-                self._login = login
-                self._channel_login = channel_login
-                self.result: dict | None = None
-                self.pronouns: str = ""
-                self.avatar_data: bytes = b""
+        platform = user.platform
 
-            def run(self):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # Fetch user info and pronouns in parallel
-                    user_info_coro = UserCardFetchWorker.fetch_twitch_user_info(
-                        self._login, self._channel_login
+        if platform == StreamPlatform.TWITCH:
+            login = user.name
+            channel_login = self.channel_key.split(":", 1)[-1] if ":" in self.channel_key else ""
+
+            async def fetch():
+                results = await asyncio.gather(
+                    UserCardFetchWorker.fetch_twitch_user_info(login, channel_login),
+                    UserCardFetchWorker.fetch_pronouns(login),
+                )
+                result, pronouns = results[0], results[1]
+                avatar_data = b""
+                if result and result.get("profile_image_url"):
+                    avatar_data = await UserCardFetchWorker.fetch_avatar(
+                        result["profile_image_url"]
                     )
-                    pronouns_coro = UserCardFetchWorker.fetch_pronouns(self._login)
-                    results = loop.run_until_complete(asyncio.gather(user_info_coro, pronouns_coro))
-                    self.result = results[0]
-                    self.pronouns = results[1]
-                    # Fetch avatar if we got a URL
-                    if self.result and self.result.get("profile_image_url"):
-                        self.avatar_data = loop.run_until_complete(
-                            UserCardFetchWorker.fetch_avatar(self.result["profile_image_url"])
-                        )
-                except Exception as e:
-                    logger.debug(f"User card fetch error for {self._login}: {e}")
-                finally:
-                    loop.close()
+                return (result, pronouns, avatar_data)
 
-        thread = _CardFetchThread(login, channel_login, parent=self)
+        elif platform == StreamPlatform.YOUTUBE:
+            channel_id = user.id
 
-        def on_finished():
-            if thread.result:
-                card.update_created_at(thread.result.get("created_at", ""))
-                card.update_bio(thread.result.get("description", ""))
-                card.update_followers(thread.result.get("follower_count", 0))
-                card.update_follow_age(thread.result.get("followed_at", ""))
-            else:
-                card.update_created_at("")
-            if thread.pronouns:
-                card.update_pronouns(thread.pronouns)
-            if thread.avatar_data:
-                card.update_avatar(thread.avatar_data)
+            async def fetch():
+                result = await UserCardFetchWorker.fetch_youtube_user_info(channel_id)
+                avatar_data = b""
+                if result and result.get("avatar_url"):
+                    avatar_data = await UserCardFetchWorker.fetch_avatar(result["avatar_url"])
+                return (result, "", avatar_data)
 
-        thread.finished.connect(on_finished)
-        thread.start()
+        elif platform == StreamPlatform.KICK:
+            slug = user.name
 
-    def _fetch_youtube_user_card_info(self, card: UserCardPopup, channel_id: str) -> None:
-        """Fetch YouTube user card info and avatar asynchronously."""
-        import asyncio
+            async def fetch():
+                result = await UserCardFetchWorker.fetch_kick_user_info(slug)
+                avatar_data = b""
+                if result and result.get("profile_pic_url"):
+                    avatar_data = await UserCardFetchWorker.fetch_avatar(result["profile_pic_url"])
+                return (result, "", avatar_data)
 
-        from PySide6.QtCore import QThread
+        else:
+            return
 
-        class _YTCardFetchThread(QThread):
-            def __init__(self, channel_id, parent=None):
-                super().__init__(parent)
-                self._channel_id = channel_id
-                self.result: dict | None = None
-                self.avatar_data: bytes = b""
+        worker = AsyncTaskWorker(fetch, parent=self, error_log_level=_logging.DEBUG)
 
-            def run(self):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    self.result = loop.run_until_complete(
-                        UserCardFetchWorker.fetch_youtube_user_info(self._channel_id)
-                    )
-                    if self.result and self.result.get("avatar_url"):
-                        self.avatar_data = loop.run_until_complete(
-                            UserCardFetchWorker.fetch_avatar(self.result["avatar_url"])
-                        )
-                except Exception as e:
-                    logger.debug(f"YouTube user card fetch error for {self._channel_id}: {e}")
-                finally:
-                    loop.close()
-
-        thread = _YTCardFetchThread(channel_id, parent=self)
-
-        def on_finished():
-            if thread.result:
-                card.update_bio(thread.result.get("description", ""))
-                card.update_created_at(thread.result.get("joined_date_text", ""))
-                card.update_subscribers(thread.result.get("subscriber_count_text", ""))
-                card.update_country(thread.result.get("country", ""))
-            else:
-                if card._created_label:
-                    card._created_label.setText("Joined: Unknown")
-            if thread.avatar_data:
-                card.update_avatar(thread.avatar_data)
-
-        thread.finished.connect(on_finished)
-        thread.start()
-
-    def _fetch_kick_user_card_info(self, card: UserCardPopup, slug: str) -> None:
-        """Fetch Kick user card info and avatar asynchronously."""
-        import asyncio
-
-        from PySide6.QtCore import QThread
-
-        class _KickCardFetchThread(QThread):
-            def __init__(self, slug, parent=None):
-                super().__init__(parent)
-                self._slug = slug
-                self.result: dict | None = None
-                self.avatar_data: bytes = b""
-
-            def run(self):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    self.result = loop.run_until_complete(
-                        UserCardFetchWorker.fetch_kick_user_info(self._slug)
-                    )
-                    if self.result and self.result.get("profile_pic_url"):
-                        self.avatar_data = loop.run_until_complete(
-                            UserCardFetchWorker.fetch_avatar(
-                                self.result["profile_pic_url"]
-                            )
-                        )
-                except Exception as e:
-                    logger.debug(f"Kick user card fetch error for {self._slug}: {e}")
-                finally:
-                    loop.close()
-
-        thread = _KickCardFetchThread(slug, parent=self)
-
-        def on_finished():
-            if thread.result:
-                card.update_bio(thread.result.get("bio", ""))
-                card.update_followers(thread.result.get("followers_count", 0))
-                card.update_country(thread.result.get("country", ""))
-                card.update_verified(thread.result.get("verified", False))
-                # Kick API doesn't expose account creation date
+        def on_result(payload):
+            result, pronouns, avatar_data = payload
+            if platform == StreamPlatform.TWITCH:
+                if result:
+                    card.update_created_at(result.get("created_at", ""))
+                    card.update_bio(result.get("description", ""))
+                    card.update_followers(result.get("follower_count", 0))
+                    card.update_follow_age(result.get("followed_at", ""))
+                else:
+                    card.update_created_at("")
+                if pronouns:
+                    card.update_pronouns(pronouns)
+            elif platform == StreamPlatform.YOUTUBE:
+                if result:
+                    card.update_bio(result.get("description", ""))
+                    card.update_created_at(result.get("joined_date_text", ""))
+                    card.update_subscribers(result.get("subscriber_count_text", ""))
+                    card.update_country(result.get("country", ""))
+                else:
+                    if card._created_label:
+                        card._created_label.setText("Joined: Unknown")
+            elif platform == StreamPlatform.KICK:
+                if result:
+                    card.update_bio(result.get("bio", ""))
+                    card.update_followers(result.get("followers_count", 0))
+                    card.update_country(result.get("country", ""))
+                    card.update_verified(result.get("verified", False))
                 if card._created_label:
                     card._created_label.hide()
-            else:
-                if card._created_label:
-                    card._created_label.hide()
-            if thread.avatar_data:
-                card.update_avatar(thread.avatar_data)
+            if avatar_data:
+                card.update_avatar(avatar_data)
 
-        thread.finished.connect(on_finished)
-        thread.start()
+        worker.result_ready.connect(on_result)
+        worker.start()
 
     def _show_emote_picker(self) -> None:
         """Show the emote picker popup above the emote button."""
