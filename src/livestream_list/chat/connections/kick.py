@@ -57,12 +57,9 @@ class KickChatConnection(BaseChatConnection):
         self._nick = ""  # Set after fetching user info from Kick API
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._should_stop = False
         self._chatroom_id: int | None = None
         self._broadcaster_user_id: int | None = None
         self._badge_url_map: dict[str, str] = {}  # badge_type -> image_url
-        self._message_batch: list[ChatMessage] = []
-        self._last_flush: float = 0
         self._refresh_lock = asyncio.Lock()
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
@@ -357,10 +354,7 @@ class KickChatConnection(BaseChatConnection):
                     pass
 
                 # Flush batched messages
-                now = time.monotonic()
-                if len(self._message_batch) >= 10 or (
-                    self._message_batch and now - self._last_flush >= 0.1
-                ):
+                if self._should_flush_batch():
                     self._flush_batch()
 
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -525,13 +519,6 @@ class KickChatConnection(BaseChatConnection):
             duration=int(duration) if duration else None,
         )
         self._emit_moderation(event)
-
-    def _flush_batch(self) -> None:
-        """Emit batched messages and reset."""
-        if self._message_batch:
-            self._emit_messages(self._message_batch[:])
-            self._message_batch.clear()
-        self._last_flush = time.monotonic()
 
     async def _cleanup(self) -> None:
         """Clean up WebSocket and session."""

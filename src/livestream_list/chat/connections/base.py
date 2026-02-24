@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import random
+import time
 from abc import abstractmethod
 
 from PySide6.QtCore import QObject, Signal
@@ -16,6 +17,10 @@ INITIAL_RECONNECT_DELAY = 1.0  # seconds
 MAX_RECONNECT_DELAY = 60.0  # seconds
 RECONNECT_BACKOFF_FACTOR = 2.0
 RECONNECT_JITTER = 0.1  # 10% jitter to prevent thundering herd
+
+# Message batching thresholds
+BATCH_SIZE_THRESHOLD = 10  # Flush after this many messages
+BATCH_FLUSH_INTERVAL = 0.1  # seconds — flush if older than this
 
 
 class BaseChatConnection(QObject):
@@ -45,6 +50,9 @@ class BaseChatConnection(QObject):
         self._reconnect_delay: float = INITIAL_RECONNECT_DELAY
         self._should_reconnect: bool = True  # Set to False for intentional disconnect
         self._max_reconnect_attempts: int = 10  # 0 = unlimited
+        self._should_stop: bool = False
+        self._message_batch: list[ChatMessage] = []
+        self._last_flush: float = 0.0
 
     @property
     def channel_id(self) -> str:
@@ -110,6 +118,21 @@ class BaseChatConnection(QObject):
         """Emit an error."""
         logger.error(f"Chat connection error ({self.__class__.__name__}): {message}")
         self.error.emit(message)
+
+    def _flush_batch(self) -> None:
+        """Emit batched messages and reset."""
+        if self._message_batch:
+            self._emit_messages(self._message_batch[:])
+            self._message_batch.clear()
+        self._last_flush = time.monotonic()
+
+    def _should_flush_batch(self) -> bool:
+        """Check if the message batch should be flushed."""
+        if not self._message_batch:
+            return False
+        return len(self._message_batch) >= BATCH_SIZE_THRESHOLD or (
+            time.monotonic() - self._last_flush >= BATCH_FLUSH_INTERVAL
+        )
 
     def _reset_backoff(self) -> None:
         """Reset reconnection backoff delay after successful connection."""

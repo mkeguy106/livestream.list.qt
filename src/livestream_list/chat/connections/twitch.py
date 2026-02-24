@@ -186,13 +186,10 @@ class TwitchChatConnection(BaseChatConnection):
         self._display_name = ""  # Display name with proper case (for local echo)
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
-        self._should_stop = False
         self._auth_failed = False
         self._can_send = False  # Set True only if token has chat:edit scope
         self._user_badges: list[ChatBadge] = []  # Our badges from USERSTATE
         self._user_color: str | None = None  # Our color from USERSTATE/GLOBALUSERSTATE
-        self._message_batch: list[ChatMessage] = []
-        self._last_flush: float = 0
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a Twitch channel's chat via IRC WebSocket."""
@@ -361,10 +358,7 @@ class TwitchChatConnection(BaseChatConnection):
                         await self._handle_message(line)
 
                 # Flush batched messages if threshold reached
-                now = time.monotonic()
-                if len(self._message_batch) >= 10 or (
-                    self._message_batch and now - self._last_flush >= 0.1
-                ):
+                if self._should_flush_batch():
                     self._flush_batch()
 
             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -709,13 +703,6 @@ class TwitchChatConnection(BaseChatConnection):
         except Exception as e:
             logger.warning(f"Failed to get own user ID: {e}")
         return None
-
-    def _flush_batch(self) -> None:
-        """Emit batched messages and reset."""
-        if self._message_batch:
-            self._emit_messages(self._message_batch[:])
-            self._message_batch.clear()
-        self._last_flush = time.monotonic()
 
     async def _cleanup(self) -> None:
         """Clean up WebSocket and session."""

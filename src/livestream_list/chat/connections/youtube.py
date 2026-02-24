@@ -49,9 +49,12 @@ _EMOJI_SHORTCODE_RE = re.compile(r":([a-z][a-z0-9_]*[a-z0-9]):")
 
 # Shortcodes where YouTube name diverges from the official Unicode character name
 _EMOJI_FALLBACK: dict[str, str] = {
-    "thumbsup": "\U0001f44d", "thumbs_up": "\U0001f44d",
-    "thumbsdown": "\U0001f44e", "thumbs_down": "\U0001f44e",
-    "heart": "\u2764\ufe0f", "red_heart": "\u2764\ufe0f",
+    "thumbsup": "\U0001f44d",
+    "thumbs_up": "\U0001f44d",
+    "thumbsdown": "\U0001f44e",
+    "thumbs_down": "\U0001f44e",
+    "heart": "\u2764\ufe0f",
+    "red_heart": "\u2764\ufe0f",
     "broken_heart": "\U0001f494",
     "100": "\U0001f4af",
     "pray": "\U0001f64f",
@@ -192,9 +195,11 @@ def _shortcode_to_unicode(name: str) -> str | None:
 
 def _replace_emoji_shortcodes(text: str) -> str:
     """Replace :emoji_name: patterns in text with Unicode characters."""
+
     def _replace(m: re.Match) -> str:
         char = _shortcode_to_unicode(m.group(1))
         return char if char else m.group(0)
+
     return _EMOJI_SHORTCODE_RE.sub(_replace, text)
 
 
@@ -308,11 +313,8 @@ class YouTubeChatConnection(BaseChatConnection):
 
     def __init__(self, youtube_settings: YouTubeSettings | None = None, parent=None):
         super().__init__(parent)
-        self._should_stop = False
         self._pytchat = None  # pytchat.LiveChat instance
         self._processor: LivestreamListProcessor | None = None
-        self._message_batch: list[ChatMessage] = []
-        self._last_flush: float = 0
         self._youtube_settings = youtube_settings
 
         # InnerTube sending state
@@ -594,9 +596,7 @@ class YouTubeChatConnection(BaseChatConnection):
                                 slow_sec = self._parse_slow_mode_from_response(data)
                                 if slow_sec > 0:
                                     self._slow_mode_seconds = slow_sec
-                                    self._emit_room_state(
-                                        ChatRoomState(slow=slow_sec)
-                                    )
+                                    self._emit_room_state(ChatRoomState(slow=slow_sec))
                                 return "slow_mode"
 
                             # Success — extract slow mode interval from response
@@ -606,9 +606,7 @@ class YouTubeChatConnection(BaseChatConnection):
                                 timeout_sec = int(timeout_usec) // 1_000_000
                                 if timeout_sec > 0:
                                     self._slow_mode_seconds = timeout_sec
-                                    self._emit_room_state(
-                                        ChatRoomState(slow=timeout_sec)
-                                    )
+                                    self._emit_room_state(ChatRoomState(slow=timeout_sec))
 
                         except Exception as e:
                             logger.debug(f"YouTube send response parse error: {e}")
@@ -617,22 +615,17 @@ class YouTubeChatConnection(BaseChatConnection):
                     elif resp.status in (400, 409):
                         error_text = await resp.text()
                         if self._is_slow_mode_error(error_text):
-                            logger.warning(
-                                f"YouTube send rejected: slow mode ({resp.status})"
-                            )
+                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
                             return "slow_mode"
                         logger.warning(
-                            f"YouTube send_message failed ({resp.status}): "
-                            f"{error_text[:200]}"
+                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
                         )
                         return False
                     elif resp.status in (401, 403):
                         error_text = await resp.text()
                         # Check for slow mode before treating as auth failure
                         if self._is_slow_mode_error(error_text):
-                            logger.warning(
-                                f"YouTube send rejected: slow mode ({resp.status})"
-                            )
+                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
                             return "slow_mode"
                         logger.warning(f"YouTube send auth failed ({resp.status})")
                         return "auth_expired"
@@ -645,13 +638,10 @@ class YouTubeChatConnection(BaseChatConnection):
                     else:
                         error_text = await resp.text()
                         if self._is_slow_mode_error(error_text):
-                            logger.warning(
-                                f"YouTube send rejected: slow mode ({resp.status})"
-                            )
+                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
                             return "slow_mode"
                         logger.warning(
-                            f"YouTube send_message failed ({resp.status}): "
-                            f"{error_text[:200]}"
+                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
                         )
                         return False
 
@@ -802,9 +792,7 @@ class YouTubeChatConnection(BaseChatConnection):
 
             # Build mention-matching name variants
             login = getattr(yt_s, "login_name", "") if yt_s else ""
-            self._nick_variants = _build_nick_variants(
-                self._nick if author_match else "", login
-            )
+            self._nick_variants = _build_nick_variants(self._nick if author_match else "", login)
 
             # Check for chat restrictions (e.g. subscribers-only mode)
             restriction_match = re.search(
@@ -831,9 +819,7 @@ class YouTubeChatConnection(BaseChatConnection):
                 slow_seconds = int(slow_match.group(1))
             else:
                 # Fallback: search for slowModeDurationSeconds anywhere
-                slow_match2 = re.search(
-                    r'"?slowModeDurationSeconds"?\s*[:=]\s*"?(\d+)', html
-                )
+                slow_match2 = re.search(r'"?slowModeDurationSeconds"?\s*[:=]\s*"?(\d+)', html)
                 if slow_match2:
                     slow_seconds = int(slow_match2.group(1))
 
@@ -881,10 +867,7 @@ class YouTubeChatConnection(BaseChatConnection):
                     self._process_extra_events()
 
                 # Flush batched messages
-                now = time.monotonic()
-                if len(self._message_batch) >= 10 or (
-                    self._message_batch and now - self._last_flush >= 0.1
-                ):
+                if self._should_flush_batch():
                     self._flush_batch()
 
             except Exception as e:
@@ -1118,13 +1101,6 @@ class YouTubeChatConnection(BaseChatConnection):
         except Exception as e:
             logger.debug(f"Failed to parse YouTube chat item: {e}")
             return None
-
-    def _flush_batch(self) -> None:
-        """Emit batched messages and reset."""
-        if self._message_batch:
-            self._emit_messages(self._message_batch[:])
-            self._message_batch.clear()
-        self._last_flush = time.monotonic()
 
     def _cleanup_pytchat(self) -> None:
         """Clean up pytchat instance."""
