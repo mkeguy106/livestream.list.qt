@@ -19,6 +19,16 @@ datas = [
     (DATA_DIR, "data"),
 ]
 
+# pyspellchecker dictionary files (en.json.gz etc.)
+try:
+    import spellchecker as _sc
+    _sc_dir = os.path.dirname(_sc.__file__)
+    _sc_res = os.path.join(_sc_dir, "resources")
+    if os.path.isdir(_sc_res):
+        datas.append((_sc_res, "spellchecker/resources"))
+except ImportError:
+    pass
+
 # Bundled yt-dlp.exe (downloaded during CI)
 ytdlp_exe = os.path.join(SPEC_DIR, "yt-dlp.exe")
 if os.path.isfile(ytdlp_exe):
@@ -38,6 +48,7 @@ a = Analysis(
         "pydantic_settings",
         "pytchat",
         "aiohttp",
+        "spellchecker",
     ],
     hookspath=[],
     hooksconfig={},

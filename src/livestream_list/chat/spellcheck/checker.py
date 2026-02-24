@@ -133,7 +133,9 @@ class _SpellBackend:
             self._engine = PySpellChecker(distance=1)
             self.name = "pyspellchecker"
             return
-        except ImportError:
+        except (ImportError, ValueError, FileNotFoundError):
+            # ValueError/FileNotFoundError: pyspellchecker can't find its bundled
+            # dictionary (e.g. en.json.gz missing in PyInstaller builds)
             pass
 
         raise ImportError("No spellcheck backend available (tried hunspell, pyspellchecker)")
