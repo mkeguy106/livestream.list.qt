@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
@@ -1193,8 +1194,7 @@ class HypeTrainEventSubWorker(QThread):
                         # No subscriptions succeeded (not a mod of any channel).
                         # Use exponential backoff up to 5 minutes.
                         logger.debug(
-                            f"HypeTrainEventSub: no active subscriptions, "
-                            f"retrying in {backoff}s"
+                            f"HypeTrainEventSub: no active subscriptions, retrying in {backoff}s"
                         )
                         await asyncio.sleep(backoff)
                         backoff = min(backoff * 2, 300)
@@ -1281,9 +1281,7 @@ class HypeTrainEventSubWorker(QThread):
                 ):
                     return has_any_sub
 
-    async def _subscribe_channel(
-        self, session, session_id: str, broadcaster_id: str
-    ) -> bool:
+    async def _subscribe_channel(self, session, session_id: str, broadcaster_id: str) -> bool:
         """Subscribe to all 3 hype train event types for a broadcaster.
 
         Returns True if at least one subscription succeeded.
@@ -1658,96 +1656,63 @@ class ChatManager(QObject):
         self._workers[channel_key] = worker
         worker.start()
 
-    def reconnect_twitch(self) -> None:
-        """Reconnect all Twitch chat connections with the current token.
-
-        Call this after re-login to pick up new OAuth scopes.
-        """
-        twitch_keys = [
-            key
-            for key, ls in self._livestreams.items()
-            if ls.channel.platform == StreamPlatform.TWITCH
-        ]
-        if not twitch_keys:
+    def _reconnect_platform(
+        self,
+        platform: StreamPlatform,
+        has_auth: bool,
+        *,
+        post_reconnect: Callable[[], None] | None = None,
+        emit_on_empty: bool = True,
+    ) -> None:
+        """Reconnect all chat connections for a platform."""
+        keys = [key for key, ls in self._livestreams.items() if ls.channel.platform == platform]
+        if not keys:
+            if emit_on_empty:
+                self.auth_state_changed.emit(has_auth)
             return
 
-        logger.info(f"Reconnecting {len(twitch_keys)} Twitch chats with updated token")
+        logger.info(f"Reconnecting {len(keys)} {platform.value} chats")
 
-        for key in twitch_keys:
-            # Stop old worker/connection
+        for key in keys:
             worker = self._workers.pop(key, None)
             if worker:
                 worker.stop()
                 worker.wait(500)
             self._disconnect_connection_signals(key)
+            self._start_connection(key, self._livestreams[key])
 
-            # Restart with new token
-            livestream = self._livestreams[key]
-            self._start_connection(key, livestream)
+        if post_reconnect:
+            post_reconnect()
+        self.auth_state_changed.emit(has_auth)
 
-        self._ensure_user_emotes(force=True)
-        # Restart whisper listener with new token
-        self._stop_whisper_listener()
-        self._ensure_whisper_listener()
-        self.auth_state_changed.emit(bool(self.settings.twitch.access_token))
+    def reconnect_twitch(self) -> None:
+        """Reconnect all Twitch chat connections with the current token."""
+
+        def _post() -> None:
+            self._ensure_user_emotes(force=True)
+            self._stop_whisper_listener()
+            self._ensure_whisper_listener()
+
+        self._reconnect_platform(
+            StreamPlatform.TWITCH,
+            bool(self.settings.twitch.access_token),
+            post_reconnect=_post,
+            emit_on_empty=False,
+        )
 
     def reconnect_kick(self) -> None:
-        """Reconnect all Kick chat connections with the current token.
-
-        Call this after login to enable sending messages.
-        """
-        kick_keys = [
-            key
-            for key, ls in self._livestreams.items()
-            if ls.channel.platform == StreamPlatform.KICK
-        ]
-        if not kick_keys:
-            # No active Kick chats, just emit auth change
-            self.auth_state_changed.emit(bool(self.settings.kick.access_token))
-            return
-
-        logger.info(f"Reconnecting {len(kick_keys)} Kick chats with updated token")
-
-        for key in kick_keys:
-            worker = self._workers.pop(key, None)
-            if worker:
-                worker.stop()
-                worker.wait(500)
-            self._disconnect_connection_signals(key)
-
-            livestream = self._livestreams[key]
-            self._start_connection(key, livestream)
-
-        self.auth_state_changed.emit(bool(self.settings.kick.access_token))
+        """Reconnect all Kick chat connections with the current token."""
+        self._reconnect_platform(
+            StreamPlatform.KICK,
+            bool(self.settings.kick.access_token),
+        )
 
     def reconnect_youtube(self) -> None:
-        """Reconnect all YouTube chat connections with current cookies.
-
-        Call this after saving cookies to enable sending messages.
-        """
-        youtube_keys = [
-            key
-            for key, ls in self._livestreams.items()
-            if ls.channel.platform == StreamPlatform.YOUTUBE
-        ]
-        if not youtube_keys:
-            # No active YouTube chats, just emit auth change
-            self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
-            return
-
-        logger.debug(f"Reconnecting {len(youtube_keys)} YouTube chats with updated cookies")
-
-        for key in youtube_keys:
-            worker = self._workers.pop(key, None)
-            if worker:
-                worker.stop()
-                worker.wait(500)
-            self._disconnect_connection_signals(key)
-
-            livestream = self._livestreams[key]
-            self._start_connection(key, livestream)
-
-        self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
+        """Reconnect all YouTube chat connections with current cookies."""
+        self._reconnect_platform(
+            StreamPlatform.YOUTUBE,
+            bool(self.settings.youtube.cookies),
+        )
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
@@ -2101,9 +2066,7 @@ class ChatManager(QObject):
                 logger.info("YouTube cookie auto-refresh started, suppressing error")
                 return
             # Can't auto-refresh — emit the user-facing error instead
-            message = (
-                "YouTube login expired — update cookies in Preferences > Accounts"
-            )
+            message = "YouTube login expired — update cookies in Preferences > Accounts"
 
         logger.error(f"Chat error for {channel_key}: {message}")
         self.chat_error.emit(channel_key, message)
@@ -2125,8 +2088,7 @@ class ChatManager(QObject):
 
         self._yt_cookie_auto_refresh_attempted = True
         logger.info(
-            f"Auto-refreshing YouTube cookies from browser: "
-            f"{self.settings.youtube.cookie_browser}"
+            f"Auto-refreshing YouTube cookies from browser: {self.settings.youtube.cookie_browser}"
         )
 
         worker = CookieRefreshWorker(self.settings.youtube.cookie_browser, parent=self)
@@ -2594,9 +2556,7 @@ class ChatManager(QObject):
         # Notify widgets so they can re-resolve badges on already-displayed messages
         self.badge_map_ready.emit(channel_key)
 
-    def resolve_badges_on_messages(
-        self, channel_key: str, messages: list[ChatMessage]
-    ) -> int:
+    def resolve_badges_on_messages(self, channel_key: str, messages: list[ChatMessage]) -> int:
         """Re-resolve badge ImageSets on existing messages after badge map arrives.
 
         Returns the number of badges that were newly resolved.

@@ -83,6 +83,23 @@ class PrefixLayout:
     text_start_x: int  # x after username + colon/space — where message text begins
 
 
+@dataclass(slots=True)
+class _FontBundle:
+    """Cached font variants and their metrics, keyed on font_size."""
+
+    font_size: int
+    main: QFont
+    main_fm: QFontMetrics
+    timestamp: QFont
+    timestamp_fm: QFontMetrics
+    bold: QFont
+    bold_fm: QFontMetrics
+    italic: QFont
+    italic_fm: QFontMetrics
+    reply: QFont
+    reply_fm: QFontMetrics
+
+
 class ChatMessageDelegate(QStyledItemDelegate):
     """Delegate for rendering chat messages in a QListView.
 
@@ -98,6 +115,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._animation_time_ms: int = 0
         # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
         self._size_cache: dict[tuple, QSize] = {}
+        self._font_bundle: _FontBundle | None = None
+        self._settings_hash_cache: tuple | None = None
         self._size_cache_max = 2000
         self._scaled_cache: dict[tuple[str, int], QPixmap] = {}
         self._scaled_cache_max = 1200
@@ -356,19 +375,69 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def invalidate_size_cache(self) -> None:
         """Clear the sizeHint cache when settings change or on resize."""
         self._size_cache.clear()
+        self._font_bundle = None
+        self._settings_hash_cache = None
 
     def _get_settings_hash(self) -> tuple:
         """Return a tuple of settings that affect message sizing."""
-        return (
-            self.settings.font_size,
-            self.settings.line_spacing,
-            self.settings.show_timestamps,
-            self.settings.timestamp_format,
-            self.settings.show_badges,
-            self.settings.show_mod_badges,
-            self.settings.show_emotes,
-            self.settings.moderated_message_display,
+        if self._settings_hash_cache is None:
+            self._settings_hash_cache = (
+                self.settings.font_size,
+                self.settings.line_spacing,
+                self.settings.show_timestamps,
+                self.settings.timestamp_format,
+                self.settings.show_badges,
+                self.settings.show_mod_badges,
+                self.settings.show_emotes,
+                self.settings.moderated_message_display,
+            )
+        return self._settings_hash_cache
+
+    def _get_font_bundle(self, base_font: QFont) -> _FontBundle:
+        """Get or create cached font bundle for the current font_size."""
+        size = self.settings.font_size
+        if self._font_bundle is not None and self._font_bundle.font_size == size:
+            return self._font_bundle
+
+        font = QFont(base_font)
+        font.setPointSize(size)
+
+        ts_font = QFont(font)
+        ts_font.setPointSize(max(size - 2, 4))
+
+        bold_font = QFont(font)
+        bold_font.setBold(True)
+
+        italic_font = QFont(font)
+        italic_font.setItalic(True)
+
+        reply_font = QFont(font)
+        reply_font.setItalic(True)
+        reply_font.setPointSize(max(size - 1, 4))
+
+        self._font_bundle = _FontBundle(
+            font_size=size,
+            main=font,
+            main_fm=QFontMetrics(font),
+            timestamp=ts_font,
+            timestamp_fm=QFontMetrics(ts_font),
+            bold=bold_font,
+            bold_fm=QFontMetrics(bold_font),
+            italic=italic_font,
+            italic_fm=QFontMetrics(italic_font),
+            reply=reply_font,
+            reply_fm=QFontMetrics(reply_font),
         )
+        return self._font_bundle
+
+    def _is_badge_visible(self, badge: ChatBadge) -> bool:
+        """Check if a badge should be displayed given current settings."""
+        is_mod = badge.name in MOD_BADGE_NAMES
+        if not self.settings.show_badges and not is_mod:
+            return False
+        if not self.settings.show_mod_badges and is_mod:
+            return False
+        return True
 
     def _get_emote_height(self, fm: QFontMetrics) -> int:
         """Get emote height scaled to font size."""
@@ -506,9 +575,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x = rect_x
         y = rect_y
 
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
+        fb = self._get_font_bundle(option.font)
+        fm = fb.main_fm
         scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
@@ -518,11 +586,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Timestamp
         ts_end_x = x
         if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             ts_end_x = x + (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
+                fb.timestamp_fm.horizontalAdvance(self.settings.ts_measure_text) + TIMESTAMP_PADDING
             )
             x = ts_end_x
 
@@ -530,9 +595,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         system_text_lines = 0
         has_content = True
         if message.is_system and message.system_text:
-            sys_font = QFont(font)
-            sys_font.setItalic(True)
-            sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+            sys_width = fb.italic_fm.horizontalAdvance(message.system_text)
             remaining = available_width - (x - rect_x)
             system_text_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
             if message.text:
@@ -544,20 +607,16 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Reply context
         reply_rect = QRect()
         if has_content and message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            reply_fm = QFontMetrics(reply_font)
             reply_text = message.reply_parent_text
             if len(reply_text) > 50:
                 reply_text = reply_text[:50] + "\u2026"
             reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
-            reply_width = reply_fm.horizontalAdvance(reply_str)
+            reply_width = fb.reply_fm.horizontalAdvance(reply_str)
             remaining = available_width - (x - rect_x)
             reply_rect = QRect(
-                int(x), int(y), min(int(reply_width), int(remaining)), reply_fm.height()
+                int(x), int(y), min(int(reply_width), int(remaining)), fb.reply_fm.height()
             )
-            y += reply_fm.height() + 2
+            y += fb.reply_fm.height() + 2
             x = rect_x
 
         # Content line starts here
@@ -572,10 +631,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         ):
             badge_y = y + (line_height - badge_size) // 2
             for badge in message.user.badges:
-                is_mod = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
+                if not self._is_badge_visible(badge):
                     continue
                 image_ref = self._get_badge_image_ref_for_scale(badge, scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
@@ -599,13 +655,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
         username_rect = QRect()
         text_start_x = int(x)
         if has_content:
-            bold_font = QFont(font)
-            bold_font.setBold(True)
             name_text = self._resolve_display_name(message)
-            name_width = QFontMetrics(bold_font).horizontalAdvance(name_text)
+            name_width = fb.bold_fm.horizontalAdvance(name_text)
             username_rect = QRect(int(x), int(y), int(name_width), line_height)
             suffix = " " if message.is_action else ": "
-            text_start_x = int(x) + QFontMetrics(bold_font).horizontalAdvance(name_text + suffix)
+            text_start_x = int(x) + fb.bold_fm.horizontalAdvance(name_text + suffix)
 
         return PrefixLayout(
             rect_x=rect_x,
@@ -677,10 +731,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Compute prefix layout (shared coordinates for all elements)
         layout = self._compute_prefix_layout(option, message)
+        fb = self._get_font_bundle(option.font)
 
-        font = painter.font()
-        font.setPointSize(self.settings.font_size)
-        painter.setFont(font)
+        painter.setFont(fb.main)
 
         # Highlight text color for selected state
         highlight_color = option.palette.highlightedText().color() if is_selected else None
@@ -689,10 +742,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if self.settings.show_timestamps:
             ts_text = message.timestamp.astimezone().strftime(self.settings.ts_strftime)
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            painter.setFont(ts_font)
-            ts_width = QFontMetrics(ts_font).horizontalAdvance(ts_text) + TIMESTAMP_PADDING
+            painter.setFont(fb.timestamp)
+            ts_width = fb.timestamp_fm.horizontalAdvance(ts_text) + TIMESTAMP_PADDING
             painter.drawText(
                 layout.rect_x,
                 layout.rect_y,
@@ -701,13 +752,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 ALIGN_LEFT_VCENTER,
                 ts_text,
             )
-            painter.setFont(font)
+            painter.setFont(fb.main)
 
         # System message text (USERNOTICE - subs, raids, etc.)
         if message.is_system and message.system_text:
-            italic_font = QFont(font)
-            italic_font.setItalic(True)
-            painter.setFont(italic_font)
+            painter.setFont(fb.italic)
             painter.setPen(highlight_color if is_selected else self._system_message_color)
             remaining = layout.available_width - (layout.ts_end_x - layout.rect_x)
             painter.drawText(
@@ -718,17 +767,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 ALIGN_WRAP,
                 message.system_text,
             )
-            painter.setFont(font)
+            painter.setFont(fb.main)
             if not layout.has_content:
                 painter.restore()
                 return
 
         # Reply context (shown above the message on its own line)
         if message.reply_parent_display_name and not layout.reply_rect.isEmpty():
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            painter.setFont(reply_font)
+            painter.setFont(fb.reply)
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
             reply_text = message.reply_parent_text
             if len(reply_text) > 50:
@@ -743,7 +789,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 ALIGN_LEFT_VCENTER,
                 reply_str,
             )
-            painter.setFont(font)
+            painter.setFont(fb.main)
 
         # Badges (draw at layout-computed positions)
         for badge_rect, badge in layout.badge_rects:
@@ -769,9 +815,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             )
 
         # Username
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        painter.setFont(bold_font)
+        painter.setFont(fb.bold)
 
         if self.settings.use_platform_name_colors:
             user_color = QColor(message.user.color) if message.user.color else QColor(180, 130, 255)
@@ -820,7 +864,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             )
 
         # Message text (with inline emotes)
-        painter.setFont(font)
+        painter.setFont(fb.main)
         if is_selected:
             painter.setPen(highlight_color)
         elif message.is_action:
@@ -1219,9 +1263,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Cache miss - calculate size
         padding_v = self.settings.line_spacing
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
+        fb = self._get_font_bundle(option.font)
+        fm = fb.main_fm
         scale = self._current_scale_from_option(option)
 
         badge_size = self._get_badge_size(fm)
@@ -1232,33 +1275,21 @@ class ChatMessageDelegate(QStyledItemDelegate):
         prefix_width = 0
         ts_width_only = 0
         if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             ts_w = (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
+                fb.timestamp_fm.horizontalAdvance(self.settings.ts_measure_text) + TIMESTAMP_PADDING
             )
             prefix_width += ts_w
             ts_width_only = ts_w
         if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            badge_count = 0
-            for b in message.user.badges:
-                is_mod = b.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
-                    continue
-                badge_count += 1
+            badge_count = sum(1 for b in message.user.badges if self._is_badge_visible(b))
             prefix_width += badge_count * (badge_size + BADGE_SPACING)
 
         if self._has_user_note(message):
             prefix_width += badge_size + BADGE_SPACING
 
-        bold_font = QFont(font)
-        bold_font.setBold(True)
         suffix = ": " if not message.is_action else " "
         name_text = self._resolve_display_name(message) + suffix
-        prefix_width += QFontMetrics(bold_font).horizontalAdvance(name_text)
+        prefix_width += fb.bold_fm.horizontalAdvance(name_text)
 
         # Calculate number of lines needed via wrapping simulation
         # First line has reduced width (after prefix); wrapped lines get full width
@@ -1288,18 +1319,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Reply context needs an extra line
         extra_reply_height = 0
         if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            extra_reply_height = QFontMetrics(reply_font).height() + 2
+            extra_reply_height = fb.reply_fm.height() + 2
 
         # System messages need extra lines for system_text
         # System text is drawn after timestamp only (before badges/username), so use ts_width_only
         extra_lines = 0
         if message.is_system and message.system_text:
-            sys_font = QFont(font)
-            sys_font.setItalic(True)
-            sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+            sys_width = fb.italic_fm.horizontalAdvance(message.system_text)
             sys_available = max(available_width - ts_width_only, 200)
             extra_lines = max(1, int(sys_width / sys_available) + 1) if sys_available > 0 else 1
             if not message.text:
@@ -1800,28 +1826,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         fm: QFontMetrics,
         wrap_width: int | None = None,
     ) -> int:
-        """Compute how many lines text needs with word wrapping.
-
-        content_width is the available width for the first line.
-        wrap_width is the available width for subsequent lines (defaults to content_width).
-        """
+        """Compute how many lines text needs with word wrapping."""
         if wrap_width is None:
             wrap_width = content_width
-        lines = 1
-        current_x = 0
-        line_width = content_width  # First line
-        words = text.split(" ")
-        for i, word in enumerate(words):
-            draw_word = word if i == 0 else " " + word
-            word_width = fm.horizontalAdvance(draw_word)
-            if current_x + word_width > line_width and (current_x > 0 or line_width < wrap_width):
-                lines += 1
-                current_x = 0
-                line_width = wrap_width  # Subsequent lines get full width
-                if draw_word.startswith(" "):
-                    draw_word = draw_word[1:]
-                    word_width = fm.horizontalAdvance(draw_word)
-            current_x += word_width
+        _, lines, _ = self._advance_line_count(text, 0, 1, content_width, fm, wrap_width)
         return lines
 
     def _compute_wrapped_lines_with_emotes(
