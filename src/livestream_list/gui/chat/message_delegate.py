@@ -1,6 +1,9 @@
 """Custom delegate for painting chat messages."""
 
+from __future__ import annotations
+
 import re
+from dataclasses import dataclass
 
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
 from PySide6.QtGui import (
@@ -50,6 +53,34 @@ MENTION_RE = re.compile(r"(?:^|(?<=\s))@(\w+)")
 # Shared alignment flags
 ALIGN_LEFT_VCENTER = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 ALIGN_WRAP = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap
+
+
+@dataclass(slots=True)
+class PrefixLayout:
+    """Prefix layout coordinates computed once for paint() and hit-testing."""
+
+    rect_x: int  # Content area left edge (after PADDING_H)
+    rect_y: int  # Content area top edge (after line_spacing)
+    available_width: int  # Content area width
+
+    line_height: int  # max(fm.height(), badge_size)
+    badge_size: int
+    emote_height: int
+    fm: QFontMetrics  # Main font metrics (font_size applied)
+    scale: float  # Device pixel ratio
+
+    ts_end_x: int  # x after timestamp (= rect_x if no timestamp)
+    system_text_lines: int  # Lines consumed by system text (0 if none)
+    has_content: bool  # False if system-only message (no user text)
+
+    reply_rect: QRect  # Bounding rect of reply context line (empty if none)
+
+    content_y: int  # y of the badges/username/text line
+    badge_rects: list[tuple[QRect, ChatBadge]]  # (bounding_rect, badge)
+    notebook_rect: QRect | None
+
+    username_rect: QRect  # Username only (no colon/space)
+    text_start_x: int  # x after username + colon/space — where message text begins
 
 
 class ChatMessageDelegate(QStyledItemDelegate):
@@ -126,6 +157,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
         key = (color.rgb(), bg.rgb())
         if key in self._contrast_cache:
             return self._contrast_cache[key]
+
+        # Evict oldest 25% when cache is full
+        if len(self._contrast_cache) >= 500:
+            keys = list(self._contrast_cache.keys())
+            for k in keys[: len(keys) // 4]:
+                del self._contrast_cache[k]
 
         fg_lum = self._relative_luminance(color)
         bg_lum = self._relative_luminance(bg)
@@ -452,6 +489,144 @@ class ChatMessageDelegate(QStyledItemDelegate):
         """Get badge size scaled to font size."""
         return max(fm.height(), 10)
 
+    def _compute_prefix_layout(
+        self, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> PrefixLayout:
+        """Compute prefix layout coordinates shared by paint() and hit-testing.
+
+        Returns a PrefixLayout with positions for timestamp, system text, reply context,
+        badges, notebook icon, username, and text start. Called once per paint/hit-test
+        instead of duplicating the math in every method.
+        """
+        padding_v = self.settings.line_spacing
+        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        rect_x = rect.x()
+        rect_y = rect.y()
+        available_width = rect.width()
+        x = rect_x
+        y = rect_y
+
+        font = option.font
+        font.setPointSize(self.settings.font_size)
+        fm = QFontMetrics(font)
+        scale = self._current_scale_from_option(option)
+
+        badge_size = self._get_badge_size(fm)
+        emote_height = self._get_emote_height(fm)
+        line_height = max(fm.height(), badge_size)
+
+        # Timestamp
+        ts_end_x = x
+        if self.settings.show_timestamps:
+            ts_font = QFont(font)
+            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
+            ts_end_x = x + (
+                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
+                + TIMESTAMP_PADDING
+            )
+            x = ts_end_x
+
+        # System text
+        system_text_lines = 0
+        has_content = True
+        if message.is_system and message.system_text:
+            sys_font = QFont(font)
+            sys_font.setItalic(True)
+            sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
+            remaining = available_width - (x - rect_x)
+            system_text_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
+            if message.text:
+                y += line_height * system_text_lines
+                x = rect_x
+            else:
+                has_content = False
+
+        # Reply context
+        reply_rect = QRect()
+        if has_content and message.reply_parent_display_name:
+            reply_font = QFont(font)
+            reply_font.setItalic(True)
+            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
+            reply_fm = QFontMetrics(reply_font)
+            reply_text = message.reply_parent_text
+            if len(reply_text) > 50:
+                reply_text = reply_text[:50] + "\u2026"
+            reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
+            reply_width = reply_fm.horizontalAdvance(reply_str)
+            remaining = available_width - (x - rect_x)
+            reply_rect = QRect(
+                int(x), int(y), min(int(reply_width), int(remaining)), reply_fm.height()
+            )
+            y += reply_fm.height() + 2
+            x = rect_x
+
+        # Content line starts here
+        content_y = y
+
+        # Badges
+        badge_rects: list[tuple[QRect, ChatBadge]] = []
+        if (
+            has_content
+            and message.user.badges
+            and (self.settings.show_badges or self.settings.show_mod_badges)
+        ):
+            badge_y = y + (line_height - badge_size) // 2
+            for badge in message.user.badges:
+                is_mod = badge.name in MOD_BADGE_NAMES
+                if not self.settings.show_badges and not is_mod:
+                    continue
+                if not self.settings.show_mod_badges and is_mod:
+                    continue
+                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
+                pixmap = self._get_loaded_pixmap(image_ref)
+                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
+                    badge_rects.append(
+                        (
+                            QRect(int(x), int(badge_y), badge_size, badge_size),
+                            badge,
+                        )
+                    )
+                    x += badge_size + BADGE_SPACING
+
+        # Notebook icon
+        notebook_rect = None
+        if has_content and self._has_user_note(message):
+            note_y = y + (line_height - badge_size) // 2
+            notebook_rect = QRect(int(x), int(note_y), badge_size, badge_size)
+            x += badge_size + BADGE_SPACING
+
+        # Username
+        username_rect = QRect()
+        text_start_x = int(x)
+        if has_content:
+            bold_font = QFont(font)
+            bold_font.setBold(True)
+            name_text = self._resolve_display_name(message)
+            name_width = QFontMetrics(bold_font).horizontalAdvance(name_text)
+            username_rect = QRect(int(x), int(y), int(name_width), line_height)
+            suffix = " " if message.is_action else ": "
+            text_start_x = int(x) + QFontMetrics(bold_font).horizontalAdvance(name_text + suffix)
+
+        return PrefixLayout(
+            rect_x=rect_x,
+            rect_y=rect_y,
+            available_width=available_width,
+            line_height=line_height,
+            badge_size=badge_size,
+            emote_height=emote_height,
+            fm=fm,
+            scale=scale,
+            ts_end_x=ts_end_x,
+            system_text_lines=system_text_lines,
+            has_content=has_content,
+            reply_rect=reply_rect,
+            content_y=content_y,
+            badge_rects=badge_rects,
+            notebook_rect=notebook_rect,
+            username_rect=username_rect,
+            text_start_x=text_start_x,
+        )
+
     def paint(  # noqa: N802
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
     ) -> None:
@@ -500,20 +675,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 return
             painter.setOpacity(0.5)
 
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
-        available_width = rect.width()
+        # Compute prefix layout (shared coordinates for all elements)
+        layout = self._compute_prefix_layout(option, message)
 
         font = painter.font()
         font.setPointSize(self.settings.font_size)
         painter.setFont(font)
-        fm = QFontMetrics(font)
-
-        badge_size = self._get_badge_size(fm)
-        emote_height = self._get_emote_height(fm)
-        line_height = max(fm.height(), badge_size)
 
         # Highlight text color for selected state
         highlight_color = option.palette.highlightedText().color() if is_selected else None
@@ -526,8 +693,14 @@ class ChatMessageDelegate(QStyledItemDelegate):
             ts_font.setPointSize(max(self.settings.font_size - 2, 4))
             painter.setFont(ts_font)
             ts_width = QFontMetrics(ts_font).horizontalAdvance(ts_text) + TIMESTAMP_PADDING
-            painter.drawText(x, y, ts_width, line_height, ALIGN_LEFT_VCENTER, ts_text)
-            x += ts_width
+            painter.drawText(
+                layout.rect_x,
+                layout.rect_y,
+                ts_width,
+                layout.line_height,
+                ALIGN_LEFT_VCENTER,
+                ts_text,
+            )
             painter.setFont(font)
 
         # System message text (USERNOTICE - subs, raids, etc.)
@@ -536,22 +709,22 @@ class ChatMessageDelegate(QStyledItemDelegate):
             italic_font.setItalic(True)
             painter.setFont(italic_font)
             painter.setPen(highlight_color if is_selected else self._system_message_color)
-            sys_text = message.system_text
-            sys_width = QFontMetrics(italic_font).horizontalAdvance(sys_text)
-            remaining = available_width - (x - rect.x())
-            sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-            painter.drawText(x, y, remaining, line_height * sys_lines, ALIGN_WRAP, sys_text)
+            remaining = layout.available_width - (layout.ts_end_x - layout.rect_x)
+            painter.drawText(
+                layout.ts_end_x,
+                layout.rect_y,
+                remaining,
+                layout.line_height * layout.system_text_lines,
+                ALIGN_WRAP,
+                message.system_text,
+            )
             painter.setFont(font)
-            # If there's user text, move to next line
-            if message.text:
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
+            if not layout.has_content:
                 painter.restore()
                 return
 
         # Reply context (shown above the message on its own line)
-        if message.reply_parent_display_name:
+        if message.reply_parent_display_name and not layout.reply_rect.isEmpty():
             reply_font = QFont(font)
             reply_font.setItalic(True)
             reply_font.setPointSize(max(self.settings.font_size - 1, 4))
@@ -561,44 +734,39 @@ class ChatMessageDelegate(QStyledItemDelegate):
             if len(reply_text) > 50:
                 reply_text = reply_text[:50] + "\u2026"
             reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
-            reply_fm = QFontMetrics(reply_font)
-            remaining = available_width - (x - rect.x())
-            painter.drawText(x, y, remaining, line_height, ALIGN_LEFT_VCENTER, reply_str)
-            y += reply_fm.height() + 2
-            x = rect.x()
+            remaining = layout.available_width - (layout.reply_rect.x() - layout.rect_x)
+            painter.drawText(
+                layout.reply_rect.x(),
+                layout.reply_rect.y(),
+                remaining,
+                layout.line_height,
+                ALIGN_LEFT_VCENTER,
+                reply_str,
+            )
             painter.setFont(font)
 
-        # Badges
-        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            badge_y = y + (line_height - badge_size) // 2
-            for badge in message.user.badges:
-                is_mod_badge = badge.name in MOD_BADGE_NAMES
-                # Skip non-mod badges if show_badges is off
-                if not self.settings.show_badges and not is_mod_badge:
-                    continue
-                # Skip mod badges if show_mod_badges is off
-                if not self.settings.show_mod_badges and is_mod_badge:
-                    continue
-                if not badge.image_set or not self._image_store:
-                    if badge.id in FALLBACK_BADGE_IDS:
-                        self._draw_fallback_badge(
-                            painter, badge.id, int(x), int(badge_y), badge_size
-                        )
-                        x += badge_size + BADGE_SPACING
-                    continue
-                image_set = badge.image_set.bind(self._image_store)
-                badge.image_set = image_set
-                image_ref = image_set.get_image_or_loaded(scale=self._current_scale(painter))
-                pixmap = image_ref.pixmap_or_load() if image_ref else None
-                if pixmap and not pixmap.isNull():
-                    painter.drawPixmap(x, badge_y, badge_size, badge_size, pixmap)
-                    x += badge_size + BADGE_SPACING
+        # Badges (draw at layout-computed positions)
+        for badge_rect, badge in layout.badge_rects:
+            bx, by = badge_rect.x(), badge_rect.y()
+            if not badge.image_set or not self._image_store:
+                if badge.id in FALLBACK_BADGE_IDS:
+                    self._draw_fallback_badge(painter, badge.id, bx, by, layout.badge_size)
+                continue
+            image_set = badge.image_set.bind(self._image_store)
+            badge.image_set = image_set
+            image_ref = image_set.get_image_or_loaded(scale=self._current_scale(painter))
+            pixmap = image_ref.pixmap_or_load() if image_ref else None
+            if pixmap and not pixmap.isNull():
+                painter.drawPixmap(bx, by, layout.badge_size, layout.badge_size, pixmap)
 
         # Notebook icon for users with notes
-        if self._has_user_note(message):
-            note_y = y + (line_height - badge_size) // 2
-            self._draw_notebook_icon(painter, int(x), int(note_y), badge_size)
-            x += badge_size + BADGE_SPACING
+        if layout.notebook_rect:
+            self._draw_notebook_icon(
+                painter,
+                layout.notebook_rect.x(),
+                layout.notebook_rect.y(),
+                layout.badge_size,
+            )
 
         # Username
         bold_font = QFont(font)
@@ -631,15 +799,25 @@ class ChatMessageDelegate(QStyledItemDelegate):
         painter.setPen(highlight_color if is_selected else user_color)
 
         name_text = self._resolve_display_name(message)
+        name_draw_width = layout.text_start_x - layout.username_rect.x()
         if message.is_action:
-            name_width = QFontMetrics(bold_font).horizontalAdvance(name_text + " ")
-            painter.drawText(x, y, name_width, line_height, ALIGN_LEFT_VCENTER, name_text)
-            x += name_width
+            painter.drawText(
+                layout.username_rect.x(),
+                layout.content_y,
+                name_draw_width,
+                layout.line_height,
+                ALIGN_LEFT_VCENTER,
+                name_text,
+            )
         else:
-            name_with_colon = name_text + ": "
-            name_width = QFontMetrics(bold_font).horizontalAdvance(name_with_colon)
-            painter.drawText(x, y, name_width, line_height, ALIGN_LEFT_VCENTER, name_with_colon)
-            x += name_width
+            painter.drawText(
+                layout.username_rect.x(),
+                layout.content_y,
+                name_draw_width,
+                layout.line_height,
+                ALIGN_LEFT_VCENTER,
+                name_text + ": ",
+            )
 
         # Message text (with inline emotes)
         painter.setFont(font)
@@ -653,23 +831,22 @@ class ChatMessageDelegate(QStyledItemDelegate):
         # Truncated mode: replace text with "<message deleted>"
         if message.is_moderated and mod_display == "truncated":
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
-            deleted_text = "<message deleted>"
-            remaining_width = available_width - (x - rect.x())
+            remaining_width = layout.available_width - (layout.text_start_x - layout.rect_x)
             painter.drawText(
-                int(x),
-                int(y),
+                layout.text_start_x,
+                layout.content_y,
                 remaining_width,
-                line_height,
+                layout.line_height,
                 ALIGN_LEFT_VCENTER,
-                deleted_text,
+                "<message deleted>",
             )
             painter.restore()
             return
 
         msg_text = message.text
-        text_x = x
-        text_y = y
-        wrap_x = rect.x()  # Wrapped lines start at left margin
+        text_x = layout.text_start_x
+        text_y = layout.content_y
+        wrap_x = layout.rect_x
 
         if self.settings.show_emotes and message.emote_positions:
             self._paint_text_with_emotes(
@@ -678,25 +855,25 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 message.emote_positions,
                 text_x,
                 text_y,
-                line_height,
-                emote_height,
-                available_width - (text_x - rect.x()),
-                fm,
+                layout.line_height,
+                layout.emote_height,
+                layout.available_width - (text_x - layout.rect_x),
+                layout.fm,
                 message.is_moderated,
                 is_selected=is_selected,
                 dpr=self._current_scale(painter),
                 wrap_x=wrap_x,
             )
         else:
-            remaining_width = available_width - (text_x - rect.x())
+            remaining_width = layout.available_width - (text_x - layout.rect_x)
             self._paint_wrapped_text(
                 painter,
                 msg_text,
                 text_x,
                 text_y,
                 remaining_width,
-                line_height,
-                fm,
+                layout.line_height,
+                layout.fm,
                 message.is_moderated,
                 is_selected=is_selected,
                 wrap_x=wrap_x,
@@ -758,15 +935,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
             frames = image_ref.frames_or_load() if image_ref else None
             if frames and self.settings.animate_emotes:
                 key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
-                scaled_frames = self._get_scaled_animated_frames(
-                    key, frames, emote_height, dpr
-                )
+                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height, dpr)
                 pixmap = self._select_animated_frame(image_ref, scaled_frames)
             elif frames:
                 key = image_ref.key if image_ref else f"emote:{emote.provider}:{emote.id}"
-                scaled_frames = self._get_scaled_animated_frames(
-                    key, frames, emote_height, dpr
-                )
+                scaled_frames = self._get_scaled_animated_frames(key, frames, emote_height, dpr)
                 pixmap = scaled_frames[0] if scaled_frames else frames[0]
             else:
                 pixmap = image_ref.pixmap_or_load() if image_ref else None
@@ -1180,154 +1353,23 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
     def _get_username_rect(self, option: QStyleOptionViewItem, message: ChatMessage) -> QRect:
         """Get the bounding rect of the username in a message item."""
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
-
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-        scale = self._current_scale_from_option(option)
-
-        badge_size = self._get_badge_size(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return QRect()
-
-        # Skip reply context line
-        if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            y += QFontMetrics(reply_font).height() + 2
-            x = rect.x()
-
-        # Skip badges - must match paint logic for consistent positioning
-        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            for badge in message.user.badges:
-                is_mod = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
-                    continue
-                # Advance x if pixmap exists or fallback badge drawn
-                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-                pixmap = self._get_loaded_pixmap(image_ref)
-                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
-                    x += badge_size + BADGE_SPACING
-
-        # Skip notebook icon
-        if self._has_user_note(message):
-            x += badge_size + BADGE_SPACING
-
-        # Username rect
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        name_text = self._resolve_display_name(message)
-        name_width = QFontMetrics(bold_font).horizontalAdvance(name_text)
-        return QRect(int(x), int(y), int(name_width), line_height)
+        layout = self._compute_prefix_layout(option, message)
+        if not layout.has_content:
+            return QRect()
+        return layout.username_rect
 
     def _get_emote_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
         """Find which emote (if any) is at the given position, accounting for wrapping."""
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
+        layout = self._compute_prefix_layout(option, message)
+        if not layout.has_content:
+            return None
 
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-        scale = self._current_scale_from_option(option)
-
-        badge_size = self._get_badge_size(fm)
-        emote_height = self._get_emote_height(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return None
-
-        # Skip reply context line
-        if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            y += QFontMetrics(reply_font).height() + 2
-            x = rect.x()
-
-        # Skip badges - must match paint logic for consistent positioning
-        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            for badge in message.user.badges:
-                is_mod = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
-                    continue
-                # Advance x if pixmap exists or fallback badge drawn
-                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-                pixmap = self._get_loaded_pixmap(image_ref)
-                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
-                    x += badge_size + BADGE_SPACING
-
-        # Skip notebook icon
-        if self._has_user_note(message):
-            x += badge_size + BADGE_SPACING
-
-        # Skip username
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        suffix = " " if message.is_action else ": "
-        name_text = self._resolve_display_name(message) + suffix
-        x += QFontMetrics(bold_font).horizontalAdvance(name_text)
-
-        # Walk through text + emotes with wrapping logic
-        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
         last_end = 0
-        start_x = rect.x()
-        current_x = x
-        current_y = y
-        available_width = rect.width()
-        right_edge = rect.x() + available_width
+        start_x = layout.rect_x
+        current_x = layout.text_start_x
+        current_y = layout.content_y
+        right_edge = layout.rect_x + layout.available_width
         last_emote_rect: QRect | None = None
 
         for start, end, emote in message.emote_positions:
@@ -1341,29 +1383,28 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     current_y,
                     start_x,
                     right_edge,
-                    line_height,
-                    fm,
+                    layout.line_height,
+                    layout.fm,
                 )
                 if current_y != prev_y:
                     last_emote_rect = None
 
             # Emote rect (with wrapping)
-            image_ref = self._get_image_ref_for_scale(emote, scale)
+            image_ref = self._get_image_ref_for_scale(emote, layout.scale)
             pixmap = self._get_loaded_pixmap(image_ref)
             if pixmap and not pixmap.isNull():
-                emote_w = self._scaled_width(pixmap, emote_height)
+                emote_w = self._scaled_width(pixmap, layout.emote_height)
             else:
                 emote_text = text[start:end] if end <= len(text) else emote.name
-                emote_w = fm.horizontalAdvance(emote_text)
+                emote_w = layout.fm.horizontalAdvance(emote_text)
 
-            # Wrap emote if needed
             if emote.zero_width and last_emote_rect is not None:
                 overlay_x = int(last_emote_rect.x() + (last_emote_rect.width() - emote_w) / 2)
                 emote_rect = QRect(
                     int(overlay_x),
                     int(last_emote_rect.y()),
                     int(emote_w),
-                    emote_height,
+                    layout.emote_height,
                 )
                 if emote_rect.contains(pos):
                     return emote
@@ -1371,11 +1412,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 continue
             if current_x + emote_w > right_edge and current_x > start_x:
                 current_x = start_x
-                current_y += line_height
+                current_y += layout.line_height
                 last_emote_rect = None
 
-            emote_y_pos = current_y + (line_height - emote_height) // 2
-            emote_rect = QRect(int(current_x), int(emote_y_pos), int(emote_w), emote_height)
+            emote_y_pos = current_y + (layout.line_height - layout.emote_height) // 2
+            emote_rect = QRect(int(current_x), int(emote_y_pos), int(emote_w), layout.emote_height)
             if emote_rect.contains(pos):
                 return emote
             current_x += emote_w
@@ -1392,85 +1433,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if not url_ranges:
             return None
 
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
+        layout = self._compute_prefix_layout(option, message)
+        if not layout.has_content:
+            return None
 
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-        scale = self._current_scale_from_option(option)
-
-        badge_size = self._get_badge_size(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return None
-
-        # Skip reply context line
-        if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            y += QFontMetrics(reply_font).height() + 2
-            x = rect.x()
-
-        # Skip badges - must match paint logic for consistent positioning
-        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            for badge in message.user.badges:
-                is_mod = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
-                    continue
-                # Advance x if pixmap exists or fallback badge drawn
-                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-                pixmap = self._get_loaded_pixmap(image_ref)
-                if (pixmap and not pixmap.isNull()) or badge.id in FALLBACK_BADGE_IDS:
-                    x += badge_size + BADGE_SPACING
-
-        # Skip notebook icon
-        if self._has_user_note(message):
-            x += badge_size + BADGE_SPACING
-
-        # Skip username
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        suffix = " " if message.is_action else ": "
-        name_text = self._resolve_display_name(message) + suffix
-        x += QFontMetrics(bold_font).horizontalAdvance(name_text)
-
-        # Walk through text with wrapping, checking URL word positions
-        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
-        start_x = rect.x()
-        current_x = x
-        current_y = y
-        right_edge = rect.x() + rect.width()
+        start_x = layout.rect_x
+        current_x = layout.text_start_x
+        current_y = layout.content_y
+        right_edge = layout.rect_x + layout.available_width
         has_base_emote = False
 
         if message.emote_positions:
-            # Walk through text segments between emotes
             last_end = 0
             for em_start, em_end, emote in message.emote_positions:
                 if em_start > last_end:
@@ -1482,8 +1456,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         current_y,
                         start_x,
                         right_edge,
-                        line_height,
-                        fm,
+                        layout.line_height,
+                        layout.fm,
                         pos,
                         url_ranges,
                         last_end,
@@ -1496,32 +1470,30 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         current_y,
                         start_x,
                         right_edge,
-                        line_height,
-                        fm,
+                        layout.line_height,
+                        layout.fm,
                     )
                     if current_y != prev_y:
                         has_base_emote = False
                 # Skip emote
-                emote_height = self._get_emote_height(fm)
-                image_ref = self._get_image_ref_for_scale(emote, scale)
+                image_ref = self._get_image_ref_for_scale(emote, layout.scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
-                    emote_w = self._scaled_width(pixmap, emote_height)
+                    emote_w = self._scaled_width(pixmap, layout.emote_height)
                 else:
                     emote_text = text[em_start:em_end] if em_end <= len(text) else emote.name
-                    emote_w = fm.horizontalAdvance(emote_text)
+                    emote_w = layout.fm.horizontalAdvance(emote_text)
                 if emote.zero_width and has_base_emote:
                     last_end = em_end
                     continue
                 if current_x + emote_w > right_edge and current_x > start_x:
                     current_x = start_x
-                    current_y += line_height
+                    current_y += layout.line_height
                     has_base_emote = False
                 current_x += emote_w
                 has_base_emote = True
                 last_end = em_end
 
-            # Remaining text after last emote
             if last_end < len(text):
                 segment = text[last_end:]
                 result = self._check_url_words_at_pos(
@@ -1530,8 +1502,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     current_y,
                     start_x,
                     right_edge,
-                    line_height,
-                    fm,
+                    layout.line_height,
+                    layout.fm,
                     pos,
                     url_ranges,
                     last_end,
@@ -1545,8 +1517,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 current_y,
                 start_x,
                 right_edge,
-                line_height,
-                fm,
+                layout.line_height,
+                layout.fm,
                 pos,
                 url_ranges,
                 0,
@@ -1643,76 +1615,18 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if not has_badges and not has_note:
             return None
 
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
+        layout = self._compute_prefix_layout(option, message)
+        if not layout.has_content:
+            return None
 
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-        scale = self._current_scale_from_option(option)
+        for badge_rect, badge in layout.badge_rects:
+            if badge_rect.contains(pos):
+                return badge
 
-        badge_size = self._get_badge_size(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return None
-
-        # Skip reply context line
-        if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            y += QFontMetrics(reply_font).height() + 2
-            x = rect.x()
-
-        # Check each platform badge
-        badge_y = y + (line_height - badge_size) // 2
-        if has_badges:
-            for badge in message.user.badges:
-                is_mod_badge = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod_badge:
-                    continue
-                if not self.settings.show_mod_badges and is_mod_badge:
-                    continue
-                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-                pixmap = self._get_loaded_pixmap(image_ref)
-                has_pixmap = pixmap and not pixmap.isNull()
-                is_fallback = badge.id in FALLBACK_BADGE_IDS
-                if not has_pixmap and not is_fallback:
-                    continue
-                badge_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
-                if badge_rect.contains(pos):
-                    return badge
-                x += badge_size + BADGE_SPACING
-
-        # Check notebook icon
-        if has_note:
-            note_rect = QRect(int(x), int(badge_y), badge_size, badge_size)
-            if note_rect.contains(pos):
-                user_key = f"{message.user.platform.value}:{message.user.id}"
-                note_text = self.settings.user_notes.get(user_key, "")
-                return ChatBadge(id="note", name="note", image_url="", title=note_text)
+        if layout.notebook_rect and layout.notebook_rect.contains(pos):
+            user_key = f"{message.user.platform.value}:{message.user.id}"
+            note_text = self.settings.user_notes.get(user_key, "")
+            return ChatBadge(id="note", name="note", image_url="", title=note_text)
 
         return None
 
@@ -1720,53 +1634,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
         """Get the bounding rect of the reply context line, if present."""
         if not message.reply_parent_display_name:
             return QRect()
-
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
-
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-
-        badge_size = self._get_badge_size(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return QRect()
-
-        # Reply context line rect
-        reply_font = QFont(font)
-        reply_font.setItalic(True)
-        reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-        reply_fm = QFontMetrics(reply_font)
-        reply_text = message.reply_parent_text
-        if len(reply_text) > 50:
-            reply_text = reply_text[:50] + "\u2026"
-        reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
-        reply_width = reply_fm.horizontalAdvance(reply_str)
-        remaining = rect.width() - (x - rect.x())
-        return QRect(int(x), int(y), min(int(reply_width), int(remaining)), reply_fm.height())
+        layout = self._compute_prefix_layout(option, message)
+        return layout.reply_rect
 
     def _get_mention_at_position(
         self, pos, option: QStyleOptionViewItem, message: ChatMessage
@@ -1779,80 +1648,15 @@ class ChatMessageDelegate(QStyledItemDelegate):
         if not mention_ranges:
             return None
 
-        padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
-        x = rect.x()
-        y = rect.y()
+        layout = self._compute_prefix_layout(option, message)
+        if not layout.has_content:
+            return None
 
-        font = option.font
-        font.setPointSize(self.settings.font_size)
-        fm = QFontMetrics(font)
-        scale = self._current_scale_from_option(option)
-
-        badge_size = self._get_badge_size(fm)
-        line_height = max(fm.height(), badge_size)
-
-        # Skip timestamp
-        if self.settings.show_timestamps:
-            ts_font = QFont(font)
-            ts_font.setPointSize(max(self.settings.font_size - 2, 4))
-            x += (
-                QFontMetrics(ts_font).horizontalAdvance(self.settings.ts_measure_text)
-                + TIMESTAMP_PADDING
-            )
-
-        # Skip system text lines
-        if message.is_system and message.system_text:
-            if message.text:
-                sys_font = QFont(font)
-                sys_font.setItalic(True)
-                sys_width = QFontMetrics(sys_font).horizontalAdvance(message.system_text)
-                remaining = rect.width() - (x - rect.x())
-                sys_lines = max(1, int(sys_width / remaining) + 1) if remaining > 0 else 1
-                y += line_height * sys_lines
-                x = rect.x()
-            else:
-                return None
-
-        # Skip reply context line
-        if message.reply_parent_display_name:
-            reply_font = QFont(font)
-            reply_font.setItalic(True)
-            reply_font.setPointSize(max(self.settings.font_size - 1, 4))
-            y += QFontMetrics(reply_font).height() + 2
-            x = rect.x()
-
-        # Skip badges
-        if message.user.badges and (self.settings.show_badges or self.settings.show_mod_badges):
-            for badge in message.user.badges:
-                is_mod = badge.name in MOD_BADGE_NAMES
-                if not self.settings.show_badges and not is_mod:
-                    continue
-                if not self.settings.show_mod_badges and is_mod:
-                    continue
-                image_ref = self._get_badge_image_ref_for_scale(badge, scale)
-                pixmap = self._get_loaded_pixmap(image_ref)
-                if pixmap and not pixmap.isNull():
-                    x += badge_size + BADGE_SPACING
-
-        # Skip notebook icon
-        if self._has_user_note(message):
-            x += badge_size + BADGE_SPACING
-
-        # Skip username
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        suffix = " " if message.is_action else ": "
-        name_text = self._resolve_display_name(message) + suffix
-        x += QFontMetrics(bold_font).horizontalAdvance(name_text)
-
-        # Walk through text checking mention word positions
-        # start_x is left margin — wrapped lines flow back to start of row
         text = message.text
-        start_x = rect.x()
-        current_x = x
-        current_y = y
-        right_edge = rect.x() + rect.width()
+        start_x = layout.rect_x
+        current_x = layout.text_start_x
+        current_y = layout.content_y
+        right_edge = layout.rect_x + layout.available_width
         has_base_emote = False
 
         if message.emote_positions:
@@ -1867,8 +1671,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         current_y,
                         start_x,
                         right_edge,
-                        line_height,
-                        fm,
+                        layout.line_height,
+                        layout.fm,
                         pos,
                         mention_ranges,
                         last_end,
@@ -1881,26 +1685,25 @@ class ChatMessageDelegate(QStyledItemDelegate):
                         current_y,
                         start_x,
                         right_edge,
-                        line_height,
-                        fm,
+                        layout.line_height,
+                        layout.fm,
                     )
                     if current_y != prev_y:
                         has_base_emote = False
                 # Skip emote
-                emote_height = self._get_emote_height(fm)
-                image_ref = self._get_image_ref_for_scale(emote, scale)
+                image_ref = self._get_image_ref_for_scale(emote, layout.scale)
                 pixmap = self._get_loaded_pixmap(image_ref)
                 if pixmap and not pixmap.isNull():
-                    emote_w = self._scaled_width(pixmap, emote_height)
+                    emote_w = self._scaled_width(pixmap, layout.emote_height)
                 else:
                     emote_text = text[em_start:em_end] if em_end <= len(text) else emote.name
-                    emote_w = fm.horizontalAdvance(emote_text)
+                    emote_w = layout.fm.horizontalAdvance(emote_text)
                 if emote.zero_width and has_base_emote:
                     last_end = em_end
                     continue
                 if current_x + emote_w > right_edge and current_x > start_x:
                     current_x = start_x
-                    current_y += line_height
+                    current_y += layout.line_height
                     has_base_emote = False
                 current_x += emote_w
                 has_base_emote = True
@@ -1914,8 +1717,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     current_y,
                     start_x,
                     right_edge,
-                    line_height,
-                    fm,
+                    layout.line_height,
+                    layout.fm,
                     pos,
                     mention_ranges,
                     last_end,
@@ -1929,8 +1732,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 current_y,
                 start_x,
                 right_edge,
-                line_height,
-                fm,
+                layout.line_height,
+                layout.fm,
                 pos,
                 mention_ranges,
                 0,
