@@ -130,7 +130,7 @@ class _SpellBackend:
         try:
             from spellchecker import SpellChecker as PySpellChecker
 
-            self._engine = PySpellChecker()
+            self._engine = PySpellChecker(distance=1)
             self.name = "pyspellchecker"
             return
         except ImportError:
@@ -160,6 +160,16 @@ class _SpellBackend:
         else:
             self._engine.word_frequency.load_words([word.lower()])  # type: ignore[union-attr]
 
+    def add_batch(self, words: list[str]) -> None:
+        """Add multiple words at once (much faster for pyspellchecker)."""
+        if not words:
+            return
+        if self.name == "hunspell":
+            for word in words:
+                self._engine.add(word)  # type: ignore[union-attr]
+        else:
+            self._engine.word_frequency.load_words([w.lower() for w in words])  # type: ignore[union-attr]
+
 
 class SpellChecker:
     """Wraps spellcheck backend with custom dictionary and chat-aware skip rules."""
@@ -171,22 +181,21 @@ class SpellChecker:
 
         # Load bundled adult words into backend
         bundled = _load_bundled_words()
-        for word in bundled:
-            self._spell.add(word)
         if bundled:
+            self._spell.add_batch(bundled)
             logger.debug("Loaded %d bundled words into spellcheck backend", len(bundled))
 
         # Sync existing custom dictionary words into backend
-        for word in self._dict.all_words:
-            self._spell.add(word)
+        custom = list(self._dict.all_words)
+        if custom:
+            self._spell.add_batch(custom)
 
         # Register callback so future dictionary additions sync to backend
         self._dict.set_on_words_added(self._on_dict_words_added)
 
     def _on_dict_words_added(self, words: set[str]) -> None:
         """Callback when new words are added to the custom dictionary."""
-        for word in words:
-            self._spell.add(word)
+        self._spell.add_batch(list(words))
 
     @property
     def dictionary(self) -> CustomDictionary:

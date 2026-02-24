@@ -39,8 +39,8 @@ pkill -9 -f livestream-list-qt 2>/dev/null; sleep 0.5
 # Create venv (use full path to Python if not in PATH)
 /c/Users/admin/AppData/Local/Programs/Python/Python312/python.exe -m venv .venv
 
-# Install dependencies (hunspell won't build on Windows — skip it, spellcheck is optional)
-.venv/Scripts/python.exe -m pip install aiohttp PySide6 pydantic pydantic-settings desktop-notifier keyring appdirs yt-dlp pytchat
+# Install dependencies (hunspell won't build on Windows — skip it, pyspellchecker is the fallback)
+.venv/Scripts/python.exe -m pip install aiohttp PySide6 pydantic pydantic-settings desktop-notifier keyring appdirs yt-dlp pytchat pyspellchecker
 
 # Install app in editable mode (skip deps since we installed them manually)
 .venv/Scripts/python.exe -m pip install -e . --no-deps
@@ -176,7 +176,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Socials Banner**: Fetched via `SocialsFetchWorker`. Twitch uses GraphQL, YouTube scrapes `/about` page (note: `UC...` IDs need `/channel/UC.../about` format), Kick uses REST API.
 
-**Spellcheck & Autocorrect**: `SpellChecker` in `chat/spellcheck/checker.py` wraps hunspell (system dictionary) with chat-aware skip rules (emotes, URLs, mentions, all-caps). Red wavy underlines drawn in `ChatInput.paintEvent()`. `SpellCompleter` shows click-to-correct popup. Autocorrect (`get_confident_correction`) auto-replaces obvious typos when the user moves past a misspelled word (space + next letter). Confidence rule: correct if apostrophe expansion matches (dont→don't), only 1 suggestion, or top suggestion is within Damerau-Levenshtein distance 1. Bundled adult word list (`data/adult.txt`) prevents profanity from being flagged. Custom dictionary additions sync to hunspell runtime via callback. Corrected words show a green underline for 3 seconds. Both features togglable in Preferences > Chat and the gear menu.
+**Spellcheck & Autocorrect**: `SpellChecker` in `chat/spellcheck/checker.py` wraps hunspell (Linux, fast C extension) or pyspellchecker (cross-platform, pure Python fallback) with chat-aware skip rules (emotes, URLs, mentions, all-caps). Red wavy underlines drawn in `ChatInput.paintEvent()`. `SpellCompleter` shows click-to-correct popup. Autocorrect (`get_confident_correction`) auto-replaces obvious typos when the user moves past a misspelled word (space + next letter). Confidence rule: correct if apostrophe expansion matches (dont→don't), only 1 suggestion, or top suggestion is within Damerau-Levenshtein distance 1. Bundled adult word list (`data/adult.txt`) prevents profanity from being flagged. Custom dictionary additions sync to backend runtime via callback. Corrected words show a green underline for 3 seconds. Both features togglable in Preferences > Chat and the gear menu.
 
 **Chat Logging**: `ChatLogWriter` in `chat/chat_log_store.py` writes buffered JSONL + plain text per-channel logs. Date-based files with configurable disk limit and LRU deletion. History loads from JSONL on channel open.
 
@@ -254,7 +254,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `gui/youtube_login.py` | Windows browser cookie paths (`%LOCALAPPDATA%`, `%APPDATA%`) |
 | `gui/dialogs/preferences.py` | Hides "notify-send" notification backend option |
 
-**Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe`. Spellcheck unavailable on Windows (`hunspell` C extension is Linux-only). Users install streamlink and mpv separately.
+**Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe`. Users install streamlink and mpv separately.
 
 ## Known Pitfalls
 
@@ -282,7 +282,8 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `start_new_session=True` on Windows | Use `creationflags=CREATE_NEW_PROCESS_GROUP \| CREATE_NO_WINDOW` instead (see `core/streamlink.py`) |
 | `os.chmod(0o600)` on Windows | No-op on Windows — skip with `IS_WINDOWS` guard (see `core/credential_store.py`) |
 | `notify-send` on Windows | Doesn't exist — `desktop-notifier` handles Windows toast notifications. Hidden from Preferences backend list. |
-| `hunspell` package on Windows | C extension can't compile — `hunspell` is Linux-only in pyproject.toml. Spellcheck gracefully disabled on Windows. |
+| `hunspell` package on Windows | C extension can't compile — `hunspell` is Linux-only in pyproject.toml. `pyspellchecker` is the cross-platform fallback. |
+| `pyspellchecker` `candidates()` freezes UI | `candidates()` with `distance=2` takes 600-1000ms for longer words. Always init with `distance=1` — autocorrect only trusts distance-1 anyway. |
 | PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
 | `sys.stderr`/`sys.stdout` is `None` in windowed builds | Guard `faulthandler.enable()`, `StreamHandler`, `traceback.print_exc()` — use `logging.NullHandler()` fallback and `logger.error(..., exc_info=True)` instead |
 
