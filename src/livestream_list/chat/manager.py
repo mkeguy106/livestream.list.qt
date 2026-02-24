@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 import time
 import uuid
 from collections.abc import Callable
@@ -19,6 +18,7 @@ from .emotes.image import GifTimer, ImageExpirationPool, ImageSet, ImageSpec
 from .emotes.matcher import find_third_party_emotes
 from .emotes.provider import BTTVProvider, FFZProvider, SevenTVProvider, TwitchProvider
 from .models import ChatBadge, ChatEmote, ChatMessage, ChatUser, HypeTrainEvent
+from .workers import AsyncTaskWorker
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,89 @@ MAX_RECENT_CHANNELS = 30
 MESSAGE_FLUSH_INTERVAL_MS = 50
 MAX_MESSAGES_PER_FLUSH = 200
 MAX_PENDING_MESSAGES = 5000
+
+
+async def _fetch_global_emotes(providers: list[str], oauth_token: str, client_id: str) -> dict:
+    """Fetch Twitch + third-party global emotes."""
+    import aiohttp
+
+    twitch_globals: list[ChatEmote] = []
+    common_globals: list[ChatEmote] = []
+
+    async with aiohttp.ClientSession() as session:
+        twitch_provider = TwitchProvider(
+            oauth_token=oauth_token,
+            client_id=client_id,
+        )
+        try:
+            twitch_globals = await twitch_provider.get_global_emotes(session=session)
+            logger.debug(f"Fetched {len(twitch_globals)} Twitch global emotes")
+        except Exception as e:
+            logger.debug(f"Failed to fetch Twitch global emotes: {e}")
+
+        provider_map = {
+            "7tv": SevenTVProvider,
+            "bttv": BTTVProvider,
+            "ffz": FFZProvider,
+        }
+        for name in providers:
+            provider_cls = provider_map.get(name)
+            if not provider_cls:
+                continue
+            provider = provider_cls()
+            try:
+                emotes = await provider.get_global_emotes(session=session)
+                common_globals.extend(emotes)
+                logger.debug(f"Fetched {len(emotes)} global emotes from {name}")
+            except Exception as e:
+                logger.debug(f"Failed to fetch global emotes from {name}: {e}")
+
+    return {"twitch": twitch_globals, "common": common_globals}
+
+
+async def _fetch_user_emotes(oauth_token: str, client_id: str) -> list[ChatEmote]:
+    """Fetch Twitch user emotes for the authenticated user."""
+    import aiohttp
+
+    if not oauth_token:
+        return []
+
+    # Resolve authenticated user ID
+    user_id = None
+    if oauth_token and client_id:
+        try:
+            headers = {
+                "Authorization": f"Bearer {oauth_token}",
+                "Client-Id": client_id,
+            }
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(
+                    "https://api.twitch.tv/helix/users",
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        users = data.get("data", [])
+                        if users:
+                            user_id = users[0].get("id", "") or None
+        except Exception as e:
+            logger.debug(f"Failed to get authenticated user ID: {e}")
+
+    if not user_id:
+        return []
+
+    twitch_provider = TwitchProvider(
+        oauth_token=oauth_token,
+        client_id=client_id,
+    )
+    try:
+        async with aiohttp.ClientSession() as session:
+            emotes = await twitch_provider.get_user_emotes(user_id, session=session)
+        logger.debug(f"Fetched {len(emotes)} user emotes")
+        return emotes
+    except Exception as e:
+        logger.debug(f"Failed to fetch user emotes: {e}")
+        return []
 
 
 class ChatConnectionWorker(QThread):
@@ -387,531 +470,6 @@ class EmoteFetchWorker(QThread):
             logger.warning(f"Failed to fetch Twitch badges from public API: {e}")
 
         return badge_map
-
-
-class CookieRefreshWorker(QThread):
-    """Worker thread that re-extracts YouTube cookies from the browser headlessly."""
-
-    success = Signal(str)  # cookie_string
-    failed = Signal(str)  # error_message
-
-    def __init__(self, browser_id: str, parent=None):
-        super().__init__(parent)
-        self._browser_id = browser_id
-
-    def run(self):
-        from ..gui.youtube_login import extract_cookies_headless
-
-        cookie_string, error = extract_cookies_headless(self._browser_id)
-        if cookie_string:
-            self.success.emit(cookie_string)
-        else:
-            self.failed.emit(error or "Unknown error during cookie refresh")
-
-
-class SocialsFetchWorker(QThread):
-    """Worker thread that fetches channel social links from platform APIs."""
-
-    socials_fetched = Signal(str, dict)  # channel_key, {platform: url}
-
-    def __init__(self, channel_key: str, channel_id: str, platform: StreamPlatform, parent=None):
-        super().__init__(parent)
-        self.channel_key = channel_key
-        self.channel_id = channel_id
-        self.platform = platform
-
-    def run(self):
-        """Fetch social links based on platform."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            if self.platform == StreamPlatform.TWITCH:
-                socials = loop.run_until_complete(self._fetch_twitch_socials())
-            elif self.platform == StreamPlatform.YOUTUBE:
-                socials = loop.run_until_complete(self._fetch_youtube_socials())
-            elif self.platform == StreamPlatform.KICK:
-                socials = loop.run_until_complete(self._fetch_kick_socials())
-            else:
-                socials = {}
-
-            if socials:
-                self.socials_fetched.emit(self.channel_key, socials)
-        except Exception as e:
-            logger.debug(f"Failed to fetch socials for {self.channel_id}: {e}")
-        finally:
-            loop.close()
-
-    async def _fetch_twitch_socials(self) -> dict[str, str]:
-        """Fetch socials from Twitch GQL channel socialMedias."""
-        import aiohttp
-
-        socials: dict[str, str] = {}
-
-        gql_url = "https://gql.twitch.tv/gql"
-        headers = {
-            "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
-            "Content-Type": "application/json",
-        }
-
-        query = {
-            "query": """
-            query UserSocials($login: String!) {
-                user(login: $login) {
-                    channel {
-                        socialMedias {
-                            name
-                            url
-                        }
-                    }
-                }
-            }
-            """,
-            "variables": {"login": self.channel_id},
-        }
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    gql_url,
-                    json=query,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        return socials
-
-                    data = await resp.json()
-                    user = data.get("data", {}).get("user")
-                    if not user:
-                        return socials
-
-                    channel = user.get("channel", {})
-                    social_medias = channel.get("socialMedias", []) if channel else []
-
-                    for social in social_medias:
-                        name = (social.get("name") or "").lower()
-                        url = social.get("url") or ""
-                        if url:
-                            standard_name = self._normalize_social_name(name)
-                            if standard_name not in socials:
-                                socials[standard_name] = url
-
-        except Exception as e:
-            logger.debug(f"Twitch GQL socials query failed: {e}")
-
-        return socials
-
-    async def _fetch_youtube_socials(self) -> dict[str, str]:
-        """Fetch socials from YouTube channel about page."""
-        import json
-        from urllib.parse import unquote
-
-        import aiohttp
-
-        socials: dict[str, str] = {}
-
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        }
-
-        # YouTube channel ID might be @handle or UCxxxx format
-        # For UC IDs, we need to use /channel/UC.../about format
-        channel_path = self.channel_id
-        if channel_path.startswith("UC"):
-            url = f"https://www.youtube.com/channel/{channel_path}/about"
-        elif channel_path.startswith("@"):
-            url = f"https://www.youtube.com/{channel_path}/about"
-        else:
-            url = f"https://www.youtube.com/@{channel_path}/about"
-
-        logger.debug(f"Fetching YouTube socials from: {url}")
-
-        try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    logger.debug(f"YouTube about page status: {resp.status}")
-                    if resp.status != 200:
-                        return socials
-
-                    html = await resp.text()
-                    logger.debug(f"YouTube HTML length: {len(html)}")
-
-                    # Extract ytInitialData JSON
-                    match = re.search(r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL)
-                    if not match:
-                        logger.warning("Could not find ytInitialData in YouTube page")
-                        return socials
-
-                    data = json.loads(match.group(1))
-                    logger.debug(f"ytInitialData keys: {list(data.keys())}")
-
-                    # Navigate to about channel links
-                    endpoints = data.get("onResponseReceivedEndpoints", [])
-                    logger.debug(f"YouTube onResponseReceivedEndpoints count: {len(endpoints)}")
-
-                    # If no endpoints, try alternative path via tabs
-                    if not endpoints:
-                        # Try contents.twoColumnBrowseResultsRenderer.tabs
-                        tabs = (
-                            data.get("contents", {})
-                            .get("twoColumnBrowseResultsRenderer", {})
-                            .get("tabs", [])
-                        )
-                        logger.debug(f"Trying tabs path, found {len(tabs)} tabs")
-                        for tab in tabs:
-                            tab_content = (
-                                tab.get("tabRenderer", {})
-                                .get("content", {})
-                                .get("sectionListRenderer", {})
-                                .get("contents", [])
-                            )
-                            for section in tab_content:
-                                about = (
-                                    section.get("itemSectionRenderer", {})
-                                    .get("contents", [{}])[0]
-                                    .get("channelAboutFullMetadataRenderer", {})
-                                )
-                                if about:
-                                    logger.debug("Found channelAboutFullMetadataRenderer")
-                                    links = about.get("primaryLinks", [])
-                                    for link in links:
-                                        title = link.get("title", {}).get(
-                                            "simpleText", ""
-                                        ) or link.get("title", {}).get("runs", [{}])[0].get(
-                                            "text", ""
-                                        )
-                                        nav = link.get("navigationEndpoint", {})
-                                        url_ep = nav.get("urlEndpoint", {})
-                                        redirect_url = url_ep.get("url", "")
-                                        if redirect_url and "q=" in redirect_url:
-                                            actual_url = unquote(redirect_url.split("q=")[-1])
-                                            name = self._detect_social_from_url(actual_url)
-                                            if not name:
-                                                name = self._detect_social_from_title(title)
-                                            if name and name not in socials:
-                                                socials[name] = actual_url
-                                                logger.debug(f"Found social (tabs): {name}")
-
-                    for endpoint in endpoints:
-                        panel = (
-                            endpoint.get("showEngagementPanelEndpoint", {})
-                            .get("engagementPanel", {})
-                            .get("engagementPanelSectionListRenderer", {})
-                            .get("content", {})
-                            .get("sectionListRenderer", {})
-                            .get("contents", [])
-                        )
-                        logger.debug(f"YouTube panel contents count: {len(panel)}")
-                        for section in panel:
-                            about = (
-                                section.get("itemSectionRenderer", {})
-                                .get("contents", [{}])[0]
-                                .get("aboutChannelRenderer", {})
-                                .get("metadata", {})
-                                .get("aboutChannelViewModel", {})
-                            )
-                            links = about.get("links", [])
-                            if about:
-                                logger.debug(f"Found aboutChannelViewModel with {len(links)} links")
-                            for link in links:
-                                link_vm = link.get("channelExternalLinkViewModel", {})
-                                title = link_vm.get("title", {}).get("content", "")
-                                link_data = link_vm.get("link", {})
-                                display_url = link_data.get("content", "")
-
-                                # Get actual URL from redirect
-                                actual_url = ""
-                                runs = link_data.get("commandRuns", [])
-                                for run in runs:
-                                    innertube = run.get("onTap", {}).get("innertubeCommand", {})
-                                    web_cmd = innertube.get("commandMetadata", {}).get(
-                                        "webCommandMetadata", {}
-                                    )
-                                    redirect_url = web_cmd.get("url", "")
-                                    if redirect_url:
-                                        # Parse URL to extract q= parameter
-                                        from urllib.parse import parse_qs, urlparse
-
-                                        parsed = urlparse(redirect_url)
-                                        qs = parse_qs(parsed.query)
-                                        if "q" in qs:
-                                            # External link with redirect
-                                            actual_url = qs["q"][0]
-                                        elif parsed.path and not parsed.path.startswith(
-                                            "/redirect"
-                                        ):
-                                            # Internal YouTube link (direct URL)
-                                            actual_url = redirect_url
-                                        break
-
-                                # Use actual URL if available, else construct from display
-                                final_url = actual_url
-                                if not final_url and display_url:
-                                    if not display_url.startswith("http"):
-                                        final_url = f"https://{display_url}"
-                                    else:
-                                        final_url = display_url
-
-                                if not final_url:
-                                    continue
-
-                                logger.debug(f"YouTube link: {title} -> {final_url}")
-
-                                # Detect social from URL or title
-                                name = self._detect_social_from_url(final_url)
-                                if not name:
-                                    name = self._detect_social_from_title(title)
-                                if name and name not in socials:
-                                    socials[name] = final_url
-
-        except Exception as e:
-            logger.debug(f"YouTube socials fetch failed: {e}")
-
-        return socials
-
-    def _detect_social_from_title(self, title: str) -> str | None:
-        """Detect social media platform from link title."""
-        title_lower = title.lower()
-        title_map = {
-            "twitter": "twitter",
-            "x": "twitter",
-            "instagram": "instagram",
-            "tiktok": "tiktok",
-            "discord": "discord",
-            "facebook": "facebook",
-            "patreon": "patreon",
-            "kick": "kick",
-            "twitch": "twitch",
-            "website": "website",
-            "youtube": "youtube",
-            "second channel": "youtube2",
-            "clips": "youtube_clips",
-        }
-        for keyword, platform in title_map.items():
-            if keyword in title_lower:
-                return platform
-        return None
-
-    async def _fetch_kick_socials(self) -> dict[str, str]:
-        """Fetch socials from Kick channel API."""
-        import aiohttp
-
-        socials: dict[str, str] = {}
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
-            "Accept": "application/json",
-        }
-
-        url = f"https://kick.com/api/v2/channels/{self.channel_id}"
-
-        try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                    if resp.status != 200:
-                        return socials
-
-                    data = await resp.json()
-                    user = data.get("user", {})
-
-                    # Kick stores socials as usernames, need to construct URLs
-                    social_fields = {
-                        "twitter": "https://twitter.com/{}",
-                        "instagram": "https://instagram.com/{}",
-                        "youtube": "https://youtube.com/{}",
-                        "discord": "https://discord.gg/{}",
-                        "tiktok": "https://tiktok.com/@{}",
-                        "facebook": "https://facebook.com/{}",
-                    }
-
-                    for field, url_template in social_fields.items():
-                        value = user.get(field)
-                        if value:
-                            # Clean up the value (remove trailing slashes, etc.)
-                            value = value.strip().rstrip("/")
-                            if value:
-                                socials[field] = url_template.format(value)
-
-        except Exception as e:
-            logger.debug(f"Kick socials fetch failed: {e}")
-
-        return socials
-
-    def _normalize_social_name(self, name: str) -> str:
-        """Normalize social media platform name."""
-        name_map = {
-            "twitter": "twitter",
-            "x": "twitter",
-            "instagram": "instagram",
-            "youtube": "youtube",
-            "tiktok": "tiktok",
-            "facebook": "facebook",
-            "discord": "discord",
-            "patreon": "patreon",
-        }
-        return name_map.get(name.lower(), name.lower())
-
-    def _detect_social_from_url(self, url: str) -> str | None:
-        """Detect social media platform from URL."""
-        url_lower = url.lower()
-        if "twitter.com" in url_lower or "x.com" in url_lower:
-            return "twitter"
-        elif "instagram.com" in url_lower:
-            return "instagram"
-        elif "tiktok.com" in url_lower:
-            return "tiktok"
-        elif "discord.gg" in url_lower or "discord.com" in url_lower:
-            return "discord"
-        elif "facebook.com" in url_lower:
-            return "facebook"
-        elif "patreon.com" in url_lower:
-            return "patreon"
-        elif "twitch.tv" in url_lower:
-            return "twitch"
-        elif "kick.com" in url_lower:
-            return "kick"
-        elif "youtube.com" in url_lower:
-            return "youtube"
-        return None
-
-
-class GlobalEmoteFetchWorker(QThread):
-    """Worker thread that fetches global emotes."""
-
-    emotes_fetched = Signal(dict)  # {"twitch": list[ChatEmote], "common": list[ChatEmote]}
-
-    def __init__(self, providers: list[str], oauth_token: str, client_id: str, parent=None):
-        super().__init__(parent)
-        self.providers = providers
-        self.oauth_token = oauth_token
-        self.client_id = client_id
-
-    def run(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(self._fetch_globals())
-            if result:
-                self.emotes_fetched.emit(result)
-        except Exception as e:
-            logger.error(f"Global emote fetch error: {e}")
-        finally:
-            loop.close()
-
-    async def _fetch_globals(self) -> dict:
-        import aiohttp
-
-        twitch_globals: list[ChatEmote] = []
-        common_globals: list[ChatEmote] = []
-
-        async with aiohttp.ClientSession() as session:
-            twitch_provider = TwitchProvider(
-                oauth_token=self.oauth_token,
-                client_id=self.client_id,
-            )
-            try:
-                twitch_globals = await twitch_provider.get_global_emotes(session=session)
-                logger.debug(f"Fetched {len(twitch_globals)} Twitch global emotes")
-            except Exception as e:
-                logger.debug(f"Failed to fetch Twitch global emotes: {e}")
-
-            provider_map = {
-                "7tv": SevenTVProvider,
-                "bttv": BTTVProvider,
-                "ffz": FFZProvider,
-            }
-            for name in self.providers:
-                provider_cls = provider_map.get(name)
-                if not provider_cls:
-                    continue
-                provider = provider_cls()
-                try:
-                    emotes = await provider.get_global_emotes(session=session)
-                    common_globals.extend(emotes)
-                    logger.debug(f"Fetched {len(emotes)} global emotes from {name}")
-                except Exception as e:
-                    logger.debug(f"Failed to fetch global emotes from {name}: {e}")
-
-        return {"twitch": twitch_globals, "common": common_globals}
-
-
-class UserEmoteFetchWorker(QThread):
-    """Worker thread that fetches Twitch user emotes."""
-
-    user_emotes_fetched = Signal(list)  # list[ChatEmote]
-
-    def __init__(self, oauth_token: str, client_id: str, parent=None):
-        super().__init__(parent)
-        self.oauth_token = oauth_token
-        self.client_id = client_id
-
-    def run(self):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            emotes = loop.run_until_complete(self._fetch_user_emotes())
-            if emotes:
-                self.user_emotes_fetched.emit(emotes)
-        except Exception as e:
-            logger.debug(f"User emote fetch error: {e}")
-        finally:
-            loop.close()
-
-    async def _get_authenticated_user_id(self) -> str | None:
-        """Get the user ID of the authenticated user from the OAuth token."""
-        import aiohttp
-
-        if not self.oauth_token or not self.client_id:
-            return None
-
-        try:
-            headers = {
-                "Authorization": f"Bearer {self.oauth_token}",
-                "Client-Id": self.client_id,
-            }
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(
-                    "https://api.twitch.tv/helix/users",
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        users = data.get("data", [])
-                        if users:
-                            user_id = users[0].get("id", "")
-                            if user_id:
-                                return user_id
-        except Exception as e:
-            logger.debug(f"Failed to get authenticated user ID: {e}")
-
-        return None
-
-    async def _fetch_user_emotes(self) -> list[ChatEmote]:
-        import aiohttp
-
-        if not self.oauth_token:
-            return []
-
-        user_id = await self._get_authenticated_user_id()
-        if not user_id:
-            return []
-
-        twitch_provider = TwitchProvider(
-            oauth_token=self.oauth_token,
-            client_id=self.client_id,
-        )
-        try:
-            async with aiohttp.ClientSession() as session:
-                emotes = await twitch_provider.get_user_emotes(user_id, session=session)
-            logger.debug(f"Fetched {len(emotes)} user emotes")
-            return emotes
-        except Exception as e:
-            logger.debug(f"Failed to fetch user emotes: {e}")
-            return []
 
 
 EVENTSUB_WS_URL = "wss://eventsub.wss.twitch.tv/ws"
@@ -1440,9 +998,9 @@ class ChatManager(QObject):
         self._connections: dict[str, BaseChatConnection] = {}
         self._livestreams: dict[str, Livestream] = {}
         self._emote_fetch_workers: dict[str, EmoteFetchWorker] = {}
-        self._socials_fetch_workers: dict[str, SocialsFetchWorker] = {}
-        self._global_emote_worker: GlobalEmoteFetchWorker | None = None
-        self._user_emote_worker: UserEmoteFetchWorker | None = None
+        self._socials_fetch_workers: dict[str, AsyncTaskWorker] = {}
+        self._global_emote_worker: AsyncTaskWorker | None = None
+        self._user_emote_worker: AsyncTaskWorker | None = None
 
         # Emote cache shared across all widgets
         self._emote_cache = EmoteCache(parent=self)
@@ -1511,7 +1069,7 @@ class ChatManager(QObject):
             self._chat_log_enforce_timer.start()
 
         # YouTube cookie auto-refresh state
-        self._yt_cookie_refresh_worker: CookieRefreshWorker | None = None
+        self._yt_cookie_refresh_worker: AsyncTaskWorker | None = None
         self._yt_cookie_auto_refresh_attempted: bool = False
 
         # Kick off global/user emote fetch in background
@@ -1898,68 +1456,44 @@ class ChatManager(QObject):
         token = self.settings.twitch.access_token
         client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
 
-        class _WhisperSendWorker(QThread):
-            error = Signal(str)
+        async def send():
+            import aiohttp
 
-            def __init__(self, token, client_id, to_user_id, text, parent=None):
-                super().__init__(parent)
-                self._token = token
-                self._client_id = client_id
-                self._to_user_id = to_user_id
-                self._text = text
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    "https://id.twitch.tv/oauth2/validate",
+                    headers={"Authorization": f"OAuth {token}"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError("Token validation failed")
+                    data = await resp.json()
+                    from_user_id = data.get("user_id", "")
 
-            def run(self):
-                import aiohttp
+                if from_user_id == to_user_id:
+                    raise RuntimeError("Cannot whisper yourself")
 
-                async def do_send():
-                    # Resolve own user ID
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(
-                            "https://id.twitch.tv/oauth2/validate",
-                            headers={"Authorization": f"OAuth {self._token}"},
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            if resp.status != 200:
-                                self.error.emit("Token validation failed")
-                                return
-                            data = await resp.json()
-                            from_user_id = data.get("user_id", "")
+                logger.info(f"Standalone whisper: from={from_user_id} to={to_user_id}")
+                async with session.post(
+                    "https://api.twitch.tv/helix/whispers",
+                    params={
+                        "from_user_id": from_user_id,
+                        "to_user_id": to_user_id,
+                    },
+                    json={"message": text},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Client-Id": client_id,
+                        "Content-Type": "application/json",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 204:
+                        body = await resp.text()
+                        raise RuntimeError(f"Whisper failed (HTTP {resp.status}): {body}")
 
-                        if from_user_id == self._to_user_id:
-                            self.error.emit("Cannot whisper yourself")
-                            return
-
-                        logger.info(
-                            f"Standalone whisper: from={from_user_id} to={self._to_user_id}"
-                        )
-                        async with session.post(
-                            "https://api.twitch.tv/helix/whispers",
-                            params={
-                                "from_user_id": from_user_id,
-                                "to_user_id": self._to_user_id,
-                            },
-                            json={"message": self._text},
-                            headers={
-                                "Authorization": f"Bearer {self._token}",
-                                "Client-Id": self._client_id,
-                                "Content-Type": "application/json",
-                            },
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            if resp.status != 204:
-                                body = await resp.text()
-                                self.error.emit(f"Whisper failed (HTTP {resp.status}): {body}")
-
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(do_send())
-                except Exception as e:
-                    self.error.emit(str(e))
-                finally:
-                    loop.close()
-
-        worker = _WhisperSendWorker(token, client_id, to_user_id, text, parent=self)
-        worker.error.connect(lambda msg: logger.error(f"Standalone whisper error: {msg}"))
+        worker = AsyncTaskWorker(send, parent=self)
+        worker.error_occurred.connect(lambda msg: logger.error(f"Standalone whisper error: {msg}"))
         worker.start()
 
     def _ensure_whisper_listener(self) -> None:
@@ -2091,25 +1625,40 @@ class ChatManager(QObject):
             f"Auto-refreshing YouTube cookies from browser: {self.settings.youtube.cookie_browser}"
         )
 
-        worker = CookieRefreshWorker(self.settings.youtube.cookie_browser, parent=self)
-        worker.success.connect(self._on_cookie_refresh_success)
-        worker.failed.connect(self._on_cookie_refresh_failed)
+        browser_id = self.settings.youtube.cookie_browser
+
+        def refresh():
+            from ..gui.youtube_login import extract_cookies_headless
+
+            return extract_cookies_headless(browser_id)
+
+        worker = AsyncTaskWorker(refresh, parent=self)
+        worker.result_ready.connect(self._on_cookie_refresh_result)
+        worker.error_occurred.connect(self._on_cookie_refresh_error)
         worker.finished.connect(self._on_cookie_refresh_finished)
         self._yt_cookie_refresh_worker = worker
         worker.start()
         return True
 
-    def _on_cookie_refresh_success(self, cookie_string: str) -> None:
-        """Handle successful cookie auto-refresh."""
-        logger.info("YouTube cookies auto-refreshed successfully")
-        self.settings.youtube.cookies = cookie_string
-        self.settings.save()
-        self.reconnect_youtube()
-        self.youtube_cookies_refreshed.emit()
+    def _on_cookie_refresh_result(self, result: object) -> None:
+        """Handle cookie auto-refresh result (success or failure)."""
+        cookie_string, error = result
+        if cookie_string:
+            logger.info("YouTube cookies auto-refreshed successfully")
+            self.settings.youtube.cookies = cookie_string
+            self.settings.save()
+            self.reconnect_youtube()
+            self.youtube_cookies_refreshed.emit()
+        else:
+            logger.warning(f"YouTube cookie auto-refresh failed: {error}")
+            message = "YouTube login expired — update cookies in Preferences > Accounts"
+            for key, ls in self._livestreams.items():
+                if ls.channel.platform == StreamPlatform.YOUTUBE:
+                    self.chat_error.emit(key, message)
 
-    def _on_cookie_refresh_failed(self, error: str) -> None:
-        """Handle failed cookie auto-refresh — emit errors for all YouTube channels."""
-        logger.warning(f"YouTube cookie auto-refresh failed: {error}")
+    def _on_cookie_refresh_error(self, error: str) -> None:
+        """Handle unexpected exception during cookie refresh."""
+        logger.warning(f"YouTube cookie auto-refresh error: {error}")
         message = "YouTube login expired — update cookies in Preferences > Accounts"
         for key, ls in self._livestreams.items():
             if ls.channel.platform == StreamPlatform.YOUTUBE:
@@ -2430,18 +1979,24 @@ class ChatManager(QObject):
         if not self.settings.chat.builtin.show_socials_banner:
             return
 
-        worker = SocialsFetchWorker(
-            channel_key=channel_key,
-            channel_id=livestream.channel.channel_id,
-            platform=livestream.channel.platform,
-            parent=self,
-        )
-        worker.socials_fetched.connect(self._on_socials_fetched)
+        channel_id = livestream.channel.channel_id
+        platform = livestream.channel.platform
+
+        async def fetch():
+            from .socials import fetch_socials
+
+            return (channel_key, await fetch_socials(channel_id, platform))
+
+        worker = AsyncTaskWorker(fetch, parent=self)
+        worker.result_ready.connect(self._on_socials_fetched)
         self._socials_fetch_workers[channel_key] = worker
         worker.start()
 
-    def _on_socials_fetched(self, channel_key: str, socials: dict) -> None:
+    def _on_socials_fetched(self, result: object) -> None:
         """Handle fetched social links - emit to UI."""
+        channel_key, socials = result
+        if not socials:
+            return
         logger.info(f"Fetched socials for {channel_key}: {list(socials.keys())}")
         self.socials_fetched.emit(channel_key, socials)
 
@@ -2600,17 +2155,21 @@ class ChatManager(QObject):
             and (now - self._global_emotes_fetched_at < GLOBAL_EMOTE_TTL)
         ):
             return
-        self._global_emote_worker = GlobalEmoteFetchWorker(
-            providers=self.settings.chat.builtin.emote_providers,
-            oauth_token=self.settings.twitch.access_token,
-            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
-            parent=self,
-        )
-        self._global_emote_worker.emotes_fetched.connect(self._on_global_emotes_fetched)
+        providers = self.settings.chat.builtin.emote_providers
+        oauth_token = self.settings.twitch.access_token
+        client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
+
+        async def fetch():
+            return await _fetch_global_emotes(providers, oauth_token, client_id)
+
+        self._global_emote_worker = AsyncTaskWorker(fetch, parent=self)
+        self._global_emote_worker.result_ready.connect(self._on_global_emotes_fetched)
         self._global_emote_worker.start()
 
-    def _on_global_emotes_fetched(self, payload: dict) -> None:
+    def _on_global_emotes_fetched(self, payload: object) -> None:
         """Handle global emote fetch results."""
+        if not payload:
+            return
         twitch_list = payload.get("twitch", [])
         common_list = payload.get("common", [])
         self._global_twitch_emotes = {}
@@ -2647,12 +2206,14 @@ class ChatManager(QObject):
         time_since_fetch = now - self._user_emotes_fetched_at
         if not force and self._user_emotes and time_since_fetch < USER_EMOTE_TTL:
             return
-        self._user_emote_worker = UserEmoteFetchWorker(
-            oauth_token=self.settings.twitch.access_token,
-            client_id=self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID,
-            parent=self,
-        )
-        self._user_emote_worker.user_emotes_fetched.connect(self._on_user_emotes_fetched)
+        oauth_token = self.settings.twitch.access_token
+        client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
+
+        async def fetch():
+            return await _fetch_user_emotes(oauth_token, client_id)
+
+        self._user_emote_worker = AsyncTaskWorker(fetch, parent=self)
+        self._user_emote_worker.result_ready.connect(self._on_user_emotes_fetched)
         self._user_emote_worker.start()
 
     def _on_emote_loaded(self, key: str) -> None:
