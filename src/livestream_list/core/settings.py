@@ -3,7 +3,8 @@
 import json
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from dataclasses import fields as dc_fields
 
 # Import ThemeMode here to avoid circular imports - it's defined in gui.theme
 # but we need a local definition for settings serialization
@@ -472,6 +473,29 @@ class Settings:
             return max_val
         return value
 
+    @staticmethod
+    def _color_settings_from_dict(data: dict, defaults: ChatColorSettings) -> ChatColorSettings:
+        """Create ChatColorSettings from a dict, filling missing fields from defaults."""
+        return ChatColorSettings(
+            **{
+                f.name: data.get(f.name, getattr(defaults, f.name))
+                for f in dc_fields(ChatColorSettings)
+            }
+        )
+
+    @staticmethod
+    def _simple_dc_from_dict(dc_class: type, data: dict):
+        """Create a dataclass from a dict, using field defaults for missing keys.
+
+        Only for dataclasses where _from_dict defaults match dataclass field
+        defaults and no validation or enum conversion is needed.
+        """
+        kwargs = {}
+        for f in dc_fields(dc_class):
+            if f.name in data:
+                kwargs[f.name] = data[f.name]
+        return dc_class(**kwargs)
+
     @classmethod
     def _from_dict(cls, data: dict) -> "Settings":
         """Create Settings from a dictionary with validation."""
@@ -517,38 +541,15 @@ class Settings:
 
         # Twitch
         if "twitch" in data:
-            t = data["twitch"]
-            settings.twitch = TwitchSettings(
-                client_id=t.get("client_id", ""),
-                client_secret=t.get("client_secret", ""),
-                access_token=t.get("access_token", ""),
-                refresh_token=t.get("refresh_token", ""),
-                login_name=t.get("login_name", ""),
-                browser_auth_token=t.get("browser_auth_token", ""),
-            )
+            settings.twitch = cls._simple_dc_from_dict(TwitchSettings, data["twitch"])
 
         # YouTube
         if "youtube" in data:
-            yt = data["youtube"]
-            settings.youtube = YouTubeSettings(
-                api_key=yt.get("api_key", ""),
-                cookies=yt.get("cookies", ""),
-                use_ytdlp_fallback=yt.get("use_ytdlp_fallback", True),
-                cookie_browser=yt.get("cookie_browser", ""),
-                cookie_auto_refresh=yt.get("cookie_auto_refresh", True),
-                login_name=yt.get("login_name", ""),
-            )
+            settings.youtube = cls._simple_dc_from_dict(YouTubeSettings, data["youtube"])
 
         # Kick
         if "kick" in data:
-            k = data["kick"]
-            settings.kick = KickSettings(
-                client_id=k.get("client_id", ""),
-                client_secret=k.get("client_secret", ""),
-                access_token=k.get("access_token", ""),
-                refresh_token=k.get("refresh_token", ""),
-                login_name=k.get("login_name", ""),
-            )
+            settings.kick = cls._simple_dc_from_dict(KickSettings, data["kick"])
 
         # Streamlink
         if "streamlink" in data:
@@ -610,12 +611,8 @@ class Settings:
         if "chat" in data:
             c = data["chat"]
             builtin_data = c.get("builtin", {})
-            window_data = builtin_data.get("window", {})
-            chat_window = ChatWindowSettings(
-                width=window_data.get("width", 400),
-                height=window_data.get("height", 600),
-                x=window_data.get("x"),
-                y=window_data.get("y"),
+            chat_window = cls._simple_dc_from_dict(
+                ChatWindowSettings, builtin_data.get("window", {})
             )
             # Load dark/light color settings (with migration from legacy single-color fields)
             dark_data = builtin_data.get("dark_colors", {})
@@ -628,74 +625,12 @@ class Settings:
 
             # Check for legacy fields and migrate to dark_colors if new structure not present
             if not dark_data:
-                # Migrate legacy fields to dark colors
-                dark_colors = ChatColorSettings(
-                    alt_row_color_even=builtin_data.get(
-                        "alt_row_color_even", dark_defaults.alt_row_color_even
-                    ),
-                    alt_row_color_odd=builtin_data.get(
-                        "alt_row_color_odd", dark_defaults.alt_row_color_odd
-                    ),
-                    tab_active_color=builtin_data.get(
-                        "tab_active_color", dark_defaults.tab_active_color
-                    ),
-                    tab_inactive_color=builtin_data.get(
-                        "tab_inactive_color", dark_defaults.tab_inactive_color
-                    ),
-                    mention_highlight_color=builtin_data.get(
-                        "mention_highlight_color", dark_defaults.mention_highlight_color
-                    ),
-                    banner_bg_color=builtin_data.get(
-                        "banner_bg_color", dark_defaults.banner_bg_color
-                    ),
-                    banner_text_color=builtin_data.get(
-                        "banner_text_color", dark_defaults.banner_text_color
-                    ),
-                )
+                # Migrate legacy top-level color fields to dark_colors
+                dark_colors = cls._color_settings_from_dict(builtin_data, dark_defaults)
             else:
-                dark_colors = ChatColorSettings(
-                    alt_row_color_even=dark_data.get(
-                        "alt_row_color_even", dark_defaults.alt_row_color_even
-                    ),
-                    alt_row_color_odd=dark_data.get(
-                        "alt_row_color_odd", dark_defaults.alt_row_color_odd
-                    ),
-                    tab_active_color=dark_data.get(
-                        "tab_active_color", dark_defaults.tab_active_color
-                    ),
-                    tab_inactive_color=dark_data.get(
-                        "tab_inactive_color", dark_defaults.tab_inactive_color
-                    ),
-                    mention_highlight_color=dark_data.get(
-                        "mention_highlight_color", dark_defaults.mention_highlight_color
-                    ),
-                    banner_bg_color=dark_data.get("banner_bg_color", dark_defaults.banner_bg_color),
-                    banner_text_color=dark_data.get(
-                        "banner_text_color", dark_defaults.banner_text_color
-                    ),
-                )
+                dark_colors = cls._color_settings_from_dict(dark_data, dark_defaults)
 
-            light_colors = ChatColorSettings(
-                alt_row_color_even=light_data.get(
-                    "alt_row_color_even", light_defaults.alt_row_color_even
-                ),
-                alt_row_color_odd=light_data.get(
-                    "alt_row_color_odd", light_defaults.alt_row_color_odd
-                ),
-                tab_active_color=light_data.get(
-                    "tab_active_color", light_defaults.tab_active_color
-                ),
-                tab_inactive_color=light_data.get(
-                    "tab_inactive_color", light_defaults.tab_inactive_color
-                ),
-                mention_highlight_color=light_data.get(
-                    "mention_highlight_color", light_defaults.mention_highlight_color
-                ),
-                banner_bg_color=light_data.get("banner_bg_color", light_defaults.banner_bg_color),
-                banner_text_color=light_data.get(
-                    "banner_text_color", light_defaults.banner_text_color
-                ),
-            )
+            light_colors = cls._color_settings_from_dict(light_data, light_defaults)
 
             builtin = BuiltinChatSettings(
                 font_size=cls._validate_int(
@@ -764,21 +699,14 @@ class Settings:
 
         # Channel info
         if "channel_info" in data:
-            cinfo = data["channel_info"]
-            settings.channel_info = ChannelInfoSettings(
-                show_live_duration=cinfo.get("show_live_duration", True),
-                show_viewers=cinfo.get("show_viewers", True),
+            settings.channel_info = cls._simple_dc_from_dict(
+                ChannelInfoSettings, data["channel_info"]
             )
 
         # Channel icons
         if "channel_icons" in data:
-            ci = data["channel_icons"]
-            settings.channel_icons = ChannelIconSettings(
-                show_platform=ci.get("show_platform", True),
-                show_play=ci.get("show_play", True),
-                show_favorite=ci.get("show_favorite", True),
-                show_chat=ci.get("show_chat", True),
-                show_browser=ci.get("show_browser", True),
+            settings.channel_icons = cls._simple_dc_from_dict(
+                ChannelIconSettings, data["channel_icons"]
             )
 
         # Performance (with validation to prevent resource exhaustion)
@@ -801,187 +729,17 @@ class Settings:
         If exclude_secrets is True, sensitive tokens/cookies are omitted
         (they are stored in the system keyring instead).
         """
-        return {
-            "refresh_interval": self.refresh_interval,
-            "minimize_to_tray": self.minimize_to_tray,
-            "start_minimized": self.start_minimized,
-            "check_for_updates": self.check_for_updates,
-            "autostart": self.autostart,
-            "close_to_tray": self.close_to_tray,
-            "close_to_tray_asked": self.close_to_tray_asked,
-            "emote_cache_mb": self.emote_cache_mb,
-            "sort_mode": self.sort_mode.value,
-            "hide_offline": self.hide_offline,
-            "favorites_only": self.favorites_only,
-            "ui_style": self.ui_style.value,
-            "platform_colors": self.platform_colors,
-            "font_size": self.font_size,
-            "theme_mode": self.theme_mode.value,
-            "custom_theme_slug": self.custom_theme_slug,
-            "custom_theme_base": self.custom_theme_base,
-            "twitch": {
-                "client_id": self.twitch.client_id,
-                "client_secret": self.twitch.client_secret,
-                "login_name": self.twitch.login_name,
-                **(
-                    {
-                        "access_token": self.twitch.access_token,
-                        "refresh_token": self.twitch.refresh_token,
-                        "browser_auth_token": self.twitch.browser_auth_token,
-                    }
-                    if not exclude_secrets
-                    else {}
-                ),
-            },
-            "youtube": {
-                "api_key": self.youtube.api_key,
-                "use_ytdlp_fallback": self.youtube.use_ytdlp_fallback,
-                "cookie_browser": self.youtube.cookie_browser,
-                "cookie_auto_refresh": self.youtube.cookie_auto_refresh,
-                "login_name": self.youtube.login_name,
-                **({"cookies": self.youtube.cookies} if not exclude_secrets else {}),
-            },
-            "kick": {
-                "client_id": self.kick.client_id,
-                "client_secret": self.kick.client_secret,
-                "login_name": self.kick.login_name,
-                **(
-                    {
-                        "access_token": self.kick.access_token,
-                        "refresh_token": self.kick.refresh_token,
-                    }
-                    if not exclude_secrets
-                    else {}
-                ),
-            },
-            "streamlink": {
-                "enabled": self.streamlink.enabled,
-                "path": self.streamlink.path,
-                "player": self.streamlink.player,
-                "player_args": self.streamlink.player_args,
-                "default_quality": self.streamlink.default_quality.value,
-                "additional_args": self.streamlink.additional_args,
-                "twitch_launch_method": self.streamlink.twitch_launch_method.value,
-                "youtube_launch_method": self.streamlink.youtube_launch_method.value,
-                "kick_launch_method": self.streamlink.kick_launch_method.value,
-                "twitch_turbo": self.streamlink.twitch_turbo,
-                "show_console": self.streamlink.show_console,
-                "auto_close_console": self.streamlink.auto_close_console,
-                "record_streams": self.streamlink.record_streams,
-                "record_directory": self.streamlink.record_directory,
-            },
-            "notifications": {
-                "enabled": self.notifications.enabled,
-                "sound_enabled": self.notifications.sound_enabled,
-                "show_game": self.notifications.show_game,
-                "show_title": self.notifications.show_title,
-                "excluded_channels": self.notifications.excluded_channels,
-                "backend": self.notifications.backend,
-                "custom_sound_path": self.notifications.custom_sound_path,
-                "urgency": self.notifications.urgency,
-                "timeout_seconds": self.notifications.timeout_seconds,
-                "platform_filter": self.notifications.platform_filter,
-                "quiet_hours_enabled": self.notifications.quiet_hours_enabled,
-                "quiet_hours_start": self.notifications.quiet_hours_start,
-                "quiet_hours_end": self.notifications.quiet_hours_end,
-                "raid_notifications_enabled": self.notifications.raid_notifications_enabled,
-                "mention_notifications_enabled": self.notifications.mention_notifications_enabled,
-                "mention_custom_sound_path": self.notifications.mention_custom_sound_path,
-            },
-            "window": {
-                "width": self.window.width,
-                "height": self.window.height,
-                "x": self.window.x,
-                "y": self.window.y,
-                "maximized": self.window.maximized,
-                "always_on_top": self.window.always_on_top,
-            },
-            "chat": {
-                "enabled": self.chat.enabled,
-                "mode": self.chat.mode,
-                "browser": self.chat.browser,
-                "url_type": self.chat.url_type,
-                "auto_open": self.chat.auto_open,
-                "new_window": self.chat.new_window,
-                "recent_channels": self.chat.recent_channels,
-                "builtin": {
-                    "font_size": self.chat.builtin.font_size,
-                    "show_timestamps": self.chat.builtin.show_timestamps,
-                    "timestamp_format": self.chat.builtin.timestamp_format,
-                    "show_badges": self.chat.builtin.show_badges,
-                    "show_mod_badges": self.chat.builtin.show_mod_badges,
-                    "show_emotes": self.chat.builtin.show_emotes,
-                    "animate_emotes": self.chat.builtin.animate_emotes,
-                    "line_spacing": self.chat.builtin.line_spacing,
-                    "max_messages": self.chat.builtin.max_messages,
-                    "emote_providers": self.chat.builtin.emote_providers,
-                    "show_alternating_rows": self.chat.builtin.show_alternating_rows,
-                    "show_metrics": self.chat.builtin.show_metrics,
-                    "blocked_users": self.chat.builtin.blocked_users,
-                    "blocked_user_names": self.chat.builtin.blocked_user_names,
-                    "highlight_keywords": self.chat.builtin.highlight_keywords,
-                    "user_nicknames": self.chat.builtin.user_nicknames,
-                    "user_nickname_display_names": self.chat.builtin.user_nickname_display_names,
-                    "user_notes": self.chat.builtin.user_notes,
-                    "user_note_display_names": self.chat.builtin.user_note_display_names,
-                    "use_platform_name_colors": self.chat.builtin.use_platform_name_colors,
-                    "show_stream_title": self.chat.builtin.show_stream_title,
-                    "show_socials_banner": self.chat.builtin.show_socials_banner,
-                    "spellcheck_enabled": self.chat.builtin.spellcheck_enabled,
-                    "autocorrect_enabled": self.chat.builtin.autocorrect_enabled,
-                    "user_card_hover": self.chat.builtin.user_card_hover,
-                    "always_on_top": self.chat.builtin.always_on_top,
-                    "moderated_message_display": self.chat.builtin.moderated_message_display,
-                    "dark_colors": {
-                        "alt_row_color_even": self.chat.builtin.dark_colors.alt_row_color_even,
-                        "alt_row_color_odd": self.chat.builtin.dark_colors.alt_row_color_odd,
-                        "tab_active_color": self.chat.builtin.dark_colors.tab_active_color,
-                        "tab_inactive_color": self.chat.builtin.dark_colors.tab_inactive_color,
-                        "mention_highlight_color": (
-                            self.chat.builtin.dark_colors.mention_highlight_color
-                        ),
-                        "banner_bg_color": self.chat.builtin.dark_colors.banner_bg_color,
-                        "banner_text_color": self.chat.builtin.dark_colors.banner_text_color,
-                    },
-                    "light_colors": {
-                        "alt_row_color_even": self.chat.builtin.light_colors.alt_row_color_even,
-                        "alt_row_color_odd": self.chat.builtin.light_colors.alt_row_color_odd,
-                        "tab_active_color": self.chat.builtin.light_colors.tab_active_color,
-                        "tab_inactive_color": self.chat.builtin.light_colors.tab_inactive_color,
-                        "mention_highlight_color": (
-                            self.chat.builtin.light_colors.mention_highlight_color
-                        ),
-                        "banner_bg_color": self.chat.builtin.light_colors.banner_bg_color,
-                        "banner_text_color": self.chat.builtin.light_colors.banner_text_color,
-                    },
-                    "window": {
-                        "width": self.chat.builtin.window.width,
-                        "height": self.chat.builtin.window.height,
-                        "x": self.chat.builtin.window.x,
-                        "y": self.chat.builtin.window.y,
-                    },
-                },
-                "logging": {
-                    "enabled": self.chat.logging.enabled,
-                    "max_disk_mb": self.chat.logging.max_disk_mb,
-                    "log_format": self.chat.logging.log_format,
-                    "load_history_on_open": self.chat.logging.load_history_on_open,
-                    "history_lines": self.chat.logging.history_lines,
-                },
-            },
-            "channel_info": {
-                "show_live_duration": self.channel_info.show_live_duration,
-                "show_viewers": self.channel_info.show_viewers,
-            },
-            "channel_icons": {
-                "show_platform": self.channel_icons.show_platform,
-                "show_play": self.channel_icons.show_play,
-                "show_favorite": self.channel_icons.show_favorite,
-                "show_chat": self.channel_icons.show_chat,
-                "show_browser": self.channel_icons.show_browser,
-            },
-            "performance": {
-                "youtube_concurrency": self.performance.youtube_concurrency,
-                "kick_concurrency": self.performance.kick_concurrency,
-            },
-        }
+
+        def _enum_dict_factory(items):
+            return {k: v.value if isinstance(v, _Enum) else v for k, v in items}
+
+        result = asdict(self, dict_factory=_enum_dict_factory)
+
+        if exclude_secrets:
+            for key in ("access_token", "refresh_token", "browser_auth_token"):
+                result["twitch"].pop(key, None)
+            result["youtube"].pop("cookies", None)
+            for key in ("access_token", "refresh_token"):
+                result["kick"].pop(key, None)
+
+        return result

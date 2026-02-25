@@ -149,16 +149,10 @@ class ThemeEditorWidget(QWidget):
                 edit.editingFinished.connect(self._on_color_changed)
                 fn = field_name  # capture for lambda
                 if field_name in ALPHA_COLOR_FIELDS:
-                    swatch.clicked.connect(
-                        lambda checked=False, f=fn: self._pick_color_alpha(f)
-                    )
+                    swatch.clicked.connect(lambda checked=False, f=fn: self._pick_color_alpha(f))
                 else:
-                    swatch.clicked.connect(
-                        lambda checked=False, f=fn: self._pick_color(f)
-                    )
-                reset_btn.clicked.connect(
-                    lambda checked=False, f=fn: self._reset_single_color(f)
-                )
+                    swatch.clicked.connect(lambda checked=False, f=fn: self._pick_color(f))
+                reset_btn.clicked.connect(lambda checked=False, f=fn: self._reset_single_color(f))
 
                 group_layout.addRow(label_text + ":", row)
 

@@ -1031,11 +1031,7 @@ class MainWindow(QMainWindow):
         def launch():
             try:
                 process = self.app.streamlink.launch(livestream)
-                if (
-                    process
-                    and process.stdout
-                    and self.app.settings.streamlink.show_console
-                ):
+                if process and process.stdout and self.app.settings.streamlink.show_console:
                     self._console_requested.emit(
                         livestream.channel.unique_key,
                         livestream.channel.display_name,

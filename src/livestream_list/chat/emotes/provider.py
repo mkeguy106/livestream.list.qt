@@ -178,9 +178,7 @@ class TwitchProvider(BaseEmoteProvider):
         is_animated = "animated" in formats
         specs: dict[int, ImageSpec] = {}
         for scale in (1, 2, 3):
-            url = (
-                f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/{scale}.0"
-            )
+            url = f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/default/dark/{scale}.0"
             static_url = (
                 f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}/static/dark/{scale}.0"
             )

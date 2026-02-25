@@ -345,10 +345,7 @@ class _DiskCacheWorker(threading.Thread):
         self._total_size_bytes = total
         self._calibrated = True
         self._last_calibration = time.monotonic()
-        self._logger.info(
-            f"Disk cache calibrated: {total // (1024 * 1024)}mb "
-            f"({total:,} bytes)"
-        )
+        self._logger.info(f"Disk cache calibrated: {total // (1024 * 1024)}mb ({total:,} bytes)")
 
     def _maybe_recalibrate(self) -> None:
         """Re-calibrate if enough time has elapsed."""
@@ -360,9 +357,7 @@ class _DiskCacheWorker(threading.Thread):
         """Run eviction only if the running total exceeds the limit."""
         max_bytes = self._get_limit_bytes()
         if self._total_size_bytes > max_bytes:
-            self._total_size_bytes = _enforce_disk_limit(
-                self._cache_dir, max_bytes, self._logger
-            )
+            self._total_size_bytes = _enforce_disk_limit(self._cache_dir, max_bytes, self._logger)
 
     def run(self) -> None:
         while not self._stop_event.is_set():
@@ -1232,9 +1227,7 @@ class EmoteLoaderWorker(QThread):
                         task.add_done_callback(tasks.discard)
 
                 if tasks:
-                    await asyncio.wait(
-                        tasks, timeout=0.15, return_when=asyncio.FIRST_COMPLETED
-                    )
+                    await asyncio.wait(tasks, timeout=0.15, return_when=asyncio.FIRST_COMPLETED)
                 elif not self._should_stop:
                     await asyncio.sleep(0.1)
 

@@ -77,8 +77,7 @@ class MainThreadWatchdog(QObject):
                     if main_frame:
                         stack = "".join(traceback.format_stack(main_frame))
                         logger.warning(
-                            f"MAIN THREAD BLOCKED ({staleness:.2f}s stale)! "
-                            f"Stack:\n{stack}"
+                            f"MAIN THREAD BLOCKED ({staleness:.2f}s stale)! Stack:\n{stack}"
                         )
                     else:
                         logger.warning(
@@ -273,10 +272,7 @@ class Application(QApplication):
         # Initialize core services
         self.monitor = StreamMonitor(self.settings)
         # Extract browser auth-token if logged in but missing it
-        if (
-            self.settings.twitch.access_token
-            and not self.settings.twitch.browser_auth_token
-        ):
+        if self.settings.twitch.access_token and not self.settings.twitch.browser_auth_token:
             from .youtube_login import extract_twitch_auth_token
 
             token = extract_twitch_auth_token()
@@ -541,9 +537,7 @@ class Application(QApplication):
             "This is likely because the Twitch OAuth token was rejected by streamlink. "
             "You can disable the Turbo authentication and retry."
         )
-        disable_btn = msg.addButton(
-            "Disable Turbo && Retry", QMessageBox.ButtonRole.AcceptRole
-        )
+        disable_btn = msg.addButton("Disable Turbo && Retry", QMessageBox.ButtonRole.AcceptRole)
         msg.addButton("Close", QMessageBox.ButtonRole.RejectRole)
         msg.exec()
 

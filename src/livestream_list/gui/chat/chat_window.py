@@ -753,9 +753,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
         self.chat_manager.raid_received.connect(self._on_raid_received)
         self.chat_manager.badge_map_ready.connect(self._on_badge_map_ready)
-        self.chat_manager.youtube_cookies_refreshed.connect(
-            self._on_youtube_cookies_refreshed
-        )
+        self.chat_manager.youtube_cookies_refreshed.connect(self._on_youtube_cookies_refreshed)
 
     def update_livestreams(self, livestreams: list[Livestream]) -> None:
         """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""

@@ -256,16 +256,12 @@ class UserCardFetchWorker:
 
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
-                ) as resp:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
                         return None
                     html = await resp.text()
 
-            match = re.search(
-                r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL
-            )
+            match = re.search(r"var ytInitialData\s*=\s*({.+?});</script>", html, re.DOTALL)
             if not match:
                 return None
             data = json.loads(match.group(1))
@@ -335,9 +331,7 @@ class UserCardFetchWorker:
 
             if about:
                 result["description"] = about.get("description", "")
-                result["subscriber_count_text"] = about.get(
-                    "subscriberCountText", ""
-                )
+                result["subscriber_count_text"] = about.get("subscriberCountText", "")
                 joined = about.get("joinedDateText", {})
                 if isinstance(joined, dict):
                     result["joined_date_text"] = joined.get("content", "")

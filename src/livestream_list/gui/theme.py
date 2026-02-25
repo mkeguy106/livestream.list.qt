@@ -332,9 +332,7 @@ class ThemeManager:
         mode = cls.get_theme_mode()
         if mode == ThemeMode.CUSTOM:
             # Custom mode: use the base field from settings
-            result = (
-                cls._settings.custom_theme_base != "light" if cls._settings else True
-            )
+            result = cls._settings.custom_theme_base != "light" if cls._settings else True
         elif mode == ThemeMode.DARK or mode == ThemeMode.HIGH_CONTRAST:
             result = True
         elif mode == ThemeMode.LIGHT:
