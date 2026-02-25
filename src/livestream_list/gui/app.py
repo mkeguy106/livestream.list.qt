@@ -1,6 +1,7 @@
 """Main Qt application."""
 
 import asyncio
+import gc
 import logging
 import sys
 import threading
@@ -122,6 +123,10 @@ class AsyncWorker(QThread):
 
     def run(self):
         """Run the async operation in a new event loop."""
+        # Disable GC on this thread to prevent it from finalizing PySide6
+        # objects while the main thread is inside Qt C++ code (no GIL held).
+        # Without this, GC can destroy a widget's C++ backing mid-call → SIGSEGV.
+        gc.disable()
         loop = asyncio.new_event_loop()
         self._loop = loop
         asyncio.set_event_loop(loop)
@@ -145,6 +150,7 @@ class AsyncWorker(QThread):
             if self.monitor:
                 self.monitor.reset_all_sessions()
             loop.close()
+            gc.enable()
 
 
 class NotificationBridge(QObject):
