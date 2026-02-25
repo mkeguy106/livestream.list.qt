@@ -669,6 +669,9 @@ class ChatManager(QObject):
         self._chat_log_flush_timer.stop()
         self._chat_log_enforce_timer.stop()
 
+        # Stop emote cache background workers
+        self._emote_cache.stop()
+
         # Clean up global emote/badge state when all chats are closed
         # This prevents unbounded memory growth in long-running sessions
         self._global_common_emotes.clear()

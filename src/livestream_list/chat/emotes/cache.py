@@ -911,6 +911,8 @@ class EmoteCache(QObject):
             self._frame_worker.stop()
             self._frame_worker.wait(1000)
             self._frame_worker = None
+        if self._disk_worker:
+            self._disk_worker.stop()
         if self._frame_convert_timer.isActive():
             self._frame_convert_timer.stop()
         self._frame_convert_queue.clear()

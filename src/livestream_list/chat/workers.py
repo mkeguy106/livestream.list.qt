@@ -18,6 +18,25 @@ from .models import ChatEmote, ChatMessage, ChatUser, HypeTrainEvent
 logger = logging.getLogger(__name__)
 
 
+def _cancel_remaining_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    """Cancel remaining asyncio tasks and let them clean up.
+
+    After loop.stop() interrupts run_until_complete(), coroutines are left
+    suspended inside ``async with`` blocks.  Cancelling and briefly running
+    the loop lets context managers (__aexit__) close aiohttp sessions
+    properly, preventing 'Event loop is closed' noise during GC.
+    """
+    tasks = asyncio.all_tasks(loop)
+    if not tasks:
+        return
+    for task in tasks:
+        task.cancel()
+    try:
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+    except Exception:
+        pass
+
+
 class AsyncTaskWorker(QThread):
     """One-shot worker that runs a sync or async callable in a background thread.
 
@@ -169,6 +188,7 @@ class ChatConnectionWorker(QThread):
                 logger.error(f"Chat worker error: {e}")
                 self.connection._emit_error(str(e))
         finally:
+            _cancel_remaining_tasks(self._loop)
             self._loop.close()
             self._loop = None
 
@@ -511,12 +531,17 @@ class WhisperEventSubWorker(QThread):
         self.oauth_token = oauth_token
         self.client_id = client_id
         self._should_stop = False
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def stop(self):
         self._should_stop = True
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
 
     def run(self):
         loop = asyncio.new_event_loop()
+        self._loop = loop
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._run_eventsub())
@@ -524,6 +549,8 @@ class WhisperEventSubWorker(QThread):
             if not self._should_stop:
                 logger.error(f"WhisperEventSub error: {e}")
         finally:
+            _cancel_remaining_tasks(loop)
+            self._loop = None
             loop.close()
 
     async def _run_eventsub(self):
@@ -728,6 +755,7 @@ class HypeTrainEventSubWorker(QThread):
         self.oauth_token = oauth_token
         self.client_id = client_id
         self._should_stop = False
+        self._loop: asyncio.AbstractEventLoop | None = None
         # channel_key -> broadcaster_id
         self._channels: dict[str, str] = {}
         self._pending_subscribe: list[tuple[str, str]] = []  # (channel_key, broadcaster_id)
@@ -748,9 +776,13 @@ class HypeTrainEventSubWorker(QThread):
 
     def stop(self):
         self._should_stop = True
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
 
     def run(self):
         loop = asyncio.new_event_loop()
+        self._loop = loop
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._run_eventsub())
@@ -758,6 +790,8 @@ class HypeTrainEventSubWorker(QThread):
             if not self._should_stop:
                 logger.error(f"HypeTrainEventSub error: {e}")
         finally:
+            _cancel_remaining_tasks(loop)
+            self._loop = None
             loop.close()
 
     async def _run_eventsub(self):

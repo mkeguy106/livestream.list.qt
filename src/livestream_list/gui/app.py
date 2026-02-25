@@ -112,10 +112,18 @@ class AsyncWorker(QThread):
         super().__init__(parent)
         self.coro_func = coro_func
         self.monitor = monitor
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    def stop(self):
+        """Request the worker to stop by interrupting its event loop."""
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
 
     def run(self):
         """Run the async operation in a new event loop."""
         loop = asyncio.new_event_loop()
+        self._loop = loop
         asyncio.set_event_loop(loop)
         try:
             # Reset aiohttp sessions for this event loop
@@ -133,6 +141,7 @@ class AsyncWorker(QThread):
             logger.error(f"Async worker error: {e}", exc_info=True)
             self.error.emit(str(e))
         finally:
+            self._loop = None
             if self.monitor:
                 self.monitor.reset_all_sessions()
             loop.close()
@@ -748,10 +757,13 @@ class Application(QApplication):
         if self._chat_window:
             self._chat_window.save_window_state()
 
-        # Wait for active workers to finish
+        # Stop and wait for active workers to finish
         for worker in self._active_workers[:]:
             if worker.isRunning():
-                worker.wait(5000)  # Wait up to 5 seconds
+                worker.stop()
+        for worker in self._active_workers[:]:
+            if worker.isRunning():
+                worker.wait(3000)
         self._active_workers.clear()
 
         # Flush any pending channel saves (debounced saves)

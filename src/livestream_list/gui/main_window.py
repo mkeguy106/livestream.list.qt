@@ -910,12 +910,18 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self):
         """Apply the current theme to all windows."""
+        app_stylesheet = get_app_stylesheet()
+
+        # Skip if nothing changed — setStyleSheet() is expensive (~1-2s)
+        if self.app.styleSheet() == app_stylesheet:
+            return
+
         # Disable updates during theme change to prevent cascading repaints
         self.setUpdatesEnabled(False)
         try:
             theme = get_theme()
             # Apply global app stylesheet (affects all dialogs)
-            self.app.setStyleSheet(get_app_stylesheet())
+            self.app.setStyleSheet(app_stylesheet)
             # Apply comprehensive stylesheet to main window
             self.setStyleSheet(f"""
                 QMainWindow {{
@@ -1413,6 +1419,12 @@ class MainWindow(QMainWindow):
             # windows stay mapped and retain their geometry when restored.
             self.showMinimized()
         else:
+            # Stop all chat workers before closing the window — disconnect_all()
+            # stops HypeTrainEventSub, WhisperEventSub, emote cache threads, etc.
+            # Must happen before chat_window.close() which destroys widgets and
+            # would abort on QThread children still running.
+            if self.app.chat_manager:
+                self.app.chat_manager.disconnect_all()
             # Close the chat window if it's open
             if hasattr(self.app, "_chat_window") and self.app._chat_window:
                 self.app._chat_window.close()
