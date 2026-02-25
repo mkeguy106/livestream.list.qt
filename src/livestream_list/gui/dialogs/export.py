@@ -82,15 +82,15 @@ class ExportDialog(QDialog):
                 data["channels"].append(ch_data)
 
             if self.include_settings_cb.isChecked():
-                # Export all settings except sensitive auth tokens
-                settings_dict = self.app.settings._to_dict()
-                # Remove sensitive data
-                if "twitch" in settings_dict:
-                    settings_dict["twitch"] = {}  # Don't export tokens
+                # Export all settings with secrets (tokens/cookies) stripped
+                settings_dict = self.app.settings._to_dict(exclude_secrets=True)
+                # Also strip client_id/client_secret (app-specific, not user prefs)
+                for platform_key in ("twitch", "kick"):
+                    if platform_key in settings_dict:
+                        settings_dict[platform_key].pop("client_id", None)
+                        settings_dict[platform_key].pop("client_secret", None)
                 if "youtube" in settings_dict:
-                    settings_dict["youtube"] = {}  # Don't export API key
-                if "kick" in settings_dict:
-                    settings_dict["kick"] = {}  # Don't export tokens
+                    settings_dict["youtube"].pop("api_key", None)
                 # Remove window geometry (machine-specific) but keep preferences
                 if "window" in settings_dict:
                     window_prefs = {

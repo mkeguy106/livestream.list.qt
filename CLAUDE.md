@@ -197,7 +197,7 @@ Core architecture files (most other files follow patterns established in these):
 | `gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
 | `gui/main_window.py` | QMainWindow, toolbar, stream list container |
 | `gui/theme.py` | ThemeManager singleton, stylesheet generation |
-| `gui/dialogs/preferences.py` | Preferences dialog (accounts, chat, notifications, themes) |
+| `gui/dialogs/preferences/` | Preferences package — dialog coordinator + per-tab modules (general, playback, chat, accounts) |
 | `gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
 | `gui/chat/chat_window.py` | Chat QMainWindow, tab management, pop-out windows |
 | `gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
@@ -252,7 +252,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `chat/spellcheck/checker.py` | Bundled hunspell dictionaries via `sys._MEIPASS` or exe-relative path |
 | `notifications/notifier.py` | `winsound` for sound playback instead of `paplay` |
 | `gui/youtube_login.py` | Windows browser cookie paths (`%LOCALAPPDATA%`, `%APPDATA%`) |
-| `gui/dialogs/preferences.py` | Hides "notify-send" notification backend option |
+| `gui/dialogs/preferences/general_tab.py` | Hides "notify-send" notification backend option |
 
 **Distribution**: PyInstaller `--onedir` build, wrapped by Inno Setup `.exe` installer. Bundles `yt-dlp.exe`. Users install streamlink and mpv separately.
 
@@ -286,6 +286,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `pyspellchecker` `candidates()` freezes UI | `candidates()` with `distance=2` takes 600-1000ms for longer words. Always init with `distance=1` — autocorrect only trusts distance-1 anyway. |
 | PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
 | `sys.stderr`/`sys.stdout` is `None` in windowed builds | Guard `faulthandler.enable()`, `StreamHandler`, `traceback.print_exc()` — use `logging.NullHandler()` fallback and `logger.error(..., exc_info=True)` instead |
+| New preferences not in export/import | When adding/removing settings (except cookies/tokens), update both `gui/dialogs/export.py` and `gui/main_window.py:_import_from_file()` to include the new fields |
 
 ## CI/CD
 

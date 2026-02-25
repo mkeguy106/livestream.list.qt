@@ -1282,11 +1282,26 @@ class MainWindow(QMainWindow):
             settings_imported = False
             if "settings" in data:
                 imported_settings = data["settings"]
-                # Preserve current auth tokens and window geometry
+                # Preserve current auth tokens/cookies — merge non-secret platform
+                # fields from the import while keeping current secrets intact
                 current = self.app.settings._to_dict()
-                imported_settings["twitch"] = current.get("twitch", {})
-                imported_settings["youtube"] = current.get("youtube", {})
-                imported_settings["kick"] = current.get("kick", {})
+                for platform_key in ("twitch", "youtube", "kick"):
+                    current_plat = current.get(platform_key, {})
+                    imported_plat = imported_settings.get(platform_key, {})
+                    # Start from current (has secrets), overlay imported non-secrets
+                    merged = dict(current_plat)
+                    for k, v in imported_plat.items():
+                        if k not in (
+                            "access_token",
+                            "refresh_token",
+                            "browser_auth_token",
+                            "cookies",
+                            "api_key",
+                            "client_id",
+                            "client_secret",
+                        ):
+                            merged[k] = v
+                    imported_settings[platform_key] = merged
                 # Merge window: keep current geometry but import preferences
                 current_window = current.get("window", {})
                 imported_window = imported_settings.get("window", {})
@@ -1297,21 +1312,32 @@ class MainWindow(QMainWindow):
                 imported_settings["close_to_tray_asked"] = self.app.settings.close_to_tray_asked
                 # Apply imported settings
                 new_settings = Settings._from_dict(imported_settings)
-                # Copy all fields to current settings
+                # Copy all importable fields to current settings
                 for field_name in [
+                    # General
                     "refresh_interval",
                     "minimize_to_tray",
                     "start_minimized",
                     "check_for_updates",
                     "autostart",
                     "close_to_tray",
+                    "emote_cache_mb",
+                    # UI
                     "sort_mode",
                     "hide_offline",
                     "favorites_only",
                     "ui_style",
                     "platform_colors",
                     "font_size",
+                    # Appearance / theme
                     "theme_mode",
+                    "custom_theme_slug",
+                    "custom_theme_base",
+                    # Platform non-secret settings
+                    "twitch",
+                    "youtube",
+                    "kick",
+                    # Feature settings
                     "streamlink",
                     "notifications",
                     "chat",
