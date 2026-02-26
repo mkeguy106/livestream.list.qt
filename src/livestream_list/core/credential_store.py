@@ -21,6 +21,8 @@ KEY_TWITCH_BROWSER_AUTH_TOKEN = "twitch_browser_auth_token"
 KEY_YOUTUBE_COOKIES = "youtube_cookies"
 KEY_KICK_ACCESS_TOKEN = "kick_access_token"
 KEY_KICK_REFRESH_TOKEN = "kick_refresh_token"
+KEY_TWITCH_CLIENT_SECRET = "twitch_client_secret"
+KEY_KICK_CLIENT_SECRET = "kick_client_secret"
 
 _keyring_available: bool | None = None
 

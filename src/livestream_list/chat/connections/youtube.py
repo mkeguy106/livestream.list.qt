@@ -330,6 +330,7 @@ class YouTubeChatConnection(BaseChatConnection):
         self._slow_mode_seconds: int = 0  # Known slow mode interval from room state
         self._last_send_time: float = 0.0  # monotonic timestamp of last successful send
         self._nick_variants: list[str] = []  # All name forms for mention matching
+        self._http_session: object | None = None  # Persistent aiohttp.ClientSession
 
     async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
         """Connect to a YouTube channel's live chat.
@@ -389,6 +390,7 @@ class YouTubeChatConnection(BaseChatConnection):
         """Disconnect from YouTube chat."""
         self._should_stop = True
         self._cleanup_pytchat()
+        await self._close_http_session()
 
     async def send_message(self, text: str, reply_to_msg_id: str = "") -> bool:
         """Send a message to YouTube chat via InnerTube API with retry logic."""
@@ -463,6 +465,10 @@ class YouTubeChatConnection(BaseChatConnection):
                 self._emit_error("Slow mode is active. Please wait before sending again.")
             return False
 
+        if result == "rejected":
+            # Error already emitted by _do_send_yt with YouTube's reason
+            return False
+
         # Generic failure
         self._emit_error("Failed to send YouTube message")
         return False
@@ -474,6 +480,21 @@ class YouTubeChatConnection(BaseChatConnection):
         elapsed = time.monotonic() - self._last_send_time
         remaining = self._slow_mode_seconds - int(elapsed)
         return max(remaining, 0)
+
+    @staticmethod
+    def _extract_error_text(error_msg: dict) -> str:
+        """Extract human-readable text from YouTube's errorMessage object.
+
+        YouTube uses {"simpleText": "..."} or {"runs": [{"text": "..."}, ...]}.
+        """
+        if isinstance(error_msg, dict):
+            simple = error_msg.get("simpleText")
+            if simple:
+                return str(simple)
+            runs = error_msg.get("runs")
+            if isinstance(runs, list):
+                return "".join(str(r.get("text", "")) for r in runs if isinstance(r, dict))
+        return ""
 
     @staticmethod
     def _is_slow_mode_error(text: str) -> bool:
@@ -520,6 +541,28 @@ class YouTubeChatConnection(BaseChatConnection):
                 pass
         return 0
 
+    async def _get_http_session(self):
+        """Get or create a persistent aiohttp session for YouTube API calls.
+
+        Reusing a single session keeps TCP connections pooled and ensures
+        YouTube sees consistent visitor/session state across requests,
+        preventing anti-spam filters from dropping messages.
+        """
+        import aiohttp
+
+        if self._http_session is None or getattr(self._http_session, "closed", True):
+            self._http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=15),
+                cookie_jar=aiohttp.DummyCookieJar(),
+            )
+        return self._http_session
+
+    async def _close_http_session(self) -> None:
+        """Close the persistent HTTP session."""
+        if self._http_session and not getattr(self._http_session, "closed", True):
+            await self._http_session.close()
+            self._http_session = None
+
     async def _do_send_yt(self, text: str) -> bool | str:
         """Perform the actual YouTube send HTTP request.
 
@@ -529,8 +572,6 @@ class YouTubeChatConnection(BaseChatConnection):
             or False.
         """
         try:
-            import aiohttp
-
             sapisid = self._cookies.get("SAPISID", "")
             auth_header = _generate_sapisidhash(sapisid)
             cookie_header = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
@@ -567,15 +608,14 @@ class YouTubeChatConnection(BaseChatConnection):
                 f"?key={self._innertube_api_key}"
             )
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=body,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
+            session = await self._get_http_session()
+            async with session.post(
+                url,
+                json=body,
+                headers=headers,
+            ) as resp:
                     if resp.status == 200:
-                        # Parse response to detect slow mode rejection.
+                        # Parse response to detect rejection.
                         # YouTube returns 200 even when rejecting messages:
                         #   Success → actions contain "addChatItemAction"
                         #   Rejected → "dimChatItemAction" + "errorMessage"
@@ -584,20 +624,57 @@ class YouTubeChatConnection(BaseChatConnection):
 
                             resp_text = await resp.text()
                             data = _json.loads(resp_text)
-
                             actions = data.get("actions", [])
                             has_add = any("addChatItemAction" in a for a in actions)
                             has_dim = any("dimChatItemAction" in a for a in actions)
                             error_msg_obj = data.get("errorMessage")
 
-                            if has_dim or error_msg_obj or not has_add:
-                                # Message was rejected (slow mode / rate limit)
-                                logger.warning("YouTube send rejected (slow mode)")
-                                slow_sec = self._parse_slow_mode_from_response(data)
-                                if slow_sec > 0:
-                                    self._slow_mode_seconds = slow_sec
-                                    self._emit_room_state(ChatRoomState(slow=slow_sec))
-                                return "slow_mode"
+                            if has_dim or error_msg_obj:
+                                # Explicit rejection from YouTube
+                                error_text = (
+                                    self._extract_error_text(error_msg_obj)
+                                    if error_msg_obj
+                                    else ""
+                                )
+                                if error_text and self._is_slow_mode_error(error_text):
+                                    logger.warning(
+                                        f"YouTube send rejected (slow mode): {error_text}"
+                                    )
+                                    slow_sec = self._parse_slow_mode_from_response(data)
+                                    if slow_sec > 0:
+                                        self._slow_mode_seconds = slow_sec
+                                        self._emit_room_state(ChatRoomState(slow=slow_sec))
+                                    return "slow_mode"
+
+                                # If the message was ALSO added (has_add), it's
+                                # not actually rejected — some responses contain
+                                # both addChatItemAction AND errorMessage/dim.
+                                if has_add:
+                                    logger.info(
+                                        "YouTube send has both addChatItemAction "
+                                        "and dim/error — treating as success"
+                                    )
+                                else:
+                                    # Non-slow-mode rejection
+                                    if error_text:
+                                        self._emit_error(f"YouTube: {error_text}")
+                                    else:
+                                        self._emit_error("Message rejected by YouTube")
+                                    return "rejected"
+
+                            if not has_add:
+                                # No addChatItemAction means YouTube silently
+                                # rejected the message (rate limit, spam filter,
+                                # etc.) — the message will NOT appear in chat.
+                                logger.warning(
+                                    "YouTube send got 200 without addChatItemAction "
+                                    f"(keys: {list(data.keys())})"
+                                )
+                                self._emit_error(
+                                    "Message not delivered — YouTube may be "
+                                    "rate limiting. Try again in a moment."
+                                )
+                                return "rejected"
 
                             # Success — extract slow mode interval from response
                             # timeoutDurationUsec is present when slow mode is active
@@ -682,8 +759,6 @@ class YouTubeChatConnection(BaseChatConnection):
     async def _extract_send_params(self, video_id: str) -> None:
         """Extract InnerTube API key and send params from the live chat page."""
         try:
-            import aiohttp
-
             cookie_header = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
             sapisid = self._cookies.get("SAPISID", "")
             headers = {
@@ -701,17 +776,16 @@ class YouTubeChatConnection(BaseChatConnection):
 
             url = f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as resp:
-                    if resp.status != 200:
-                        logger.warning(f"Failed to fetch live_chat page: {resp.status}")
-                        return
+            session = await self._get_http_session()
+            async with session.get(
+                url,
+                headers=headers,
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(f"Failed to fetch live_chat page: {resp.status}")
+                    return
 
-                    html = await resp.text()
+                html = await resp.text()
 
             # Check if YouTube recognizes our cookies as authenticated
             logged_in_match = re.search(r'"LOGGED_IN"\s*:\s*(true|false)', html)

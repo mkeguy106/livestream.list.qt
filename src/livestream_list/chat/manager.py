@@ -432,44 +432,58 @@ class ChatManager(QObject):
             return
 
         worker = self._workers.get(channel_key)
-        if worker and worker._loop:
-            asyncio.run_coroutine_threadsafe(
-                connection.send_message(text, reply_to_msg_id), worker._loop
+        if not worker or not worker._loop:
+            logger.warning(
+                f"Cannot send message: no worker/loop for {channel_key} "
+                f"(worker={worker is not None}, loop={getattr(worker, '_loop', None) is not None})"
             )
+            return
 
-            # Local echo: Twitch IRC doesn't echo your own messages back.
-            # Kick echoes via Pusher websocket, YouTube echoes via pytchat poll.
-            # Only add local echo for Twitch to avoid duplicates.
-            livestream = self._livestreams.get(channel_key)
-            if livestream and livestream.channel.platform not in (
-                StreamPlatform.KICK,
-                StreamPlatform.YOUTUBE,
-            ):
-                # Use display_name (proper case) if available, fall back to nick
-                display_name = getattr(connection, "_display_name", "") or getattr(
-                    connection, "_nick", "You"
-                )
-                nick = getattr(connection, "_nick", "You")
-                user_badges = getattr(connection, "_user_badges", [])
-                user_color = getattr(connection, "_user_color", None)
-                local_msg = ChatMessage(
-                    id=str(uuid.uuid4()),
-                    user=ChatUser(
-                        id="self",
-                        name=nick,
-                        display_name=display_name,
-                        platform=livestream.channel.platform,
-                        color=user_color,
-                        badges=list(user_badges),
-                    ),
-                    text=text,
-                    timestamp=datetime.now(timezone.utc),
+        future = asyncio.run_coroutine_threadsafe(
+            connection.send_message(text, reply_to_msg_id), worker._loop
+        )
+
+        def _on_send_done(f: "asyncio.Future[bool]") -> None:
+            try:
+                f.result()
+            except Exception as e:
+                logger.error(f"YouTube send_message future error: {e}", exc_info=True)
+
+        future.add_done_callback(_on_send_done)
+
+        # Local echo: Twitch IRC doesn't echo your own messages back.
+        # Kick echoes via Pusher websocket, YouTube echoes via pytchat poll.
+        # Only add local echo for Twitch to avoid duplicates.
+        livestream = self._livestreams.get(channel_key)
+        if livestream and livestream.channel.platform not in (
+            StreamPlatform.KICK,
+            StreamPlatform.YOUTUBE,
+        ):
+            # Use display_name (proper case) if available, fall back to nick
+            display_name = getattr(connection, "_display_name", "") or getattr(
+                connection, "_nick", "You"
+            )
+            nick = getattr(connection, "_nick", "You")
+            user_badges = getattr(connection, "_user_badges", [])
+            user_color = getattr(connection, "_user_color", None)
+            local_msg = ChatMessage(
+                id=str(uuid.uuid4()),
+                user=ChatUser(
+                    id="self",
+                    name=nick,
+                    display_name=display_name,
                     platform=livestream.channel.platform,
-                    reply_parent_display_name=reply_parent_display_name,
-                    reply_parent_text=reply_parent_text,
-                )
-                # Route through _on_messages_received for emote matching
-                self._on_messages_received(channel_key, [local_msg])
+                    color=user_color,
+                    badges=list(user_badges),
+                ),
+                text=text,
+                timestamp=datetime.now(timezone.utc),
+                platform=livestream.channel.platform,
+                reply_parent_display_name=reply_parent_display_name,
+                reply_parent_text=reply_parent_text,
+            )
+            # Route through _on_messages_received for emote matching
+            self._on_messages_received(channel_key, [local_msg])
 
     def _on_twitch_login_detected(self, login_name: str) -> None:
         """Store the Twitch login name when detected from token validation."""

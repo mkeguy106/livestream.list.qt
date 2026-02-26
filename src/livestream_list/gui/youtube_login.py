@@ -396,9 +396,11 @@ def _read_firefox_cookies(db_path: str) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(f"host LIKE '%{d}'" for d in COOKIE_DOMAINS)
+        domain_clauses = " OR ".join("host LIKE ?" for _ in COOKIE_DOMAINS)
+        domain_params = [f"%{d}" for d in COOKIE_DOMAINS]
         cursor.execute(
-            f"SELECT name, value FROM moz_cookies WHERE {domain_clauses}"  # noqa: S608
+            f"SELECT name, value FROM moz_cookies WHERE {domain_clauses}",
+            domain_params,
         )
         for name, value in cursor.fetchall():
             if name and value:
@@ -425,10 +427,11 @@ def _read_chromium_cookies(db_path: str, key: bytes) -> dict[str, str]:
         cursor = conn.cursor()
 
         # Build domain filter
-        domain_clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS)
+        domain_clauses = " OR ".join("host_key LIKE ?" for _ in COOKIE_DOMAINS)
+        domain_params = [f"%{d}" for d in COOKIE_DOMAINS]
         cursor.execute(
-            f"SELECT name, encrypted_value, value FROM cookies "  # noqa: S608
-            f"WHERE {domain_clauses}"
+            f"SELECT name, encrypted_value, value FROM cookies WHERE {domain_clauses}",
+            domain_params,
         )
         for name, encrypted_value, plain_value in cursor.fetchall():
             if not name:
@@ -668,8 +671,9 @@ def read_firefox(db_path):
         shutil.copy2(db_path, tmp)
         conn = sqlite3.connect(tmp)
         cur = conn.cursor()
-        clauses = " OR ".join(f"host LIKE '%{d}'" for d in COOKIE_DOMAINS)
-        cur.execute(f"SELECT name, value FROM moz_cookies WHERE {clauses}")
+        clauses = " OR ".join("host LIKE ?" for _ in COOKIE_DOMAINS)
+        params = [f"%{d}" for d in COOKIE_DOMAINS]
+        cur.execute(f"SELECT name, value FROM moz_cookies WHERE {clauses}", params)
         for name, value in cur.fetchall():
             if name and value:
                 cookies[name] = value
@@ -745,8 +749,11 @@ def read_chromium(db_path, keyring_label):
         shutil.copy2(db_path, tmp)
         conn = sqlite3.connect(tmp)
         cur = conn.cursor()
-        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in COOKIE_DOMAINS)
-        cur.execute(f"SELECT name, encrypted_value, value FROM cookies WHERE {clauses}")
+        clauses = " OR ".join("host_key LIKE ?" for _ in COOKIE_DOMAINS)
+        params = [f"%{d}" for d in COOKIE_DOMAINS]
+        cur.execute(
+            f"SELECT name, encrypted_value, value FROM cookies WHERE {clauses}", params
+        )
         for name, enc_val, plain_val in cur.fetchall():
             if not name:
                 continue
@@ -1073,9 +1080,11 @@ def _read_twitch_firefox(db_path: str) -> str | None:
         shutil.copy2(db_path, tmp_path)
         conn = sqlite3.connect(tmp_path)
         cursor = conn.cursor()
-        clauses = " OR ".join(f"host LIKE '%{d}'" for d in _TWITCH_DOMAINS)
+        clauses = " OR ".join("host LIKE ?" for _ in _TWITCH_DOMAINS)
+        params = [f"%{d}" for d in _TWITCH_DOMAINS]
         cursor.execute(
-            f"SELECT value FROM moz_cookies WHERE name = 'auth-token' AND ({clauses})"  # noqa: S608
+            f"SELECT value FROM moz_cookies WHERE name = 'auth-token' AND ({clauses})",
+            params,
         )
         row = cursor.fetchone()
         conn.close()
@@ -1097,10 +1106,12 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
         shutil.copy2(db_path, tmp_path)
         conn = sqlite3.connect(tmp_path)
         cursor = conn.cursor()
-        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in _TWITCH_DOMAINS)
+        clauses = " OR ".join("host_key LIKE ?" for _ in _TWITCH_DOMAINS)
+        params = [f"%{d}" for d in _TWITCH_DOMAINS]
         cursor.execute(
-            f"SELECT encrypted_value, value FROM cookies "  # noqa: S608
-            f"WHERE name = 'auth-token' AND ({clauses})"
+            f"SELECT encrypted_value, value FROM cookies "
+            f"WHERE name = 'auth-token' AND ({clauses})",
+            params,
         )
         row = cursor.fetchone()
         conn.close()
@@ -1251,8 +1262,11 @@ def read_firefox_token(db_path):
         shutil.copy2(db_path, tmp)
         conn = sqlite3.connect(tmp)
         cur = conn.cursor()
-        clauses = " OR ".join(f"host LIKE '%{d}'" for d in TWITCH_DOMAINS)
-        cur.execute(f"SELECT value FROM moz_cookies WHERE name='auth-token' AND ({clauses})")
+        clauses = " OR ".join("host LIKE ?" for _ in TWITCH_DOMAINS)
+        params = [f"%{d}" for d in TWITCH_DOMAINS]
+        cur.execute(
+            f"SELECT value FROM moz_cookies WHERE name='auth-token' AND ({clauses})", params
+        )
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -1297,10 +1311,12 @@ def read_chromium_token(db_path, keyring_label):
         shutil.copy2(db_path, tmp)
         conn = sqlite3.connect(tmp)
         cur = conn.cursor()
-        clauses = " OR ".join(f"host_key LIKE '%{d}'" for d in TWITCH_DOMAINS)
+        clauses = " OR ".join("host_key LIKE ?" for _ in TWITCH_DOMAINS)
+        params = [f"%{d}" for d in TWITCH_DOMAINS]
         cur.execute(
             f"SELECT encrypted_value, value FROM cookies "
-            f"WHERE name='auth-token' AND ({clauses})"
+            f"WHERE name='auth-token' AND ({clauses})",
+            params,
         )
         row = cur.fetchone()
         conn.close()

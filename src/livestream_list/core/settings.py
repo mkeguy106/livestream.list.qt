@@ -339,9 +339,11 @@ class Settings:
         """Load settings from file."""
         from .credential_store import (
             KEY_KICK_ACCESS_TOKEN,
+            KEY_KICK_CLIENT_SECRET,
             KEY_KICK_REFRESH_TOKEN,
             KEY_TWITCH_ACCESS_TOKEN,
             KEY_TWITCH_BROWSER_AUTH_TOKEN,
+            KEY_TWITCH_CLIENT_SECRET,
             KEY_TWITCH_REFRESH_TOKEN,
             KEY_YOUTUBE_COOKIES,
             get_secret,
@@ -367,9 +369,11 @@ class Settings:
             kr_twitch_at = get_secret(KEY_TWITCH_ACCESS_TOKEN)
             kr_twitch_rt = get_secret(KEY_TWITCH_REFRESH_TOKEN)
             kr_twitch_bat = get_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN)
+            kr_twitch_cs = get_secret(KEY_TWITCH_CLIENT_SECRET)
             kr_yt_cookies = get_secret(KEY_YOUTUBE_COOKIES)
             kr_kick_at = get_secret(KEY_KICK_ACCESS_TOKEN)
             kr_kick_rt = get_secret(KEY_KICK_REFRESH_TOKEN)
+            kr_kick_cs = get_secret(KEY_KICK_CLIENT_SECRET)
 
             # Migrate: if JSON has secrets but keyring doesn't, store in keyring
             needs_resave = False
@@ -391,6 +395,12 @@ class Settings:
             elif kr_twitch_bat:
                 settings.twitch.browser_auth_token = kr_twitch_bat
 
+            if settings.twitch.client_secret and not kr_twitch_cs:
+                store_secret(KEY_TWITCH_CLIENT_SECRET, settings.twitch.client_secret)
+                needs_resave = True
+            elif kr_twitch_cs:
+                settings.twitch.client_secret = kr_twitch_cs
+
             if settings.youtube.cookies and not kr_yt_cookies:
                 store_secret(KEY_YOUTUBE_COOKIES, settings.youtube.cookies)
                 needs_resave = True
@@ -409,6 +419,12 @@ class Settings:
             elif kr_kick_rt:
                 settings.kick.refresh_token = kr_kick_rt
 
+            if settings.kick.client_secret and not kr_kick_cs:
+                store_secret(KEY_KICK_CLIENT_SECRET, settings.kick.client_secret)
+                needs_resave = True
+            elif kr_kick_cs:
+                settings.kick.client_secret = kr_kick_cs
+
             # Re-save to clear secrets from JSON after migration
             if needs_resave:
                 settings.save(path)
@@ -417,11 +433,15 @@ class Settings:
 
     def save(self, path: Path | None = None) -> None:
         """Save settings to file."""
+        import logging
+
         from .credential_store import (
             KEY_KICK_ACCESS_TOKEN,
+            KEY_KICK_CLIENT_SECRET,
             KEY_KICK_REFRESH_TOKEN,
             KEY_TWITCH_ACCESS_TOKEN,
             KEY_TWITCH_BROWSER_AUTH_TOKEN,
+            KEY_TWITCH_CLIENT_SECRET,
             KEY_TWITCH_REFRESH_TOKEN,
             KEY_YOUTUBE_COOKIES,
             is_available,
@@ -429,26 +449,65 @@ class Settings:
             store_secret,
         )
 
+        _logger = logging.getLogger(__name__)
+
         if path is None:
             path = get_config_dir() / "settings.json"
 
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Store secrets in keyring
+        # Store secrets in keyring, tracking which ones succeed
         use_keyring = is_available()
+        keyring_ok = {"twitch": True, "youtube": True, "kick": True}
         if use_keyring:
-            store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token)
-            store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token)
-            store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, self.twitch.browser_auth_token)
-            store_secret(KEY_YOUTUBE_COOKIES, self.youtube.cookies)
-            store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token)
-            store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token)
+            tw_ok = all([
+                store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token),
+                store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token),
+                store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, self.twitch.browser_auth_token),
+                store_secret(KEY_TWITCH_CLIENT_SECRET, self.twitch.client_secret),
+            ])
+            if not tw_ok:
+                keyring_ok["twitch"] = False
+                _logger.warning("Keyring store failed for Twitch — falling back to file")
+
+            yt_ok = store_secret(KEY_YOUTUBE_COOKIES, self.youtube.cookies)
+            if not yt_ok:
+                keyring_ok["youtube"] = False
+                _logger.warning("Keyring store failed for YouTube — falling back to file")
+
+            kick_ok = all([
+                store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token),
+                store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token),
+                store_secret(KEY_KICK_CLIENT_SECRET, self.kick.client_secret),
+            ])
+            if not kick_ok:
+                keyring_ok["kick"] = False
+                _logger.warning("Keyring store failed for Kick — falling back to file")
+        else:
+            # No keyring available at all — secrets will be in plaintext JSON
+            has_secrets = any([
+                self.twitch.access_token,
+                self.twitch.refresh_token,
+                self.twitch.browser_auth_token,
+                self.youtube.cookies,
+                self.kick.access_token,
+                self.kick.refresh_token,
+            ])
+            if has_secrets:
+                _logger.warning(
+                    "System keyring unavailable — credentials stored in plaintext "
+                    "settings.json (protected by file permissions)"
+                )
 
         # Atomic write: write to temp file then rename to prevent corruption on crash
         fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp", prefix="settings_")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self._to_dict(exclude_secrets=use_keyring), f, indent=2)
+                json.dump(
+                    self._to_dict(exclude_secrets=use_keyring, keyring_ok=keyring_ok),
+                    f,
+                    indent=2,
+                )
             os.replace(tmp_path, path)  # Atomic on POSIX
         except Exception:
             # Clean up temp file on error
@@ -723,12 +782,24 @@ class Settings:
 
         return settings
 
-    def _to_dict(self, exclude_secrets: bool = False) -> dict:
+    def _to_dict(
+        self,
+        exclude_secrets: bool = False,
+        keyring_ok: dict[str, bool] | None = None,
+    ) -> dict:
         """Convert Settings to a dictionary.
 
         If exclude_secrets is True, sensitive tokens/cookies are omitted
-        (they are stored in the system keyring instead).
+        for platforms where keyring storage succeeded. Secrets for platforms
+        where keyring failed are kept in the dict as fallback.
+
+        Args:
+            exclude_secrets: Whether to exclude secrets (True when keyring is available).
+            keyring_ok: Per-platform keyring success status. Keys: "twitch", "youtube",
+                "kick". If None, all platforms are treated as successful.
         """
+        if keyring_ok is None:
+            keyring_ok = {"twitch": True, "youtube": True, "kick": True}
 
         def _enum_dict_factory(items):
             return {k: v.value if isinstance(v, _Enum) else v for k, v in items}
@@ -736,10 +807,15 @@ class Settings:
         result = asdict(self, dict_factory=_enum_dict_factory)
 
         if exclude_secrets:
-            for key in ("access_token", "refresh_token", "browser_auth_token"):
-                result["twitch"].pop(key, None)
-            result["youtube"].pop("cookies", None)
-            for key in ("access_token", "refresh_token"):
-                result["kick"].pop(key, None)
+            if keyring_ok.get("twitch", True):
+                for key in (
+                    "access_token", "refresh_token", "browser_auth_token", "client_secret",
+                ):
+                    result["twitch"].pop(key, None)
+            if keyring_ok.get("youtube", True):
+                result["youtube"].pop("cookies", None)
+            if keyring_ok.get("kick", True):
+                for key in ("access_token", "refresh_token", "client_secret"):
+                    result["kick"].pop(key, None)
 
         return result

@@ -272,6 +272,8 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 | YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
 | YouTube chat send requires cookies | Copy cookies from browser (SID, HSID, SSID, APISID, SAPISID) into Preferences > Accounts |
+| YouTube send uses wrong cookies after first request | YouTube HTTP session MUST use `aiohttp.DummyCookieJar()` — default jar processes `Set-Cookie` responses and overwrites our manual auth cookies |
+| YouTube send `addChatItemAction` missing | No `addChatItemAction` in 200 response = message silently dropped (rate limit/spam filter). Must report as failure, not treat as "sparse success" |
 | YouTube cookie auto-refresh loops | Guard flag `_yt_cookie_auto_refresh_attempted` must NOT reset in `reconnect_youtube()` — only one attempt per session |
 | Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
