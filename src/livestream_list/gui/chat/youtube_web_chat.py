@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
@@ -58,8 +59,8 @@ _tracker_connected: bool = False
 def _on_cookie_added(cookie) -> None:
     """Track YouTube/Google cookies as they're added to the profile."""
     domain = cookie.domain()
+    name = cookie.name().data().decode()
     if "youtube.com" in domain or "google.com" in domain:
-        name = cookie.name().data().decode()
         value = cookie.value().data().decode()
         _tracked_cookies[name] = value
 
@@ -100,21 +101,45 @@ def _get_shared_profile() -> QWebEngineProfile | None:
     return _shared_profile
 
 
+def _read_cookies_from_db() -> dict[str, str]:
+    """Read YouTube/Google cookies directly from the Chromium SQLite database.
+
+    loadAllCookies() doesn't emit cookieAdded for persisted Chromium cookies,
+    so we read the database file directly for login checks and cookie strings.
+    """
+    import sqlite3
+
+    db_path = Path(get_data_dir() / "webengine" / "Cookies")
+    if not db_path.exists():
+        return {}
+
+    cookies: dict[str, str] = {}
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cursor = conn.execute(
+            "SELECT name, value FROM cookies "
+            "WHERE host_key LIKE '%youtube.com' OR host_key LIKE '%google.com'"
+        )
+        for name, value in cursor:
+            cookies[name] = value
+        conn.close()
+    except Exception:
+        logger.warning("Failed to read YouTube cookies from database", exc_info=True)
+    return cookies
+
+
 def get_youtube_cookie_string() -> str:
     """Extract YouTube cookies from the shared profile as 'name=value; ...' string."""
-    # Ensure profile and tracker are initialized
-    if _get_shared_profile() is None:
+    cookies = _read_cookies_from_db()
+    if not cookies:
         return ""
-    if not _tracked_cookies:
-        return ""
-    return "; ".join(f"{name}={value}" for name, value in _tracked_cookies.items())
+    return "; ".join(f"{name}={value}" for name, value in cookies.items())
 
 
 def has_youtube_login() -> bool:
-    """Check if the shared profile has YouTube auth cookies (SID present)."""
-    if _get_shared_profile() is None:
-        return False
-    return "SID" in _tracked_cookies
+    """Check if the YouTube profile has auth cookies (SID present)."""
+    cookies = _read_cookies_from_db()
+    return "SID" in cookies
 
 
 def clear_youtube_cookies() -> None:
