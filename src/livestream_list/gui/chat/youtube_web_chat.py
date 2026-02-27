@@ -8,8 +8,6 @@ import re
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...core.models import Livestream
@@ -18,6 +16,8 @@ from ..theme import get_theme, is_dark_mode
 from .chat_widget import DismissibleBanner
 
 if TYPE_CHECKING:
+    from PySide6.QtWebEngineCore import QWebEngineProfile
+
     from ...core.settings import BuiltinChatSettings
 
 logger = logging.getLogger(__name__)
@@ -25,8 +25,29 @@ logger = logging.getLogger(__name__)
 # Pattern for !commands in stream titles
 _COMMAND_RE = re.compile(r"(![a-zA-Z]\w*)")
 
+# QWebEngine imports are deferred to avoid crashing Flatpak builds
+# where libgssapi_krb5.so.2 may be missing from the runtime.
+_webengine_available: bool | None = None
+
 # Shared persistent profile (singleton)
 _shared_profile: QWebEngineProfile | None = None
+
+
+def _ensure_webengine() -> bool:
+    """Lazily import QWebEngine modules. Returns True if available."""
+    global _webengine_available
+    if _webengine_available is not None:
+        return _webengine_available
+    try:
+        from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile  # noqa: F401
+        from PySide6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
+
+        _webengine_available = True
+    except ImportError:
+        logger.warning("QWebEngine not available — YouTube embedded chat disabled")
+        _webengine_available = False
+    return _webengine_available
+
 
 # Persistent cookie tracker — maintains a live dict of YouTube/Google cookies
 # so we never need loadAllCookies() + QEventLoop timing hacks.
@@ -51,9 +72,17 @@ def _on_cookie_removed(cookie) -> None:
         _tracked_cookies.pop(name, None)
 
 
-def _get_shared_profile() -> QWebEngineProfile:
-    """Get or create the shared persistent QWebEngineProfile for YouTube chat."""
+def _get_shared_profile() -> QWebEngineProfile | None:
+    """Get or create the shared persistent QWebEngineProfile for YouTube chat.
+
+    Returns None if QWebEngine is not available (e.g. Flatpak missing libs).
+    """
     global _shared_profile, _tracker_connected
+    if not _ensure_webengine():
+        return None
+
+    from PySide6.QtWebEngineCore import QWebEngineProfile
+
     if _shared_profile is None:
         storage_path = str(get_data_dir() / "webengine")
         _shared_profile = QWebEngineProfile("youtube_chat")
@@ -74,7 +103,8 @@ def _get_shared_profile() -> QWebEngineProfile:
 def get_youtube_cookie_string() -> str:
     """Extract YouTube cookies from the shared profile as 'name=value; ...' string."""
     # Ensure profile and tracker are initialized
-    _get_shared_profile()
+    if _get_shared_profile() is None:
+        return ""
     if not _tracked_cookies:
         return ""
     return "; ".join(f"{name}={value}" for name, value in _tracked_cookies.items())
@@ -82,13 +112,16 @@ def get_youtube_cookie_string() -> str:
 
 def has_youtube_login() -> bool:
     """Check if the shared profile has YouTube auth cookies (SID present)."""
-    _get_shared_profile()
+    if _get_shared_profile() is None:
+        return False
     return "SID" in _tracked_cookies
 
 
 def clear_youtube_cookies() -> None:
     """Clear all cookies from the shared YouTube profile."""
-    _get_shared_profile().cookieStore().deleteAllCookies()
+    profile = _get_shared_profile()
+    if profile is not None:
+        profile.cookieStore().deleteAllCookies()
     _tracked_cookies.clear()
 
 
@@ -135,15 +168,19 @@ class YouTubeWebChatWidget(QWidget):
         self._socials_banner.hide()
         layout.addWidget(self._socials_banner)
 
-        if not livestream.video_id:
-            # No active livestream — show placeholder
-            self._web_view: QWebEngineView | None = None
-            placeholder = QLabel("No active livestream")
+        profile = _get_shared_profile()
+        if not livestream.video_id or not profile:
+            # No active livestream or QWebEngine unavailable — show placeholder
+            self._web_view = None
+            msg = "No active livestream" if not profile else "YouTube embedded chat unavailable"
+            placeholder = QLabel(msg)
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(placeholder, 1)
         else:
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
             # Create web view with shared persistent profile
-            profile = _get_shared_profile()
             page = QWebEnginePage(profile, self)
             self._web_view = QWebEngineView(self)
             self._web_view.setPage(page)

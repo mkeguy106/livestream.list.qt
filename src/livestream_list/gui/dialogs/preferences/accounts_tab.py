@@ -52,22 +52,28 @@ class _YouTubeLoginWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        from PySide6.QtWebEngineCore import QWebEnginePage
-        from PySide6.QtWebEngineWidgets import QWebEngineView
+        from ...chat.youtube_web_chat import _ensure_webengine, _get_shared_profile
 
-        from ...chat.youtube_web_chat import _get_shared_profile
+        self._web_view = None
+        if _ensure_webengine():
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtWebEngineWidgets import QWebEngineView
 
-        profile = _get_shared_profile()
-        page = QWebEnginePage(profile, self)
-        self._web_view = QWebEngineView(self)
-        self._web_view.setPage(page)
-        self._web_view.urlChanged.connect(self._on_url_changed)
-        layout.addWidget(self._web_view)
+            profile = _get_shared_profile()
+            if profile is not None:
+                page = QWebEnginePage(profile, self)
+                self._web_view = QWebEngineView(self)
+                self._web_view.setPage(page)
+                self._web_view.urlChanged.connect(self._on_url_changed)
+                layout.addWidget(self._web_view)
 
         self._active = False
 
     def start_login(self, parent: QWidget | None = None) -> None:
         """Load the Google login page and show the window."""
+        if self._web_view is None:
+            self.login_finished.emit(False)
+            return
         self._active = True
         login_url = (
             "https://accounts.google.com/ServiceLogin"
@@ -94,7 +100,8 @@ class _YouTubeLoginWindow(QWidget):
         if not self._active:
             return
         self._active = False
-        self._web_view.setUrl(QUrl("about:blank"))
+        if self._web_view is not None:
+            self._web_view.setUrl(QUrl("about:blank"))
         self.hide()
         self.login_finished.emit(success)
 
@@ -160,13 +167,23 @@ class AccountsTab(QScrollArea):
         yt_group = QGroupBox("YouTube")
         yt_layout = QVBoxLayout(yt_group)
 
+        from ...chat.youtube_web_chat import _ensure_webengine
+
+        self._yt_webengine_ok = _ensure_webengine()
+
         self.yt_status = QLabel("Status: Not logged in")
         self.yt_status.setStyleSheet("color: gray;")
         yt_layout.addWidget(self.yt_status)
 
+        if not self._yt_webengine_ok:
+            unavail_label = QLabel("YouTube sign-in unavailable (QWebEngine not installed)")
+            unavail_label.setStyleSheet("color: orange;")
+            yt_layout.addWidget(unavail_label)
+
         yt_buttons = QHBoxLayout()
         self.yt_login_btn = QPushButton("Sign in")
         self.yt_login_btn.clicked.connect(self._on_yt_login)
+        self.yt_login_btn.setEnabled(self._yt_webengine_ok)
         yt_buttons.addWidget(self.yt_login_btn)
         self.yt_import_subs_btn = QPushButton("Import Subscriptions")
         self.yt_import_subs_btn.clicked.connect(self._on_yt_import_subs)

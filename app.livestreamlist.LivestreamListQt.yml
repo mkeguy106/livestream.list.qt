@@ -33,6 +33,19 @@ build-options:
     - --share=network
 
 modules:
+  # MIT Kerberos — provides libgssapi_krb5.so.2 needed by PySide6's QtWebEngine
+  - name: mit-krb5
+    buildsystem: simple
+    sources:
+      - type: archive
+        url: https://web.mit.edu/kerberos/krb5/1.22/krb5-1.22.2.tar.gz
+        sha256: 002526bb28bb1caf3e2a339a1424adfcaeb96dbe5733c4a0c53862fe0b7f522c
+    build-commands:
+      - cd src && autoreconf -i
+      - cd src && ./configure --prefix=/app --disable-static --enable-shared
+      - cd src && make -j$(nproc)
+      - cd src && make install
+
   - name: livestream-list-qt
     buildsystem: simple
     build-commands:
