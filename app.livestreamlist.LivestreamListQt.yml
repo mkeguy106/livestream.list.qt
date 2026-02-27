@@ -38,8 +38,8 @@ modules:
     buildsystem: simple
     sources:
       - type: archive
-        url: https://web.mit.edu/kerberos/krb5/1.22/krb5-1.22.2.tar.gz
-        sha256: 002526bb28bb1caf3e2a339a1424adfcaeb96dbe5733c4a0c53862fe0b7f522c
+        url: https://web.mit.edu/kerberos/dist/krb5/1.22/krb5-1.22.2.tar.gz
+        sha256: 3243ffbc8ea4d4ac22ddc7dd2a1dc54c57874c40648b60ff97009763554eaf13
     build-commands:
       - cd src && autoreconf -i
       - cd src && ./configure --prefix=/app --disable-static --enable-shared
