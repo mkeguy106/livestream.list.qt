@@ -753,7 +753,6 @@ class ChatWindow(QMainWindow):
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
         self.chat_manager.raid_received.connect(self._on_raid_received)
         self.chat_manager.badge_map_ready.connect(self._on_badge_map_ready)
-        self.chat_manager.youtube_cookies_refreshed.connect(self._on_youtube_cookies_refreshed)
 
     def update_livestreams(self, livestreams: list[Livestream]) -> None:
         """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""
@@ -800,11 +799,42 @@ class ChatWindow(QMainWindow):
 
         self._livestreams[channel_key] = livestream
 
-        # Create chat widget - check auth based on platform
+        # YouTube uses embedded web view
+        if livestream.channel.platform == StreamPlatform.YOUTUBE:
+            widget = self._create_youtube_web_widget(channel_key, livestream)
+        else:
+            widget = self._create_native_chat_widget(channel_key, livestream)
+
+        # Apply current theme colors to the new widget
+        widget.apply_theme()
+
+        self._widgets[channel_key] = widget
+
+        # Add tab with platform-colored dot
+        platform = livestream.channel.platform
+        icon = _create_dot_icon(PLATFORM_COLORS.get(platform, QColor("#888")))
+        tab_name = livestream.channel.display_name or livestream.channel.channel_id
+        idx = self._tab_widget.addTab(widget, icon, tab_name)
+        self._tab_widget.setCurrentIndex(idx)
+
+    def _create_youtube_web_widget(self, channel_key: str, livestream: Livestream) -> QWidget:
+        """Create a YouTubeWebChatWidget for embedded YouTube chat."""
+        from .youtube_web_chat import YouTubeWebChatWidget
+
+        widget = YouTubeWebChatWidget(
+            channel_key=channel_key,
+            livestream=livestream,
+            settings=self.settings.chat.builtin,
+            parent=self._tab_widget,
+        )
+        widget.popout_requested.connect(self._on_popout_requested)
+        widget.settings_clicked.connect(self.chat_settings_requested.emit)
+        return widget
+
+    def _create_native_chat_widget(self, channel_key: str, livestream: Livestream) -> ChatWidget:
+        """Create a native ChatWidget for Twitch/Kick chat."""
         if livestream.channel.platform == StreamPlatform.KICK:
             authenticated = bool(self.settings.kick.access_token)
-        elif livestream.channel.platform == StreamPlatform.YOUTUBE:
-            authenticated = bool(self.settings.youtube.cookies)
         else:
             authenticated = bool(self.settings.twitch.access_token)
         widget = ChatWidget(
@@ -833,18 +863,7 @@ class ChatWindow(QMainWindow):
 
         # Load disk history if chat logging is enabled
         widget.load_disk_history(self.chat_manager.chat_log_writer)
-
-        # Apply current theme colors to the new widget
-        widget.apply_theme()
-
-        self._widgets[channel_key] = widget
-
-        # Add tab with platform-colored dot
-        platform = livestream.channel.platform
-        icon = _create_dot_icon(PLATFORM_COLORS.get(platform, QColor("#888")))
-        tab_name = livestream.channel.display_name or livestream.channel.channel_id
-        idx = self._tab_widget.addTab(widget, icon, tab_name)
-        self._tab_widget.setCurrentIndex(idx)
+        return widget
 
     def _on_chat_closed(self, channel_key: str) -> None:
         """Handle a chat connection being closed."""
@@ -853,6 +872,8 @@ class ChatWindow(QMainWindow):
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.removeTab(idx)
+            if hasattr(widget, "cleanup"):
+                widget.cleanup()
             widget.deleteLater()
 
         self._livestreams.pop(channel_key, None)
@@ -961,7 +982,7 @@ class ChatWindow(QMainWindow):
             )
             widget.invalidate_message_layout()
             # Refresh emote picker icons if it's currently visible
-            if widget._emote_picker.isVisible():
+            if hasattr(widget, "_emote_picker") and widget._emote_picker.isVisible():
                 widget._emote_picker.refresh_icons()
         self.update_animation_state()
 
@@ -1096,26 +1117,27 @@ class ChatWindow(QMainWindow):
     def _on_tab_close(self, index: int) -> None:
         """Handle tab close button clicked."""
         widget = self._tab_widget.widget(index)
-        if isinstance(widget, ChatWidget):
-            if widget._is_dm:
-                # DM tabs have no connection — just remove the widget
-                channel_key = widget.channel_key
-                self._widgets.pop(channel_key, None)
-                self._tab_widget.removeTab(index)
-                widget.deleteLater()
-                if self._tab_widget.count() == 0 and not self._popout_windows:
-                    self.save_window_state()
-                    self.hide()
-                    self.window_hidden.emit()
-            else:
-                self.close_chat(widget.channel_key)
+        if not hasattr(widget, "channel_key"):
+            return
+        if isinstance(widget, ChatWidget) and widget._is_dm:
+            # DM tabs have no connection — just remove the widget
+            channel_key = widget.channel_key
+            self._widgets.pop(channel_key, None)
+            self._tab_widget.removeTab(index)
+            widget.deleteLater()
+            if self._tab_widget.count() == 0 and not self._popout_windows:
+                self.save_window_state()
+                self.hide()
+                self.window_hidden.emit()
+        else:
+            self.close_chat(widget.channel_key)
 
     def _on_tab_context_menu(self, index: int, global_pos) -> None:
         """Show context menu on tab bar right-click."""
         from PySide6.QtWidgets import QMenu
 
         widget = self._tab_widget.widget(index)
-        if not isinstance(widget, ChatWidget):
+        if not hasattr(widget, "channel_key"):
             return
 
         menu = QMenu(self)
@@ -1144,14 +1166,6 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.show_error(message)
-
-    def _on_youtube_cookies_refreshed(self) -> None:
-        """Handle successful auto-refresh of YouTube cookies."""
-        self.statusBar().showMessage("YouTube cookies refreshed automatically", 5000)
-        for key, widget in self._widgets.items():
-            ls = self._livestreams.get(key)
-            if ls and ls.channel.platform == StreamPlatform.YOUTUBE:
-                widget._auth_banner.hide()
 
     def _on_chat_disconnected(self, channel_key: str) -> None:
         """Handle a chat connection being lost."""
@@ -1364,7 +1378,7 @@ class ChatWindow(QMainWindow):
         # Collect known usernames from all chat widgets for autocomplete
         known_users: dict[str, str] = {}  # display_name -> user_id
         for widget in self._widgets.values():
-            if widget._is_dm:
+            if not isinstance(widget, ChatWidget) or widget._is_dm:
                 continue
             for msg in widget._model._messages:
                 if msg.platform == StreamPlatform.TWITCH and msg.user.id != "self":
@@ -1482,7 +1496,7 @@ class ChatPopoutWindow(QMainWindow):
     def __init__(
         self,
         channel_key: str,
-        widget: ChatWidget,
+        widget: QWidget,
         livestream: Livestream,
         parent: QWidget | None = None,
     ):
@@ -1522,7 +1536,7 @@ class ChatPopoutWindow(QMainWindow):
             }}
         """)
 
-    def take_widget(self) -> ChatWidget | None:
+    def take_widget(self) -> QWidget | None:
         """Remove and return the chat widget for re-docking."""
         widget = self._widget
         self._widget = None

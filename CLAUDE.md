@@ -100,7 +100,7 @@ src/livestream_list/
 │   └── chat_log_store.py # JSONL/text per-channel logging with disk rotation
 ├── core/                 # Data models, settings, theme definitions, monitor, streamlink, platform detection
 ├── gui/
-│   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, delegate, emote picker, etc.)
+│   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, YouTubeWebChatWidget, delegate, emote picker, etc.)
 │   ├── dialogs/          # Preferences, theme editor, add channel, import/export dialogs
 │   ├── stream_list/      # Stream list model and custom delegate
 │   ├── app.py            # Main QApplication, AsyncWorker
@@ -160,7 +160,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Kick OAuth**: OAuth 2.1 + PKCE flow in `chat/auth/kick_auth.py`. Auto-refreshes expired tokens on 401.
 
-**YouTube chat**: pytchat for reading. Message sending uses InnerTube API with SAPISIDHASH authentication (requires browser cookies copied into Preferences > Accounts). Auto-refreshes expired cookies from the same browser if imported via "Import from Browser" (`CookieRefreshWorker` in manager.py, `extract_cookies_headless()` in youtube_login.py).
+**YouTube chat**: Embedded QWebEngineView (`gui/chat/youtube_web_chat.py`) loads YouTube's native popout chat URL. Uses a shared persistent `QWebEngineProfile` ("youtube_chat") that stores cookies to disk automatically. Users sign into Google directly inside the app via `_YouTubeLoginWindow` (persistent top-level QWidget, never destroyed — see Wayland pitfall below). Reading, sending, and rendering are all handled by YouTube's web UI. Title and socials banners are added above the web view, matching the native ChatWidget's banners.
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
@@ -199,6 +199,7 @@ Core architecture files (most other files follow patterns established in these):
 | `gui/theme.py` | ThemeManager singleton, stylesheet generation |
 | `gui/dialogs/preferences/` | Preferences package — dialog coordinator + per-tab modules (general, playback, chat, accounts) |
 | `gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
+| `gui/chat/youtube_web_chat.py` | YouTube embedded QWebEngineView chat, shared profile, cookie tracker |
 | `gui/chat/chat_window.py` | Chat QMainWindow, tab management, pop-out windows |
 | `gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
 | `gui/chat/emote_picker.py` | Searchable emote grid popup with animation/viewport culling |
@@ -271,10 +272,10 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | Kick shows duplicate messages on send | Don't use local echo for Kick (it echoes via websocket unlike Twitch) |
 | `livestream.platform` AttributeError | Use `livestream.channel.platform` (Livestream wraps Channel) |
 | YouTube socials 404 | UC channel IDs need `/channel/UC.../about` URL format, not `/@UC.../about` |
-| YouTube chat send requires cookies | Copy cookies from browser (SID, HSID, SSID, APISID, SAPISID) into Preferences > Accounts |
-| YouTube send uses wrong cookies after first request | YouTube HTTP session MUST use `aiohttp.DummyCookieJar()` — default jar processes `Set-Cookie` responses and overwrites our manual auth cookies |
-| YouTube send `addChatItemAction` missing | No `addChatItemAction` in 200 response = message silently dropped (rate limit/spam filter). Must report as failure, not treat as "sparse success" |
-| YouTube cookie auto-refresh loops | Guard flag `_yt_cookie_auto_refresh_attempted` must NOT reset in `reconnect_youtube()` — only one attempt per session |
+| QWebEngineView destroys Wayland focus | Never destroy a QWebEngineView that had user interaction on Wayland — hide it and navigate to about:blank instead. The YouTube login window (`_YouTubeLoginWindow`) is a persistent singleton for this reason (QTBUG-73321). |
+| QWebEngineView in modal dialog can't receive input | Wayland modality stack: if Preferences is ApplicationModal, a child window must also be ApplicationModal to receive input. Set `setWindowModality(Qt.ApplicationModal)` on the login window. |
+| QWebEngineView stacks behind parent on Wayland | Must set transient parent via `windowHandle().setTransientParent()` BEFORE calling `show()`. Call `winId()` first to force native handle creation. |
+| QWebEngineView Ctrl+scroll zoom broken | Chromium's built-in Ctrl+scroll zoom doesn't work for zoom-out. Install an event filter on `focusProxy()` (after `loadFinished`) and call `page().setZoomFactor()` manually. |
 | Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
 | Twitch Turbo token "invalid" | Must use browser `auth-token` cookie (not OAuth access token) with `Authorization=OAuth` prefix. Token is client-ID-bound. |

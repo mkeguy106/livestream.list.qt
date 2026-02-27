@@ -614,113 +614,109 @@ class YouTubeChatConnection(BaseChatConnection):
                 json=body,
                 headers=headers,
             ) as resp:
-                    if resp.status == 200:
-                        # Parse response to detect rejection.
-                        # YouTube returns 200 even when rejecting messages:
-                        #   Success → actions contain "addChatItemAction"
-                        #   Rejected → "dimChatItemAction" + "errorMessage"
-                        try:
-                            import json as _json
+                if resp.status == 200:
+                    # Parse response to detect rejection.
+                    # YouTube returns 200 even when rejecting messages:
+                    #   Success → actions contain "addChatItemAction"
+                    #   Rejected → "dimChatItemAction" + "errorMessage"
+                    try:
+                        import json as _json
 
-                            resp_text = await resp.text()
-                            data = _json.loads(resp_text)
-                            actions = data.get("actions", [])
-                            has_add = any("addChatItemAction" in a for a in actions)
-                            has_dim = any("dimChatItemAction" in a for a in actions)
-                            error_msg_obj = data.get("errorMessage")
+                        resp_text = await resp.text()
+                        data = _json.loads(resp_text)
+                        actions = data.get("actions", [])
+                        has_add = any("addChatItemAction" in a for a in actions)
+                        has_dim = any("dimChatItemAction" in a for a in actions)
+                        error_msg_obj = data.get("errorMessage")
 
-                            if has_dim or error_msg_obj:
-                                # Explicit rejection from YouTube
-                                error_text = (
-                                    self._extract_error_text(error_msg_obj)
-                                    if error_msg_obj
-                                    else ""
+                        if has_dim or error_msg_obj:
+                            # Explicit rejection from YouTube
+                            error_text = (
+                                self._extract_error_text(error_msg_obj) if error_msg_obj else ""
+                            )
+                            if error_text and self._is_slow_mode_error(error_text):
+                                logger.warning(f"YouTube send rejected (slow mode): {error_text}")
+                                slow_sec = self._parse_slow_mode_from_response(data)
+                                if slow_sec > 0:
+                                    self._slow_mode_seconds = slow_sec
+                                    self._emit_room_state(ChatRoomState(slow=slow_sec))
+                                return "slow_mode"
+
+                            # If the message was ALSO added (has_add), it's
+                            # not actually rejected — some responses contain
+                            # both addChatItemAction AND errorMessage/dim.
+                            if has_add:
+                                logger.info(
+                                    "YouTube send has both addChatItemAction "
+                                    "and dim/error — treating as success"
                                 )
-                                if error_text and self._is_slow_mode_error(error_text):
-                                    logger.warning(
-                                        f"YouTube send rejected (slow mode): {error_text}"
-                                    )
-                                    slow_sec = self._parse_slow_mode_from_response(data)
-                                    if slow_sec > 0:
-                                        self._slow_mode_seconds = slow_sec
-                                        self._emit_room_state(ChatRoomState(slow=slow_sec))
-                                    return "slow_mode"
-
-                                # If the message was ALSO added (has_add), it's
-                                # not actually rejected — some responses contain
-                                # both addChatItemAction AND errorMessage/dim.
-                                if has_add:
-                                    logger.info(
-                                        "YouTube send has both addChatItemAction "
-                                        "and dim/error — treating as success"
-                                    )
+                            else:
+                                # Non-slow-mode rejection
+                                if error_text:
+                                    self._emit_error(f"YouTube: {error_text}")
                                 else:
-                                    # Non-slow-mode rejection
-                                    if error_text:
-                                        self._emit_error(f"YouTube: {error_text}")
-                                    else:
-                                        self._emit_error("Message rejected by YouTube")
-                                    return "rejected"
-
-                            if not has_add:
-                                # No addChatItemAction means YouTube silently
-                                # rejected the message (rate limit, spam filter,
-                                # etc.) — the message will NOT appear in chat.
-                                logger.warning(
-                                    "YouTube send got 200 without addChatItemAction "
-                                    f"(keys: {list(data.keys())})"
-                                )
-                                self._emit_error(
-                                    "Message not delivered — YouTube may be "
-                                    "rate limiting. Try again in a moment."
-                                )
+                                    self._emit_error("Message rejected by YouTube")
                                 return "rejected"
 
-                            # Success — extract slow mode interval from response
-                            # timeoutDurationUsec is present when slow mode is active
-                            timeout_usec = data.get("timeoutDurationUsec")
-                            if timeout_usec:
-                                timeout_sec = int(timeout_usec) // 1_000_000
-                                if timeout_sec > 0:
-                                    self._slow_mode_seconds = timeout_sec
-                                    self._emit_room_state(ChatRoomState(slow=timeout_sec))
+                        if not has_add:
+                            # No addChatItemAction means YouTube silently
+                            # rejected the message (rate limit, spam filter,
+                            # etc.) — the message will NOT appear in chat.
+                            logger.warning(
+                                "YouTube send got 200 without addChatItemAction "
+                                f"(keys: {list(data.keys())})"
+                            )
+                            self._emit_error(
+                                "Message not delivered — YouTube may be "
+                                "rate limiting. Try again in a moment."
+                            )
+                            return "rejected"
 
-                        except Exception as e:
-                            logger.debug(f"YouTube send response parse error: {e}")
-                        self._last_send_time = time.monotonic()
-                        return True
-                    elif resp.status in (400, 409):
-                        error_text = await resp.text()
-                        if self._is_slow_mode_error(error_text):
-                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
-                            return "slow_mode"
-                        logger.warning(
-                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
-                        )
-                        return False
-                    elif resp.status in (401, 403):
-                        error_text = await resp.text()
-                        # Check for slow mode before treating as auth failure
-                        if self._is_slow_mode_error(error_text):
-                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
-                            return "slow_mode"
-                        logger.warning(f"YouTube send auth failed ({resp.status})")
-                        return "auth_expired"
-                    elif resp.status == 429:
-                        logger.warning("YouTube send rate limited")
-                        return "rate_limited"
-                    elif resp.status >= 500:
-                        logger.warning(f"YouTube server error ({resp.status})")
-                        return "server_error"
-                    else:
-                        error_text = await resp.text()
-                        if self._is_slow_mode_error(error_text):
-                            logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
-                            return "slow_mode"
-                        logger.warning(
-                            f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
-                        )
-                        return False
+                        # Success — extract slow mode interval from response
+                        # timeoutDurationUsec is present when slow mode is active
+                        timeout_usec = data.get("timeoutDurationUsec")
+                        if timeout_usec:
+                            timeout_sec = int(timeout_usec) // 1_000_000
+                            if timeout_sec > 0:
+                                self._slow_mode_seconds = timeout_sec
+                                self._emit_room_state(ChatRoomState(slow=timeout_sec))
+
+                    except Exception as e:
+                        logger.debug(f"YouTube send response parse error: {e}")
+                    self._last_send_time = time.monotonic()
+                    return True
+                elif resp.status in (400, 409):
+                    error_text = await resp.text()
+                    if self._is_slow_mode_error(error_text):
+                        logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
+                        return "slow_mode"
+                    logger.warning(
+                        f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
+                    )
+                    return False
+                elif resp.status in (401, 403):
+                    error_text = await resp.text()
+                    # Check for slow mode before treating as auth failure
+                    if self._is_slow_mode_error(error_text):
+                        logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
+                        return "slow_mode"
+                    logger.warning(f"YouTube send auth failed ({resp.status})")
+                    return "auth_expired"
+                elif resp.status == 429:
+                    logger.warning("YouTube send rate limited")
+                    return "rate_limited"
+                elif resp.status >= 500:
+                    logger.warning(f"YouTube server error ({resp.status})")
+                    return "server_error"
+                else:
+                    error_text = await resp.text()
+                    if self._is_slow_mode_error(error_text):
+                        logger.warning(f"YouTube send rejected: slow mode ({resp.status})")
+                        return "slow_mode"
+                    logger.warning(
+                        f"YouTube send_message failed ({resp.status}): {error_text[:200]}"
+                    )
+                    return False
 
         except Exception as e:
             logger.error(f"YouTube send_message error: {e}")

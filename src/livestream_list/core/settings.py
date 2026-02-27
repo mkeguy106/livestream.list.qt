@@ -460,12 +460,14 @@ class Settings:
         use_keyring = is_available()
         keyring_ok = {"twitch": True, "youtube": True, "kick": True}
         if use_keyring:
-            tw_ok = all([
-                store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token),
-                store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token),
-                store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, self.twitch.browser_auth_token),
-                store_secret(KEY_TWITCH_CLIENT_SECRET, self.twitch.client_secret),
-            ])
+            tw_ok = all(
+                [
+                    store_secret(KEY_TWITCH_ACCESS_TOKEN, self.twitch.access_token),
+                    store_secret(KEY_TWITCH_REFRESH_TOKEN, self.twitch.refresh_token),
+                    store_secret(KEY_TWITCH_BROWSER_AUTH_TOKEN, self.twitch.browser_auth_token),
+                    store_secret(KEY_TWITCH_CLIENT_SECRET, self.twitch.client_secret),
+                ]
+            )
             if not tw_ok:
                 keyring_ok["twitch"] = False
                 _logger.warning("Keyring store failed for Twitch — falling back to file")
@@ -475,24 +477,28 @@ class Settings:
                 keyring_ok["youtube"] = False
                 _logger.warning("Keyring store failed for YouTube — falling back to file")
 
-            kick_ok = all([
-                store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token),
-                store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token),
-                store_secret(KEY_KICK_CLIENT_SECRET, self.kick.client_secret),
-            ])
+            kick_ok = all(
+                [
+                    store_secret(KEY_KICK_ACCESS_TOKEN, self.kick.access_token),
+                    store_secret(KEY_KICK_REFRESH_TOKEN, self.kick.refresh_token),
+                    store_secret(KEY_KICK_CLIENT_SECRET, self.kick.client_secret),
+                ]
+            )
             if not kick_ok:
                 keyring_ok["kick"] = False
                 _logger.warning("Keyring store failed for Kick — falling back to file")
         else:
             # No keyring available at all — secrets will be in plaintext JSON
-            has_secrets = any([
-                self.twitch.access_token,
-                self.twitch.refresh_token,
-                self.twitch.browser_auth_token,
-                self.youtube.cookies,
-                self.kick.access_token,
-                self.kick.refresh_token,
-            ])
+            has_secrets = any(
+                [
+                    self.twitch.access_token,
+                    self.twitch.refresh_token,
+                    self.twitch.browser_auth_token,
+                    self.youtube.cookies,
+                    self.kick.access_token,
+                    self.kick.refresh_token,
+                ]
+            )
             if has_secrets:
                 _logger.warning(
                     "System keyring unavailable — credentials stored in plaintext "
@@ -809,7 +815,10 @@ class Settings:
         if exclude_secrets:
             if keyring_ok.get("twitch", True):
                 for key in (
-                    "access_token", "refresh_token", "browser_auth_token", "client_secret",
+                    "access_token",
+                    "refresh_token",
+                    "browser_auth_token",
+                    "client_secret",
                 ):
                     result["twitch"].pop(key, None)
             if keyring_ok.get("youtube", True):

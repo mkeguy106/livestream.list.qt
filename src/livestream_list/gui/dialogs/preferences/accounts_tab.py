@@ -5,15 +5,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -28,6 +26,90 @@ if TYPE_CHECKING:
     from .dialog import PreferencesDialog
 
 logger = logging.getLogger(__name__)
+
+# Persistent login window — never destroyed, only hidden.
+# Destroying QWebEngineView on Wayland corrupts the focus state (QTBUG-73321).
+_login_window: _YouTubeLoginWindow | None = None
+
+
+class _YouTubeLoginWindow(QWidget):
+    """Persistent top-level window for YouTube/Google sign-in.
+
+    Uses the shared QWebEngineProfile. On login completion (or close),
+    navigates to about:blank and hides — never destroyed.
+    """
+
+    login_finished = Signal(bool)  # True if login completed
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Sign in to YouTube")
+        self.resize(500, 650)
+        self.setWindowFlag(Qt.WindowType.Dialog)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        from PySide6.QtWebEngineCore import QWebEnginePage
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+
+        from ...chat.youtube_web_chat import _get_shared_profile
+
+        profile = _get_shared_profile()
+        page = QWebEnginePage(profile, self)
+        self._web_view = QWebEngineView(self)
+        self._web_view.setPage(page)
+        self._web_view.urlChanged.connect(self._on_url_changed)
+        layout.addWidget(self._web_view)
+
+        self._active = False
+
+    def start_login(self, parent: QWidget | None = None) -> None:
+        """Load the Google login page and show the window."""
+        self._active = True
+        login_url = (
+            "https://accounts.google.com/ServiceLogin"
+            "?service=youtube&continue=https://www.youtube.com"
+        )
+        self._web_view.setUrl(QUrl(login_url))
+        # Set Wayland transient parent BEFORE showing so the WM stacks us on top
+        if parent:
+            parent_handle = parent.window().windowHandle()
+            if parent_handle:
+                self.winId()  # Force native window handle creation
+                self.windowHandle().setTransientParent(parent_handle)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_url_changed(self, url: QUrl) -> None:
+        """Detect login completion (navigated to youtube.com)."""
+        if self._active and url.host() == "www.youtube.com":
+            self._finish(True)
+
+    def _finish(self, success: bool) -> None:
+        """Navigate to blank, hide, and emit result."""
+        if not self._active:
+            return
+        self._active = False
+        self._web_view.setUrl(QUrl("about:blank"))
+        self.hide()
+        self.login_finished.emit(success)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        """Hide instead of closing — never destroy the QWebEngineView."""
+        event.ignore()
+        self._finish(False)
+
+
+def _get_login_window() -> _YouTubeLoginWindow:
+    """Get or create the persistent YouTube login window."""
+    global _login_window
+    if _login_window is None:
+        _login_window = _YouTubeLoginWindow()
+    return _login_window
 
 
 class AccountsTab(QScrollArea):
@@ -78,62 +160,23 @@ class AccountsTab(QScrollArea):
         yt_group = QGroupBox("YouTube")
         yt_layout = QVBoxLayout(yt_group)
 
-        self.yt_status = QLabel("Status: Not configured")
+        self.yt_status = QLabel("Status: Not logged in")
         self.yt_status.setStyleSheet("color: gray;")
         yt_layout.addWidget(self.yt_status)
 
-        yt_info = QLabel(
-            "Import cookies from your browser to enable YouTube chat sending.\n"
-            "You must be logged into YouTube in the browser you select."
-        )
-        yt_info.setStyleSheet("color: gray; font-style: italic;")
-        yt_info.setWordWrap(True)
-        yt_layout.addWidget(yt_info)
-
-        # Primary action: Login button
-        yt_main_buttons = QHBoxLayout()
-        self.yt_login_btn = QPushButton("Import from Browser")
+        yt_buttons = QHBoxLayout()
+        self.yt_login_btn = QPushButton("Sign in")
         self.yt_login_btn.clicked.connect(self._on_yt_login)
-        yt_main_buttons.addWidget(self.yt_login_btn)
+        yt_buttons.addWidget(self.yt_login_btn)
         self.yt_import_subs_btn = QPushButton("Import Subscriptions")
         self.yt_import_subs_btn.clicked.connect(self._on_yt_import_subs)
-        yt_main_buttons.addWidget(self.yt_import_subs_btn)
+        yt_buttons.addWidget(self.yt_import_subs_btn)
         self.yt_logout_btn = QPushButton("Logout")
         self.yt_logout_btn.setStyleSheet("color: red;")
         self.yt_logout_btn.clicked.connect(self._on_yt_clear_cookies)
-        yt_main_buttons.addWidget(self.yt_logout_btn)
-        yt_main_buttons.addStretch()
-        yt_layout.addLayout(yt_main_buttons)
-
-        # Manual cookie paste (collapsible/advanced)
-        yt_manual_label = QLabel("Or paste cookies manually:")
-        yt_manual_label.setStyleSheet("color: gray; margin-top: 8px;")
-        yt_layout.addWidget(yt_manual_label)
-
-        self.yt_cookies_edit = QPlainTextEdit()
-        self.yt_cookies_edit.setPlaceholderText(
-            "SID=...; HSID=...; SSID=...; APISID=...; SAPISID=..."
-        )
-        self.yt_cookies_edit.setMinimumHeight(120)
-        self.yt_cookies_edit.setPlainText(self.app.settings.youtube.cookies)
-        yt_layout.addWidget(self.yt_cookies_edit)
-
-        yt_buttons = QHBoxLayout()
-        self.yt_save_btn = QPushButton("Save Cookies")
-        self.yt_save_btn.clicked.connect(self._on_yt_save_cookies)
-        yt_buttons.addWidget(self.yt_save_btn)
-        yt_help_btn = QPushButton("How to get cookies")
-        yt_help_btn.setStyleSheet("color: #5599ff; border: none; text-decoration: underline;")
-        yt_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        yt_help_btn.clicked.connect(self._on_yt_cookie_help)
-        yt_buttons.addWidget(yt_help_btn)
+        yt_buttons.addWidget(self.yt_logout_btn)
         yt_buttons.addStretch()
         yt_layout.addLayout(yt_buttons)
-
-        self.yt_auto_refresh_cb = QCheckBox("Automatically refresh cookies when expired")
-        self.yt_auto_refresh_cb.setChecked(self.app.settings.youtube.cookie_auto_refresh)
-        self.yt_auto_refresh_cb.toggled.connect(self._on_yt_auto_refresh_toggled)
-        yt_layout.addWidget(self.yt_auto_refresh_cb)
 
         # YouTube handle (auto-detected on first chat connection)
         yt_handle_row = QFormLayout()
@@ -220,28 +263,21 @@ class AccountsTab(QScrollArea):
             self.kick_status.setStyleSheet("color: gray;")
 
     def _update_yt_status(self):
-        """Update YouTube cookie status display."""
-        from ....chat.connections.youtube import validate_cookies
+        """Update YouTube login status display."""
+        from ...chat.youtube_web_chat import has_youtube_login
 
-        cookies = self.app.settings.youtube.cookies
-        is_configured = bool(cookies and validate_cookies(cookies))
+        is_logged_in = has_youtube_login()
 
-        if is_configured:
+        if is_logged_in:
             self.yt_status.setText("Status: Logged in")
             self.yt_status.setStyleSheet("color: green;")
-        elif cookies:
-            self.yt_status.setText("Status: Cookies incomplete (missing required keys)")
-            self.yt_status.setStyleSheet("color: orange;")
         else:
             self.yt_status.setText("Status: Not logged in")
             self.yt_status.setStyleSheet("color: gray;")
 
-        self.yt_login_btn.setVisible(not is_configured)
-        self.yt_import_subs_btn.setVisible(is_configured)
-        self.yt_logout_btn.setVisible(is_configured)
-        # Only show auto-refresh when cookies are configured and a browser is known
-        has_browser = bool(self.app.settings.youtube.cookie_browser)
-        self.yt_auto_refresh_cb.setVisible(is_configured and has_browser)
+        self.yt_login_btn.setVisible(not is_logged_in)
+        self.yt_import_subs_btn.setVisible(is_logged_in)
+        self.yt_logout_btn.setVisible(is_logged_in)
 
     # --- Twitch callbacks ---
 
@@ -361,52 +397,38 @@ class AccountsTab(QScrollArea):
 
     # --- YouTube callbacks ---
 
-    def _on_yt_save_cookies(self):
-        """Save YouTube cookies and validate."""
-        from ....chat.connections.youtube import validate_cookies
+    def _on_yt_login(self):
+        """Open persistent YouTube sign-in window (never destroyed)."""
+        self.yt_login_btn.setEnabled(False)
+        win = _get_login_window()
+        # Disconnect any stale connections, then connect fresh
+        try:
+            win.login_finished.disconnect(self._on_yt_login_finished)
+        except RuntimeError:
+            pass
+        win.login_finished.connect(self._on_yt_login_finished)
+        win.start_login(parent=self)
 
-        cookie_text = self.yt_cookies_edit.toPlainText().strip()
-        if cookie_text and not validate_cookies(cookie_text):
-            QMessageBox.warning(
+    def _on_yt_login_finished(self, success: bool) -> None:
+        """Handle YouTube login window result."""
+        self.yt_login_btn.setEnabled(True)
+        # Re-activate the preferences window (Chromium may have confused Wayland focus)
+        self.window().activateWindow()
+        self.window().raise_()
+        if success:
+            self._update_yt_status()
+            QMessageBox.information(
                 self,
-                "Invalid Cookies",
-                "The cookies are missing required keys.\n"
-                "Required: SID, HSID, SSID, APISID, SAPISID",
+                "YouTube Login",
+                "Successfully signed in to YouTube.\nYouTube chat tabs will now use your account.",
             )
-            return
-
-        self.app.settings.youtube.cookies = cookie_text
-        self.app.save_settings()
-        self._update_yt_status()
-        self.app.chat_manager.reconnect_youtube()
 
     def _on_yt_clear_cookies(self):
-        """Clear YouTube cookies."""
-        self.yt_cookies_edit.setPlainText("")
-        self.app.settings.youtube.cookies = ""
-        self.app.settings.youtube.cookie_browser = ""
-        self.app.save_settings()
+        """Clear YouTube cookies from the shared web profile."""
+        from ...chat.youtube_web_chat import clear_youtube_cookies
+
+        clear_youtube_cookies()
         self._update_yt_status()
-        self.app.chat_manager.reconnect_youtube()
-
-    def _on_yt_login(self):
-        """Handle YouTube cookie import from browser."""
-        from ...youtube_login import import_cookies_from_browser
-
-        result = import_cookies_from_browser(self)
-        if result:
-            cookie_string, browser_id = result
-            self.app.settings.youtube.cookies = cookie_string
-            self.app.settings.youtube.cookie_browser = browser_id or ""
-            self.app.save_settings()
-            self.yt_cookies_edit.setPlainText(cookie_string)
-            self._update_yt_status()
-            self.app.chat_manager.reconnect_youtube()
-
-    def _on_yt_auto_refresh_toggled(self, checked: bool):
-        """Save auto-refresh preference."""
-        self.app.settings.youtube.cookie_auto_refresh = checked
-        self.app.save_settings()
 
     def _on_yt_import_subs(self):
         """Open YouTube subscription import dialog."""
@@ -414,34 +436,3 @@ class AccountsTab(QScrollArea):
         dialog.exec()
         if dialog._added_count > 0 and self.dialog.parent():
             self.dialog.parent().refresh_stream_list()
-
-    def _on_yt_cookie_help(self):
-        """Show instructions for obtaining YouTube cookies."""
-        msg = QMessageBox(self)
-        msg.setWindowTitle("How to Get YouTube Cookies")
-        msg.setTextFormat(Qt.TextFormat.RichText)
-        msg.setText(
-            "<h3>Getting YouTube Cookies (Manual Method)</h3>"
-            "<p>The easiest way is to click <b>Import from Browser</b> above.<br>"
-            "If that's not available, paste cookies manually:</p>"
-            "<ol>"
-            "<li>Open <b>YouTube</b> in your browser and log in</li>"
-            "<li>Press <b>F12</b> to open Developer Tools</li>"
-            "<li>Go to the <b>Application</b> tab (Chrome) or "
-            "<b>Storage</b> tab (Firefox)</li>"
-            "<li>Expand <b>Cookies</b> &rarr; <code>https://www.youtube.com</code></li>"
-            "<li>Find and copy the <b>Value</b> for each of these cookies:<br>"
-            "<code>SID</code>, <code>HSID</code>, <code>SSID</code>, "
-            "<code>APISID</code>, <code>SAPISID</code></li>"
-            "<li>Paste them in the format:<br>"
-            "<code>SID=value; HSID=value; SSID=value; APISID=value; SAPISID=value</code></li>"
-            "</ol>"
-            "<p><b>Notes:</b></p>"
-            "<ul>"
-            "<li>Cookies typically last 1-2 years</li>"
-            "<li>They are stored locally and only used to send chat messages</li>"
-            "<li>See <code>docs/youtube-cookies.md</code> for the full guide</li>"
-            "</ul>"
-        )
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg.exec()

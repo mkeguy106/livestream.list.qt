@@ -1109,8 +1109,7 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
         clauses = " OR ".join("host_key LIKE ?" for _ in _TWITCH_DOMAINS)
         params = [f"%{d}" for d in _TWITCH_DOMAINS]
         cursor.execute(
-            f"SELECT encrypted_value, value FROM cookies "
-            f"WHERE name = 'auth-token' AND ({clauses})",
+            f"SELECT encrypted_value, value FROM cookies WHERE name = 'auth-token' AND ({clauses})",
             params,
         )
         row = cursor.fetchone()

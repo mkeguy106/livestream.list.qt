@@ -53,7 +53,7 @@ class YouTubeImportDialog(QDialog):
 
         ready_label = QLabel(
             "Import your YouTube subscriptions as channels.\n"
-            "This uses your saved cookies to fetch your subscription list."
+            "This uses your YouTube login to fetch your subscription list."
         )
         ready_label.setAlignment(Qt.AlignCenter)
         ready_label.setWordWrap(True)
@@ -116,9 +116,11 @@ class YouTubeImportDialog(QDialog):
         self.close_btn.setEnabled(False)
         self._filter_livestreams = self.filter_checkbox.isChecked()
 
-        cookies = self.app.settings.youtube.cookies
+        from ..chat.youtube_web_chat import get_youtube_cookie_string
+
+        cookies = get_youtube_cookie_string()
         if not cookies:
-            self._on_import_complete(ValueError("No YouTube cookies configured"))
+            self._on_import_complete(ValueError("Not logged in to YouTube"))
             return
 
         import threading
