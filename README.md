@@ -1,6 +1,6 @@
 # Livestream List (Qt)
 
-A PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, and Kick. Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
+A PySide6/Qt6 application for monitoring livestreams on Twitch, YouTube, Kick, and Chaturbate. Inspired by [Livestream.Monitor](https://github.com/laurencee/Livestream.Monitor) for Windows.
 
 This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-linux) (GTK4/Libadwaita version).
 
@@ -16,14 +16,14 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 ## Features
 
-- **Multi-Platform Support** - Add channels from Twitch, YouTube, and Kick
-  - Paste URLs to auto-detect platform (e.g., `https://twitch.tv/username`)
+- **Multi-Platform Support** - Add channels from Twitch, YouTube, Kick, and Chaturbate
+  - Paste URLs to auto-detect platform (e.g., `https://twitch.tv/username`, `https://chaturbate.com/username`)
   - Clipboard auto-paste when opening add dialog
 - **Desktop Notifications** - Get notified when streams go live (smart notifications - no flurry on startup)
   - Custom notification sound (WAV/OGG/MP3/FLAC)
   - Urgency levels (low/normal/critical)
   - Configurable timeout
-  - Per-platform filter (Twitch, YouTube, Kick)
+  - Per-platform filter (Twitch, YouTube, Kick, Chaturbate)
   - Quiet hours scheduling (e.g., 22:00 to 08:00)
   - Raid notifications for open chat channels
 - **System Tray Icon** - Minimize to tray, click to restore, right-click menu
@@ -38,6 +38,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Low-latency defaults for Twitch and Kick streams
 - **Built-in Chat Client** - Native multi-channel chat with tabbed interface
   - Twitch and Kick chat with full emote and badge rendering
+  - Chaturbate embedded web chat (QWebEngineView with DOM isolation)
   - Emote support: Twitch, Kick native, 7TV, BTTV, FFZ
   - Tab-completion for emotes (press Tab while typing)
   - Tooltips on emotes and badges (shows name and provider)
@@ -49,6 +50,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Customizable tab colors via color picker
   - Twitch OAuth login for sending messages
   - Kick OAuth 2.1 + PKCE login for sending messages
+  - Chaturbate sign-in via embedded browser (session cookies)
   - Twitch whispers/DMs (send and receive direct messages)
   - Reply to messages (right-click → Reply, with visual indicator)
   - @mention autocomplete (type @ to suggest usernames)
@@ -60,7 +62,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Badge tooltips showing descriptive titles (e.g., "6-Month Subscriber")
   - Copy messages with Ctrl+C
   - Up/down arrow to cycle through previously sent messages
-  - Message character counter (500 for Twitch/Kick, 200 for YouTube)
+  - Message character counter (500 for Twitch/Kick/Chaturbate, 200 for YouTube)
   - Configurable timestamp format (12-hour or 24-hour)
   - Chat mode indicators (sub-only, slow mode, emote-only, followers-only, R9K)
   - Slow mode countdown timer in input box
@@ -88,14 +90,14 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Browser selection: System Default, Chrome, Chromium, Edge, Firefox
   - YouTube chat works when stream is live
   - YouTube expired cookie detection with auto-refresh from browser
-- **Import Twitch Follows** - Login to Twitch and import your followed channels
+- **Import Follows** - Import followed channels from Twitch and Chaturbate
 - **Export/Import** - Backup and restore channels and settings
   - Includes app version for compatibility tracking
   - JSON format for easy inspection
 - **Favorites** - Star your favorite channels and filter to show only favorites
 - **Last Seen** - Offline channels show when they were last live (e.g., "2h ago", "3d ago")
-- **Platform Filter** - Filter by platform (All, Twitch, YouTube, Kick)
-- **Platform Colors** - Color channel names by platform (purple for Twitch, green for Kick)
+- **Platform Filter** - Filter by platform (All, Twitch, YouTube, Kick, Chaturbate)
+- **Platform Colors** - Color channel names by platform (purple for Twitch, green for Kick, orange for Chaturbate)
 - **Name Filter** - Filter channels by name with wildcard support (e.g., `*gaming*`)
 - **Sort Options** - Sort by Name, Viewers, or Playing status
 - **Hide Offline** - Toggle to show only live streams
@@ -169,18 +171,23 @@ python -m livestream_list
 ### Adding Channels
 
 1. Click the + button or press `Ctrl+N`
-2. Paste a channel URL (e.g., `https://twitch.tv/username` or `https://kick.com/channel`)
+2. Paste a channel URL (e.g., `https://twitch.tv/username`, `https://kick.com/channel`, or `https://chaturbate.com/username`)
    - Platform is auto-detected from URLs
    - If you have a URL in clipboard, it's auto-pasted
 3. Or enter a channel name and select platform
 4. Click Add
 
-### Importing Twitch Follows
+### Importing Follows
 
-1. Open Preferences (`Ctrl+,`)
-2. Go to Accounts tab
-3. Click "Login" to authorize with Twitch
-4. Click "Import Follows" to import your followed channels
+**Twitch:**
+1. Open Preferences (`Ctrl+,`) > Accounts tab
+2. Click "Login" to authorize with Twitch
+3. Click "Import Follows" to import your followed channels
+
+**Chaturbate:**
+1. Open Preferences (`Ctrl+,`) > Accounts tab
+2. Click "Sign in" to log into Chaturbate
+3. Click "Import Follows" to import your followed channels
 
 ### Watching Streams
 
@@ -196,7 +203,8 @@ The app supports two chat modes (configurable in Preferences > Chat):
 **Built-in Chat** (recommended):
 - Click the chat icon on any live stream to open the built-in chat window
 - Tabbed interface for multiple channels simultaneously
-- Login to Twitch or Kick in Preferences > Accounts to send messages
+- Login to Twitch, Kick, or Chaturbate in Preferences > Accounts to send messages
+- Chaturbate uses embedded web chat with DOM isolation (QWebEngineView)
 - Right-click tab to pop out into standalone window
 - Settings: font size, timestamps, emote providers, badge visibility, tab colors, max messages
 
@@ -204,7 +212,7 @@ The app supports two chat modes (configurable in Preferences > Chat):
 - Opens chat in your system browser (Chrome, Firefox, etc.)
 - **Chat URL Type**: Popout (recommended), Embedded, or Default (legacy) - Twitch only
 - **Auto-open**: Automatically open chat when launching streams
-- Supported: Twitch (popout/embedded/default), Kick (chatroom), YouTube (live chat)
+- Supported: Twitch (popout/embedded/default), Kick (chatroom), YouTube (live chat), Chaturbate (room page)
 
 ## Configuration
 

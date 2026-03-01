@@ -63,6 +63,7 @@ class AddChannelDialog(QDialog):
         self.platform_combo.addItem("Twitch", StreamPlatform.TWITCH)
         self.platform_combo.addItem("YouTube", StreamPlatform.YOUTUBE)
         self.platform_combo.addItem("Kick", StreamPlatform.KICK)
+        self.platform_combo.addItem("Chaturbate", StreamPlatform.CHATURBATE)
         form_layout.addRow("Platform:", self.platform_combo)
 
         manual_layout.addLayout(form_layout)
@@ -118,9 +119,8 @@ class AddChannelDialog(QDialog):
 
         # Note about other platforms
         note_label = QLabel(
-            "<p style='color: gray;'><i>Note: YouTube and Kick channels must be added "
-            "manually using the Manual Add tab. These platforms don't support "
-            "importing followed channels.</i></p>"
+            "<p style='color: gray;'><i>Note: YouTube, Kick, and Chaturbate channels "
+            "can also be added manually using the Manual Add tab.</i></p>"
         )
         note_label.setWordWrap(True)
         twitch_layout.addWidget(note_label)
@@ -157,7 +157,7 @@ class AddChannelDialog(QDialog):
 
     def _looks_like_url(self, text: str) -> bool:
         """Check if text looks like a streaming URL."""
-        patterns = ["twitch.tv", "youtube.com", "youtu.be", "kick.com"]
+        patterns = ["twitch.tv", "youtube.com", "youtu.be", "kick.com", "chaturbate.com"]
         return any(p in text.lower() for p in patterns)
 
     def _on_text_changed(self, text: str):
@@ -217,6 +217,15 @@ class AddChannelDialog(QDialog):
             match = re.match(pattern, text, re.IGNORECASE)
             if match:
                 return (StreamPlatform.KICK, match.group(1))
+
+        # Chaturbate
+        cb_patterns = [
+            r"(?:https?://)?(?:www\.)?chaturbate\.com/([a-zA-Z0-9_]+)/?",
+        ]
+        for pattern in cb_patterns:
+            match = re.match(pattern, text, re.IGNORECASE)
+            if match:
+                return (StreamPlatform.CHATURBATE, match.group(1))
 
         return None
 

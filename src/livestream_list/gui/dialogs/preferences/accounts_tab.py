@@ -22,6 +22,9 @@ from ....core.models import StreamPlatform
 from ..import_follows import ImportFollowsDialog
 from ..youtube_import import YouTubeImportDialog
 
+# Persistent Chaturbate login window — never destroyed (Wayland workaround).
+_chaturbate_login_window: _ChaturbateLoginWindow | None = None
+
 if TYPE_CHECKING:
     from .dialog import PreferencesDialog
 
@@ -117,6 +120,93 @@ def _get_login_window() -> _YouTubeLoginWindow:
     if _login_window is None:
         _login_window = _YouTubeLoginWindow()
     return _login_window
+
+
+class _ChaturbateLoginWindow(QWidget):
+    """Persistent top-level window for Chaturbate sign-in.
+
+    Uses a shared Chaturbate QWebEngineProfile. On login completion (or close),
+    navigates to about:blank and hides — never destroyed (Wayland workaround).
+    """
+
+    login_finished = Signal(bool)  # True if login completed
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Sign in to Chaturbate")
+        self.resize(500, 650)
+        self.setWindowFlag(Qt.WindowType.Dialog)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        from ...chat.chaturbate_web_chat import _ensure_webengine, _get_shared_profile
+
+        self._web_view = None
+        if _ensure_webengine():
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
+            profile = _get_shared_profile()
+            if profile is not None:
+                page = QWebEnginePage(profile, self)
+                self._web_view = QWebEngineView(self)
+                self._web_view.setPage(page)
+                self._web_view.urlChanged.connect(self._on_url_changed)
+                layout.addWidget(self._web_view)
+
+        self._active = False
+
+    def start_login(self, parent: QWidget | None = None) -> None:
+        """Load the Chaturbate login page and show the window."""
+        if self._web_view is None:
+            self.login_finished.emit(False)
+            return
+        self._active = True
+        self._web_view.setUrl(QUrl("https://chaturbate.com/auth/login/"))
+        if parent:
+            parent_handle = parent.window().windowHandle()
+            if parent_handle:
+                self.winId()
+                self.windowHandle().setTransientParent(parent_handle)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_url_changed(self, url: QUrl) -> None:
+        """Detect login completion (navigated to chaturbate.com main page)."""
+        if not self._active:
+            return
+        path = url.path()
+        host = url.host()
+        # After login, Chaturbate redirects to "/" or "/followed-cams/" etc.
+        if host and "chaturbate.com" in host and path != "/auth/login/":
+            # Check it's not another auth page
+            if not path.startswith("/auth/"):
+                self._finish(True)
+
+    def _finish(self, success: bool) -> None:
+        if not self._active:
+            return
+        self._active = False
+        if self._web_view is not None:
+            self._web_view.setUrl(QUrl("about:blank"))
+        self.hide()
+        self.login_finished.emit(success)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        event.ignore()
+        self._finish(False)
+
+
+def _get_chaturbate_login_window() -> _ChaturbateLoginWindow:
+    """Get or create the persistent Chaturbate login window."""
+    global _chaturbate_login_window
+    if _chaturbate_login_window is None:
+        _chaturbate_login_window = _ChaturbateLoginWindow()
+    return _chaturbate_login_window
 
 
 class AccountsTab(QScrollArea):
@@ -235,6 +325,40 @@ class AccountsTab(QScrollArea):
 
         layout.addWidget(kick_group)
 
+        # Chaturbate group
+        cb_group = QGroupBox("Chaturbate")
+        cb_layout = QVBoxLayout(cb_group)
+
+        self.cb_status = QLabel("Status: Not logged in")
+        self.cb_status.setStyleSheet("color: gray;")
+        cb_layout.addWidget(self.cb_status)
+
+        from ...chat.chaturbate_web_chat import _ensure_webengine as _cb_ensure_webengine
+
+        self._cb_webengine_ok = _cb_ensure_webengine()
+
+        if not self._cb_webengine_ok:
+            cb_unavail = QLabel("Chaturbate sign-in unavailable (QWebEngine not installed)")
+            cb_unavail.setStyleSheet("color: orange;")
+            cb_layout.addWidget(cb_unavail)
+
+        cb_buttons = QHBoxLayout()
+        self.cb_login_btn = QPushButton("Sign in")
+        self.cb_login_btn.clicked.connect(self._on_cb_login)
+        self.cb_login_btn.setEnabled(self._cb_webengine_ok)
+        cb_buttons.addWidget(self.cb_login_btn)
+        self.cb_import_btn = QPushButton("Import Follows")
+        self.cb_import_btn.clicked.connect(self._on_cb_import_follows)
+        cb_buttons.addWidget(self.cb_import_btn)
+        self.cb_logout_btn = QPushButton("Logout")
+        self.cb_logout_btn.setStyleSheet("color: red;")
+        self.cb_logout_btn.clicked.connect(self._on_cb_logout)
+        cb_buttons.addWidget(self.cb_logout_btn)
+        cb_buttons.addStretch()
+        cb_layout.addLayout(cb_buttons)
+
+        layout.addWidget(cb_group)
+
         layout.addStretch()
         self._update_account_buttons()
         self.setWidget(widget)
@@ -278,6 +402,30 @@ class AccountsTab(QScrollArea):
         else:
             self.kick_status.setText("Status: Not logged in")
             self.kick_status.setStyleSheet("color: gray;")
+
+        # Chaturbate
+        self._update_cb_status()
+
+    def _update_cb_status(self):
+        """Update Chaturbate login status display."""
+        from ...chat.chaturbate_web_chat import has_chaturbate_login
+
+        is_logged_in = has_chaturbate_login()
+
+        if is_logged_in:
+            login = self.app.settings.chaturbate.login_name
+            if login:
+                self.cb_status.setText(f"Status: Logged in as {login}")
+            else:
+                self.cb_status.setText("Status: Logged in")
+            self.cb_status.setStyleSheet("color: green;")
+        else:
+            self.cb_status.setText("Status: Not logged in")
+            self.cb_status.setStyleSheet("color: gray;")
+
+        self.cb_login_btn.setVisible(not is_logged_in)
+        self.cb_import_btn.setVisible(is_logged_in)
+        self.cb_logout_btn.setVisible(is_logged_in)
 
     def _update_yt_status(self):
         """Update YouTube login status display."""
@@ -453,3 +601,77 @@ class AccountsTab(QScrollArea):
         dialog.exec()
         if dialog._added_count > 0 and self.dialog.parent():
             self.dialog.parent().refresh_stream_list()
+
+    # --- Chaturbate callbacks ---
+
+    def _on_cb_login(self):
+        """Open persistent Chaturbate sign-in window."""
+        self.cb_login_btn.setEnabled(False)
+        win = _get_chaturbate_login_window()
+        try:
+            win.login_finished.disconnect(self._on_cb_login_finished)
+        except RuntimeError:
+            pass
+        win.login_finished.connect(self._on_cb_login_finished)
+        win.start_login(parent=self)
+
+    def _on_cb_login_finished(self, success: bool) -> None:
+        """Handle Chaturbate login window result."""
+        self.cb_login_btn.setEnabled(True)
+        self.window().activateWindow()
+        self.window().raise_()
+        if success:
+            # Try to detect the logged-in username from cookies
+            self._detect_cb_username()
+            self._update_cb_status()
+            self._update_account_buttons()
+            QMessageBox.information(
+                self,
+                "Chaturbate Login",
+                "Successfully signed in to Chaturbate.",
+            )
+
+    def _detect_cb_username(self) -> None:
+        """Detect the Chaturbate username from cookies after login."""
+        from ...chat.chaturbate_web_chat import _get_all_cookies
+
+        cookies = _get_all_cookies()
+        # Chaturbate stores username in various cookies
+        for name in ("csrftoken", "sessionid"):
+            if name in cookies:
+                # sessionid exists means we're logged in, but doesn't contain username
+                pass
+        # The username is not directly in cookies; we'll detect it via API later
+        # For now, mark as logged in without a specific username
+        if "sessionid" in cookies:
+            self.app.settings.chaturbate.login_name = "(logged in)"
+            self.app.save_settings()
+
+    def _on_cb_import_follows(self):
+        """Open Chaturbate followed channels import dialog."""
+        from ..chaturbate_import import ChaturbateImportDialog
+
+        dialog = ChaturbateImportDialog(self, self.app)
+        dialog.exec()
+        if dialog._added_count > 0:
+            self.app.monitor.suppress_notifications()
+
+            def on_refresh_complete():
+                self.app.monitor.resume_notifications()
+                if self.app.main_window:
+                    self.app.main_window.refresh_stream_list()
+
+            if self.app.main_window:
+                self.app.main_window.refresh_stream_list()
+
+            self.app.refresh(on_complete=on_refresh_complete)
+
+    def _on_cb_logout(self):
+        """Clear Chaturbate cookies and reset login state."""
+        from ...chat.chaturbate_web_chat import clear_chaturbate_cookies
+
+        clear_chaturbate_cookies()
+        self.app.settings.chaturbate.login_name = ""
+        self.app.save_settings()
+        self._update_cb_status()
+        self._update_account_buttons()

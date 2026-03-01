@@ -63,6 +63,7 @@ class StreamlinkSettings:
     twitch_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
     youtube_launch_method: LaunchMethod = LaunchMethod.YT_DLP
     kick_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
+    chaturbate_launch_method: LaunchMethod = LaunchMethod.YT_DLP
 
     # Pass Twitch OAuth token to streamlink for Turbo/subscriber ad-free viewing
     twitch_turbo: bool = True
@@ -91,7 +92,9 @@ class NotificationSettings:
     custom_sound_path: str = ""  # empty = system default
     urgency: str = "normal"  # low, normal, critical
     timeout_seconds: int = 0  # 0 = system default
-    platform_filter: list[str] = field(default_factory=lambda: ["twitch", "youtube", "kick"])
+    platform_filter: list[str] = field(
+        default_factory=lambda: ["twitch", "youtube", "kick", "chaturbate"]
+    )
     quiet_hours_enabled: bool = False
     quiet_hours_start: str = "22:00"  # HH:MM 24h
     quiet_hours_end: str = "08:00"
@@ -133,6 +136,13 @@ class KickSettings:
     access_token: str = ""
     refresh_token: str = ""
     login_name: str = ""  # Kick username of the logged-in account
+
+
+@dataclass
+class ChaturbateSettings:
+    """Chaturbate settings."""
+
+    login_name: str = ""  # Username of logged-in account
 
 
 @dataclass
@@ -324,6 +334,7 @@ class Settings:
     twitch: TwitchSettings = field(default_factory=TwitchSettings)
     youtube: YouTubeSettings = field(default_factory=YouTubeSettings)
     kick: KickSettings = field(default_factory=KickSettings)
+    chaturbate: ChaturbateSettings = field(default_factory=ChaturbateSettings)
 
     # Feature settings
     streamlink: StreamlinkSettings = field(default_factory=StreamlinkSettings)
@@ -616,6 +627,10 @@ class Settings:
         if "kick" in data:
             settings.kick = cls._simple_dc_from_dict(KickSettings, data["kick"])
 
+        # Chaturbate
+        if "chaturbate" in data:
+            settings.chaturbate = cls._simple_dc_from_dict(ChaturbateSettings, data["chaturbate"])
+
         # Streamlink
         if "streamlink" in data:
             s = data["streamlink"]
@@ -629,6 +644,7 @@ class Settings:
                 twitch_launch_method=LaunchMethod(s.get("twitch_launch_method", "streamlink")),
                 youtube_launch_method=LaunchMethod(s.get("youtube_launch_method", "yt-dlp")),
                 kick_launch_method=LaunchMethod(s.get("kick_launch_method", "streamlink")),
+                chaturbate_launch_method=LaunchMethod(s.get("chaturbate_launch_method", "yt-dlp")),
                 twitch_turbo=s.get("twitch_turbo", False),
                 show_console=s.get("show_console", False),
                 auto_close_console=s.get("auto_close_console", True),
@@ -651,7 +667,7 @@ class Settings:
                 timeout_seconds=cls._validate_int(
                     n.get("timeout_seconds"), 0, min_val=0, max_val=60
                 ),
-                platform_filter=n.get("platform_filter", ["twitch", "youtube", "kick"]),
+                platform_filter=n.get("platform_filter", ["twitch", "youtube", "kick", "chaturbate"]),
                 quiet_hours_enabled=n.get("quiet_hours_enabled", False),
                 quiet_hours_start=n.get("quiet_hours_start", "22:00"),
                 quiet_hours_end=n.get("quiet_hours_end", "08:00"),

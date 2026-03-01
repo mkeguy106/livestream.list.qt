@@ -54,15 +54,21 @@ def _ensure_webengine() -> bool:
 # so we never need loadAllCookies() + QEventLoop timing hacks.
 _tracked_cookies: dict[str, str] = {}  # name -> value
 _tracker_connected: bool = False
+# Set when cookies are explicitly cleared; prevents stale DB reads from
+# reporting logged-in before Chromium flushes the deletion to disk.
+_force_logged_out: bool = False
 
 
 def _on_cookie_added(cookie) -> None:
     """Track YouTube/Google cookies as they're added to the profile."""
+    global _force_logged_out
     domain = cookie.domain()
     name = cookie.name().data().decode()
     if "youtube.com" in domain or "google.com" in domain:
         value = cookie.value().data().decode()
         _tracked_cookies[name] = value
+        if name == "SID":
+            _force_logged_out = False
 
 
 def _on_cookie_removed(cookie) -> None:
@@ -128,9 +134,21 @@ def _read_cookies_from_db() -> dict[str, str]:
     return cookies
 
 
+def _get_all_cookies() -> dict[str, str]:
+    """Get YouTube/Google cookies from all sources.
+
+    Merges the on-disk Chromium database with the in-memory tracker.
+    The in-memory tracker has cookies from the current session (populated
+    by the cookieAdded signal) which may not be flushed to disk yet.
+    """
+    cookies = _read_cookies_from_db()
+    cookies.update(_tracked_cookies)
+    return cookies
+
+
 def get_youtube_cookie_string() -> str:
     """Extract YouTube cookies from the shared profile as 'name=value; ...' string."""
-    cookies = _read_cookies_from_db()
+    cookies = _get_all_cookies()
     if not cookies:
         return ""
     return "; ".join(f"{name}={value}" for name, value in cookies.items())
@@ -138,16 +156,22 @@ def get_youtube_cookie_string() -> str:
 
 def has_youtube_login() -> bool:
     """Check if the YouTube profile has auth cookies (SID present)."""
+    if _force_logged_out:
+        return False
+    if "SID" in _tracked_cookies:
+        return True
     cookies = _read_cookies_from_db()
     return "SID" in cookies
 
 
 def clear_youtube_cookies() -> None:
     """Clear all cookies from the shared YouTube profile."""
+    global _force_logged_out
     profile = _get_shared_profile()
     if profile is not None:
         profile.cookieStore().deleteAllCookies()
     _tracked_cookies.clear()
+    _force_logged_out = True
 
 
 class YouTubeWebChatWidget(QWidget):

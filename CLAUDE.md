@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-linux) - a Python application for monitoring Twitch, YouTube, and Kick livestreams. This fork uses PySide6 (Qt6) instead of GTK4/Libadwaita.
+Qt port of [livestream.list.linux](https://github.com/mkeguy106/livestream-list-linux) - a Python application for monitoring Twitch, YouTube, Kick, and Chaturbate livestreams. This fork uses PySide6 (Qt6) instead of GTK4/Libadwaita.
 
 **Current state**: PySide6/Qt6 migration complete. Feature parity work in progress.
 
@@ -89,7 +89,7 @@ pytest tests/test_file.py::test_name -v
 
 ```
 src/livestream_list/
-├── api/                  # Platform API clients (Twitch Helix+GraphQL, YouTube/yt-dlp, Kick REST)
+├── api/                  # Platform API clients (Twitch Helix+GraphQL, YouTube/yt-dlp, Kick REST, Chaturbate REST)
 ├── chat/
 │   ├── connections/      # Per-platform WebSocket/IRC connections (BaseChatConnection subclasses)
 │   ├── emotes/           # Emote fetching, caching (two-tier LRU+disk), rendering, matching
@@ -100,7 +100,7 @@ src/livestream_list/
 │   └── chat_log_store.py # JSONL/text per-channel logging with disk rotation
 ├── core/                 # Data models, settings, theme definitions, monitor, streamlink, platform detection
 ├── gui/
-│   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, YouTubeWebChatWidget, delegate, emote picker, etc.)
+│   ├── chat/             # Chat UI widgets (ChatWidget, ChatWindow, YouTubeWebChatWidget, ChaturbateWebChatWidget, delegate, emote picker, etc.)
 │   ├── dialogs/          # Preferences, theme editor, add channel, import/export dialogs
 │   ├── stream_list/      # Stream list model and custom delegate
 │   ├── app.py            # Main QApplication, AsyncWorker
@@ -136,6 +136,7 @@ Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a 
 - **Twitch**: Helix API (authenticated) + GraphQL (unauthenticated, for public data). GraphQL uses batched queries (up to 35 channels/request). GraphQL works without authentication.
 - **YouTube**: yt-dlp subprocess (`yt-dlp --dump-json --no-download <url>`), batch size 5.
 - **Kick**: Direct REST API. Uses `start_time` field (not `created_at`) for stream duration.
+- **Chaturbate**: REST API (`/api/chatvideocontext/{username}/` for individual, `/api/ts/roomlist/room-list/?follow=true` for bulk). Bulk API requires session cookies (from QWebEngine login). Individual endpoint is public/unauthenticated. WebSocket chat connection for native chat.
 
 ### Flatpak Support
 
@@ -161,6 +162,8 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 **Kick OAuth**: OAuth 2.1 + PKCE flow in `chat/auth/kick_auth.py`. Auto-refreshes expired tokens on 401.
 
 **YouTube chat**: Embedded QWebEngineView (`gui/chat/youtube_web_chat.py`) loads YouTube's native popout chat URL. Uses a shared persistent `QWebEngineProfile` ("youtube_chat") that stores cookies to disk automatically. Users sign into Google directly inside the app via `_YouTubeLoginWindow` (persistent top-level QWidget, never destroyed — see Wayland pitfall below). Reading, sending, and rendering are all handled by YouTube's web UI. Title and socials banners are added above the web view, matching the native ChatWidget's banners.
+
+**Chaturbate chat**: Embedded QWebEngineView (`gui/chat/chaturbate_web_chat.py`) loads the Chaturbate room page and injects CSS/JS to isolate just the chat panel, hiding the video player and other content. Uses a shared persistent `QWebEngineProfile` ("chaturbate_chat") with cookie tracking for session persistence. Native WebSocket chat connection (`chat/connections/chaturbate.py`) is also available. Users sign in via `_ChaturbateLoginWindow` in the Accounts tab. DOM isolation uses `data-llqt-*` attributes and a `MutationObserver` for dynamically added elements. Chaturbate's global keyboard event interceptors are neutralized via capture-phase `stopImmediatePropagation()` on both `document` and `window` to allow typing in the `contenteditable` chat input. The settings tab (`#settings-tab-default`) is hidden because its React components require full page context to render.
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
@@ -200,6 +203,8 @@ Core architecture files (most other files follow patterns established in these):
 | `gui/dialogs/preferences/` | Preferences package — dialog coordinator + per-tab modules (general, playback, chat, accounts) |
 | `gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
 | `gui/chat/youtube_web_chat.py` | YouTube embedded QWebEngineView chat, shared profile, cookie tracker |
+| `gui/chat/chaturbate_web_chat.py` | Chaturbate embedded QWebEngineView chat, DOM isolation, shared profile, cookie tracker |
+| `api/chaturbate.py` | Chaturbate API client (bulk + individual endpoints) |
 | `gui/chat/chat_window.py` | Chat QMainWindow, tab management, pop-out windows |
 | `gui/chat/message_delegate.py` | Custom delegate for rendering chat messages (paint + hit-testing) |
 | `gui/chat/emote_picker.py` | Searchable emote grid popup with animation/viewport culling |
@@ -289,6 +294,9 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `pyspellchecker` `candidates()` freezes UI | `candidates()` with `distance=2` takes 600-1000ms for longer words. Always init with `distance=1` — autocorrect only trusts distance-1 anyway. |
 | PyInstaller bundled data files | Use `sys._MEIPASS` for base path in frozen builds vs `__file__` in dev (see `chat/spellcheck/checker.py`) |
 | `sys.stderr`/`sys.stdout` is `None` in windowed builds | Guard `faulthandler.enable()`, `StreamHandler`, `traceback.print_exc()` — use `logging.NullHandler()` fallback and `logger.error(..., exc_info=True)` instead |
+| Chaturbate cookie rotation loses sessionid | QWebEngine fires `cookieRemoved` then `cookieAdded` when rotating cookies. `_on_cookie_removed` must NOT remove from `_tracked_cookies` — cookies are only cleared on explicit logout via `clear_chaturbate_cookies()`. |
+| Chaturbate global keyboard interception | Chaturbate's JS intercepts keydown/keypress on document and window, blocking typing in the contenteditable chat input. Must add capture-phase `stopImmediatePropagation()` on both `document` AND `window` for `keydown`, `keypress`, `keyup`, `beforeinput`, `textInput`. Enter key must be let through for message sending. |
+| Chaturbate settings tab blank | The settings panel uses React components that require full page context. Hidden via `#settings-tab-default{display:none!important}` in isolation CSS. |
 | New preferences not in export/import | When adding/removing settings (except cookies/tokens), update both `gui/dialogs/export.py` and `gui/main_window.py:_import_from_file()` to include the new fields |
 
 ## CI/CD

@@ -514,6 +514,7 @@ class MainWindow(QMainWindow):
         self.platform_combo.addItem("Twitch", StreamPlatform.TWITCH)
         self.platform_combo.addItem("YouTube", StreamPlatform.YOUTUBE)
         self.platform_combo.addItem("Kick", StreamPlatform.KICK)
+        self.platform_combo.addItem("Chaturbate", StreamPlatform.CHATURBATE)
         self.platform_combo.currentIndexChanged.connect(self._on_filter_changed)
         toolbar.addWidget(self.platform_combo)
 
@@ -1291,7 +1292,7 @@ class MainWindow(QMainWindow):
                 # Preserve current auth tokens/cookies — merge non-secret platform
                 # fields from the import while keeping current secrets intact
                 current = self.app.settings._to_dict()
-                for platform_key in ("twitch", "youtube", "kick"):
+                for platform_key in ("twitch", "youtube", "kick", "chaturbate"):
                     current_plat = current.get(platform_key, {})
                     imported_plat = imported_settings.get(platform_key, {})
                     # Start from current (has secrets), overlay imported non-secrets
@@ -1343,6 +1344,7 @@ class MainWindow(QMainWindow):
                     "twitch",
                     "youtube",
                     "kick",
+                    "chaturbate",
                     # Feature settings
                     "streamlink",
                     "notifications",

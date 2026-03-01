@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from ..api.base import BaseApiClient
+from ..api.chaturbate import ChaturbateApiClient
 from ..api.kick import KickApiClient
 from ..api.twitch import TwitchApiClient
 from ..api.youtube import YouTubeApiClient
@@ -67,6 +68,7 @@ class StreamMonitor:
             self.settings.kick,
             concurrency=self.settings.performance.kick_concurrency,
         )
+        self._clients[StreamPlatform.CHATURBATE] = ChaturbateApiClient(self.settings.chaturbate)
 
     @property
     def channels(self) -> list[Channel]:

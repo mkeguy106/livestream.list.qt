@@ -339,6 +339,43 @@ async def _fetch_kick_socials(channel_id: str) -> dict[str, str]:
     return socials
 
 
+async def _fetch_chaturbate_socials(channel_id: str) -> dict[str, str]:
+    """Fetch socials from Chaturbate biocontext API."""
+    socials: dict[str, str] = {}
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+    url = f"https://chaturbate.com/api/biocontext/{channel_id}/"
+
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    return socials
+
+                data = await resp.json()
+
+                # Parse social links from the about_me HTML field
+                about_me = data.get("about_me", "") or ""
+                if about_me:
+                    # Extract URLs from HTML content
+                    url_pattern = re.compile(r'href=["\']?(https?://[^"\'>\s]+)')
+                    found_urls = url_pattern.findall(about_me)
+                    for found_url in found_urls:
+                        name = _detect_social_from_url(found_url)
+                        if name and name not in socials:
+                            socials[name] = found_url
+
+    except Exception as e:
+        logger.debug(f"Chaturbate socials fetch failed: {e}")
+
+    return socials
+
+
 async def fetch_socials(channel_id: str, platform: StreamPlatform) -> dict[str, str]:
     """Fetch social media links for a channel.
 
@@ -350,4 +387,6 @@ async def fetch_socials(channel_id: str, platform: StreamPlatform) -> dict[str, 
         return await _fetch_youtube_socials(channel_id)
     elif platform == StreamPlatform.KICK:
         return await _fetch_kick_socials(channel_id)
+    elif platform == StreamPlatform.CHATURBATE:
+        return await _fetch_chaturbate_socials(channel_id)
     return {}

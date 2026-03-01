@@ -18,6 +18,7 @@ CHANNEL_URLS = {
     StreamPlatform.TWITCH: "https://twitch.tv/{name}",
     StreamPlatform.YOUTUBE: "https://youtube.com/channel/{id}",
     StreamPlatform.KICK: "https://kick.com/{name}",
+    StreamPlatform.CHATURBATE: "https://chaturbate.com/{name}",
 }
 
 

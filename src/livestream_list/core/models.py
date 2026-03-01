@@ -11,6 +11,7 @@ class StreamPlatform(str, Enum):
     TWITCH = "twitch"
     YOUTUBE = "youtube"
     KICK = "kick"
+    CHATURBATE = "chaturbate"
 
 
 class StreamQuality(str, Enum):
@@ -200,6 +201,8 @@ class Livestream:
                 return f"https://youtube.com/@{channel_id}/live"
         elif self.channel.platform == StreamPlatform.KICK:
             return f"https://kick.com/{self.channel.channel_id}"
+        elif self.channel.platform == StreamPlatform.CHATURBATE:
+            return f"https://chaturbate.com/{self.channel.channel_id}"
         return ""
 
     @property
@@ -213,6 +216,8 @@ class Livestream:
             return ""  # No chat URL without video ID
         elif self.channel.platform == StreamPlatform.KICK:
             return f"https://kick.com/popout/{self.channel.channel_id}/chat"
+        elif self.channel.platform == StreamPlatform.CHATURBATE:
+            return f"https://chaturbate.com/{self.channel.channel_id}"
         return ""
 
     def set_offline(self) -> None:

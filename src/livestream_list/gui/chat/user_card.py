@@ -49,6 +49,7 @@ CHANNEL_URLS = {
     StreamPlatform.TWITCH: "https://twitch.tv/{name}",
     StreamPlatform.YOUTUBE: "https://youtube.com/channel/{id}",
     StreamPlatform.KICK: "https://kick.com/{name}",
+    StreamPlatform.CHATURBATE: "https://chaturbate.com/{name}",
 }
 
 
@@ -433,6 +434,7 @@ class UserCardPopup(QFrame):
             StreamPlatform.TWITCH: "Twitch",
             StreamPlatform.YOUTUBE: "YouTube",
             StreamPlatform.KICK: "Kick",
+            StreamPlatform.CHATURBATE: "Chaturbate",
         }
         self._platform_label = QLabel(platform_names.get(user.platform, ""))
         self._platform_label.setStyleSheet(

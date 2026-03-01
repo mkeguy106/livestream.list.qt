@@ -23,6 +23,7 @@ PLATFORM_COLORS = {
     StreamPlatform.TWITCH: "#9146FF",
     StreamPlatform.KICK: "#53FC18",
     StreamPlatform.YOUTUBE: "#FF0000",
+    StreamPlatform.CHATURBATE: "#F47321",
 }
 
 # Platform icon text
@@ -30,6 +31,7 @@ PLATFORM_ICONS = {
     StreamPlatform.TWITCH: "T",
     StreamPlatform.YOUTUBE: "Y",
     StreamPlatform.KICK: "K",
+    StreamPlatform.CHATURBATE: "C",
 }
 
 # UI style configurations

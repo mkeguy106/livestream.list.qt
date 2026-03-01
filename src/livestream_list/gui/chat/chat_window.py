@@ -40,6 +40,7 @@ PLATFORM_COLORS = {
     StreamPlatform.TWITCH: QColor(THEME_PLATFORM_COLORS.get("twitch", "#9146ff")),
     StreamPlatform.YOUTUBE: QColor(THEME_PLATFORM_COLORS.get("youtube", "#ff0000")),
     StreamPlatform.KICK: QColor(THEME_PLATFORM_COLORS.get("kick", "#53fc18")),
+    StreamPlatform.CHATURBATE: QColor(THEME_PLATFORM_COLORS.get("chaturbate", "#F47321")),
 }
 
 
@@ -799,9 +800,11 @@ class ChatWindow(QMainWindow):
 
         self._livestreams[channel_key] = livestream
 
-        # YouTube uses embedded web view
+        # YouTube and Chaturbate use embedded web views for chat
         if livestream.channel.platform == StreamPlatform.YOUTUBE:
             widget = self._create_youtube_web_widget(channel_key, livestream)
+        elif livestream.channel.platform == StreamPlatform.CHATURBATE:
+            widget = self._create_chaturbate_web_widget(channel_key, livestream)
         else:
             widget = self._create_native_chat_widget(channel_key, livestream)
 
@@ -831,10 +834,28 @@ class ChatWindow(QMainWindow):
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
         return widget
 
+    def _create_chaturbate_web_widget(
+        self, channel_key: str, livestream: Livestream
+    ) -> QWidget:
+        """Create a ChaturbateWebChatWidget for embedded Chaturbate chat."""
+        from .chaturbate_web_chat import ChaturbateWebChatWidget
+
+        widget = ChaturbateWebChatWidget(
+            channel_key=channel_key,
+            livestream=livestream,
+            settings=self.settings.chat.builtin,
+            parent=self._tab_widget,
+        )
+        widget.popout_requested.connect(self._on_popout_requested)
+        widget.settings_clicked.connect(self.chat_settings_requested.emit)
+        return widget
+
     def _create_native_chat_widget(self, channel_key: str, livestream: Livestream) -> ChatWidget:
         """Create a native ChatWidget for Twitch/Kick chat."""
         if livestream.channel.platform == StreamPlatform.KICK:
             authenticated = bool(self.settings.kick.access_token)
+        elif livestream.channel.platform == StreamPlatform.CHATURBATE:
+            authenticated = bool(self.settings.chaturbate.login_name)
         else:
             authenticated = bool(self.settings.twitch.access_token)
         widget = ChatWidget(
@@ -1157,6 +1178,8 @@ class ChatWindow(QMainWindow):
                 auth = bool(self.settings.kick.access_token)
             elif platform == StreamPlatform.YOUTUBE:
                 auth = bool(self.settings.youtube.cookies)
+            elif platform == StreamPlatform.CHATURBATE:
+                auth = bool(self.settings.chaturbate.login_name)
             else:
                 auth = bool(self.settings.twitch.access_token)
             widget.set_authenticated(auth)

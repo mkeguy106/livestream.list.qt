@@ -252,8 +252,11 @@ class ChatManager(QObject):
         self._livestreams[channel_key] = livestream
         self._record_recent_channel(channel_key)
 
-        # YouTube uses embedded web view — no native connection needed
-        if livestream.channel.platform == StreamPlatform.YOUTUBE:
+        # YouTube and Chaturbate use embedded web views — no native connection
+        if livestream.channel.platform in (
+            StreamPlatform.YOUTUBE,
+            StreamPlatform.CHATURBATE,
+        ):
             self._web_chat_keys.add(channel_key)
             self._fetch_socials_for_channel(channel_key, livestream)
             self.chat_opened.emit(channel_key, livestream)
@@ -374,6 +377,10 @@ class ChatManager(QObject):
     def reconnect_youtube(self) -> None:
         """Notify auth state for YouTube (web embed handles its own connection)."""
         self.auth_state_changed.emit(bool(self.settings.youtube.cookies))
+
+    def reconnect_chaturbate(self) -> None:
+        """Notify auth state for Chaturbate (web embed handles its own connection)."""
+        self.auth_state_changed.emit(bool(self.settings.chaturbate.login_name))
 
     def close_chat(self, channel_key: str) -> None:
         """Close a chat connection."""
@@ -1307,6 +1314,10 @@ class ChatManager(QObject):
                 youtube_settings=self.settings.youtube,
                 parent=self,
             )
+        elif platform == StreamPlatform.CHATURBATE:
+            from .connections.chaturbate import ChaturbateChatConnection
+
+            return ChaturbateChatConnection(parent=self)
         return None
 
     def _get_connection_kwargs(self, livestream: Livestream) -> dict:

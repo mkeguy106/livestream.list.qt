@@ -62,6 +62,8 @@ class ChatLauncher:
                 logger.warning(f"Cannot open YouTube chat without video ID for {channel}")
                 return None
             return YOUTUBE_CHAT_URL.format(video_id=video_id)
+        elif platform == StreamPlatform.CHATURBATE:
+            return f"https://chaturbate.com/{channel.lower()}"
         else:
             # Fallback to Twitch
             url_template = TWITCH_CHAT_URLS.get(self.settings.url_type, TWITCH_CHAT_URLS[0])
@@ -227,6 +229,8 @@ class ChatLauncher:
                 return f"https://youtube.com/channel/{channel}/live"
             else:
                 return f"https://youtube.com/@{channel}/live"
+        elif platform == StreamPlatform.CHATURBATE:
+            return f"https://chaturbate.com/{channel.lower()}"
         else:
             return f"https://twitch.tv/{channel.lower()}"
 
