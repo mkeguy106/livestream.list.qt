@@ -245,8 +245,7 @@ _ISOLATE_CHAT_JS = """
         + 'body>*:not([data-llqt-path]):not([data-llqt-chat]):not([data-llqt-popup]){display:none!important}'
         + '[data-llqt-path]>*:not([data-llqt-path]):not([data-llqt-chat]):not([data-llqt-popup]){display:none!important}'
         + '[data-llqt-path]{display:block!important;position:static!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;overflow:visible!important;float:none!important;flex:1 1 100%!important}'
-        + '[data-llqt-chat]{display:flex!important;flex-direction:column!important;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:999999!important}'
-        + '#settings-tab-default{display:none!important}';
+        + '[data-llqt-chat]{display:flex!important;flex-direction:column!important;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:999999!important}';
     document.head.appendChild(style);
 
     // Watch for dynamically added popups/overlays (settings panels, modals)
@@ -292,7 +291,7 @@ _ISOLATE_CHAT_JS = """
     var win = chatEl.querySelector('.window');
     if (win) {
         var tabIds = ['chat-tab-default', 'pm-tab-default',
-                      'users-tab-default'];
+                      'users-tab-default', 'settings-tab-default'];
         tabIds.forEach(function(tabId, tabIndex) {
             var tab = document.getElementById(tabId);
             if (!tab) return;
@@ -305,6 +304,10 @@ _ISOLATE_CHAT_JS = """
                         else if (tabId === 'pm-tab-default') show = (j === 1);
                         else if (tabId === 'users-tab-default')
                             show = (child.id === 'UserListTab');
+                        else if (tabId === 'settings-tab-default')
+                            show = (child.id === 'SettingsTab'
+                                || (child.className||'').toString().indexOf('settings') >= 0
+                                || j === win.children.length - 1);
                         child.style.display = show ? 'block' : 'none';
                     }
                 }, 150);
@@ -396,6 +399,7 @@ class ChaturbateWebChatWidget(QWidget):
         profile = _get_shared_profile()
         if not profile:
             self._web_view = None
+            self._loading_overlay = None
             placeholder = QLabel("Chaturbate embedded chat unavailable")
             placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(placeholder, 1)
@@ -407,8 +411,8 @@ class ChaturbateWebChatWidget(QWidget):
             page = QWebEnginePage(profile, self)
             page.setBackgroundColor(QColor("#1a1a2e"))
 
-            # Inject early-hide script: hides page content at DocumentCreation
-            # so the user never sees the full Chaturbate page flash.
+            # Inject early-hide script as secondary fallback: hides page content
+            # at DocumentCreation in case the overlay removal is slow.
             hide_script = QWebEngineScript()
             hide_script.setName("chaturbate-pre-isolate")
             hide_script.setWorldId(0)
@@ -429,16 +433,27 @@ class ChaturbateWebChatWidget(QWidget):
 
             self._web_view = QWebEngineView(self)
             self._web_view.setPage(page)
-            # Show loading placeholder inside the web view itself.
-            # Navigate to the real URL after the widget is laid out.
-            page.setHtml(
-                '<html><body style="background:#1a1a2e;color:#888;'
-                'display:flex;align-items:center;justify-content:center;'
-                'height:100vh;margin:0;font-family:sans-serif;font-size:13px">'
-                'Loading chat...</body></html>'
-            )
             self._web_view.loadFinished.connect(self._on_load_finished)
             layout.addWidget(self._web_view, 1)
+
+            # Native Qt overlay on top of the web view — prevents the full-page
+            # flash while keeping the web view visible (Chromium needs visibility
+            # to render the DOM properly for isolation JS).
+            theme = get_theme()
+            self._loading_overlay = QLabel("Loading chat...", self)
+            self._loading_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._loading_overlay.setAutoFillBackground(True)
+            self._loading_overlay.setStyleSheet(
+                f"background:{theme.chat_bg};color:{theme.text_muted};"
+                "font-size:13px;font-family:sans-serif;"
+            )
+            self._loading_overlay.raise_()
+
+            # Safety timeout: force-remove overlay after 30s
+            self._isolation_timeout = QTimer(self)
+            self._isolation_timeout.setSingleShot(True)
+            self._isolation_timeout.setInterval(30_000)
+            self._isolation_timeout.timeout.connect(self._on_isolation_timeout)
 
             # Navigate to real URL after layout is established
             QTimer.singleShot(200, self._navigate_to_chat)
@@ -455,6 +470,20 @@ class ChaturbateWebChatWidget(QWidget):
         if self.livestream and self.livestream.live:
             self._title_refresh_timer.start()
 
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        """Reposition the loading overlay to cover the web view area."""
+        super().resizeEvent(event)
+        if self._loading_overlay and self._web_view:
+            self._loading_overlay.setGeometry(self._web_view.geometry())
+
+    def _remove_loading_overlay(self) -> None:
+        """Remove the loading overlay and stop the safety timeout."""
+        if self._loading_overlay:
+            self._loading_overlay.deleteLater()
+            self._loading_overlay = None
+        if hasattr(self, "_isolation_timeout"):
+            self._isolation_timeout.stop()
+
     def _build_url(self) -> QUrl:
         """Build the Chaturbate room URL."""
         return QUrl(f"https://chaturbate.com/{self.livestream.channel.channel_id}")
@@ -463,6 +492,8 @@ class ChaturbateWebChatWidget(QWidget):
         """Navigate to the real Chaturbate URL after the widget is laid out."""
         if self._web_view:
             self._web_view.setUrl(self._build_url())
+            if hasattr(self, "_isolation_timeout"):
+                self._isolation_timeout.start()
 
     def eventFilter(self, obj, event):  # noqa: N802
         """Intercept Ctrl+scroll on the Chromium render widget to handle zoom."""
@@ -510,6 +541,12 @@ class ChaturbateWebChatWidget(QWidget):
         delay = 3000 if result in ("clicked", "force_hidden") else 1500
         QTimer.singleShot(delay, self._try_isolate_chat)
 
+    def _on_isolation_timeout(self) -> None:
+        """Safety timeout: remove the loading overlay if isolation hasn't completed."""
+        if self._loading_overlay:
+            logger.warning("Chaturbate isolation timeout — removing loading overlay")
+            self._remove_loading_overlay()
+
     def _try_isolate_chat(self) -> None:
         """Inject JS to find and isolate the chat panel."""
         if not self._web_view:
@@ -548,6 +585,7 @@ class ChaturbateWebChatWidget(QWidget):
                 f"(#{data.get('id')}.{data.get('cls', '')}) "
                 f"children={children}"
             )
+            self._remove_loading_overlay()
             return
 
         if data.get("status") == "not_found":
@@ -574,6 +612,7 @@ class ChaturbateWebChatWidget(QWidget):
                         'Chat not available<br>(room may be offline)'
                         '</body></html>'
                     )
+                self._remove_loading_overlay()
 
     # --- Banner methods ---
 
@@ -677,6 +716,7 @@ class ChaturbateWebChatWidget(QWidget):
 
     def cleanup(self) -> None:
         self._title_refresh_timer.stop()
+        self._remove_loading_overlay()
         if self._web_view:
             self._web_view.setUrl(QUrl("about:blank"))
 

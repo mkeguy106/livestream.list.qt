@@ -141,7 +141,7 @@ Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a 
 ### Flatpak Support
 
 The app runs both natively and in Flatpak. Key patterns:
-- `is_flatpak()` in `chat.py` checks for `/.flatpak-info` or `FLATPAK_ID` env var
+- `IS_FLATPAK` constant in `core/platform.py` checks for `/.flatpak-info` or `FLATPAK_ID` env var
 - `flatpak-spawn --host` wraps commands to run on host (browser launch, streamlink)
 - Flatpak builds are the primary distribution method via GitHub releases
 
@@ -163,7 +163,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **YouTube chat**: Embedded QWebEngineView (`gui/chat/youtube_web_chat.py`) loads YouTube's native popout chat URL. Uses a shared persistent `QWebEngineProfile` ("youtube_chat") that stores cookies to disk automatically. Users sign into Google directly inside the app via `_YouTubeLoginWindow` (persistent top-level QWidget, never destroyed — see Wayland pitfall below). Reading, sending, and rendering are all handled by YouTube's web UI. Title and socials banners are added above the web view, matching the native ChatWidget's banners.
 
-**Chaturbate chat**: Embedded QWebEngineView (`gui/chat/chaturbate_web_chat.py`) loads the Chaturbate room page and injects CSS/JS to isolate just the chat panel, hiding the video player and other content. Uses a shared persistent `QWebEngineProfile` ("chaturbate_chat") with cookie tracking for session persistence. Native WebSocket chat connection (`chat/connections/chaturbate.py`) is also available. Users sign in via `_ChaturbateLoginWindow` in the Accounts tab. DOM isolation uses `data-llqt-*` attributes and a `MutationObserver` for dynamically added elements. Chaturbate's global keyboard event interceptors are neutralized via capture-phase `stopImmediatePropagation()` on both `document` and `window` to allow typing in the `contenteditable` chat input. The settings tab (`#settings-tab-default`) is hidden because its React components require full page context to render.
+**Chaturbate chat**: Embedded QWebEngineView (`gui/chat/chaturbate_web_chat.py`) loads the Chaturbate room page and injects CSS/JS to isolate just the chat panel, hiding the video player and other content. Uses a shared persistent `QWebEngineProfile` ("chaturbate_chat") with cookie tracking for session persistence. Native WebSocket chat connection (`chat/connections/chaturbate.py`) is also available. Users sign in via `_ChaturbateLoginWindow` in the Accounts tab. DOM isolation uses `data-llqt-*` attributes and a `MutationObserver` for dynamically added elements. Chaturbate's global keyboard event interceptors are neutralized via capture-phase `stopImmediatePropagation()` on both `document` and `window` to allow typing in the `contenteditable` chat input. All 4 native tabs (CHAT, PM, USERS, SETTINGS) are enabled with a tab-switching helper that ensures only one content panel is visible at a time. A `QStackedWidget` hides the web view behind a loading label until isolation JS completes, preventing the full-page flash.
 
 **Emotes**: Supports Twitch, 7TV, BTTV, FFZ. Kick emotes are parsed inline from `[emote:ID:name]` tokens in chat messages (not fetched via a provider API). Loaded async per-channel. Rendered inline via `EmoteCache` (shared pixmap dict). Tab-completion via `EmoteCompleter`.
 
@@ -281,6 +281,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | QWebEngineView in modal dialog can't receive input | Wayland modality stack: if Preferences is ApplicationModal, a child window must also be ApplicationModal to receive input. Set `setWindowModality(Qt.ApplicationModal)` on the login window. |
 | QWebEngineView stacks behind parent on Wayland | Must set transient parent via `windowHandle().setTransientParent()` BEFORE calling `show()`. Call `winId()` first to force native handle creation. |
 | QWebEngineView Ctrl+scroll zoom broken | Chromium's built-in Ctrl+scroll zoom doesn't work for zoom-out. Install an event filter on `focusProxy()` (after `loadFinished`) and call `page().setZoomFactor()` manually. |
+| QWebEngineView triggers KDE close animation on Wayland | Adding the first QWebEngineView to a visible window causes Qt to recreate the native surface (RasterSurface→OpenGLSurface), triggering KDE's close animation. Fix: in `_ensure_chat_window()` (app.py), add a temporary QWebEngineView and do a show()/processEvents()/hide() cycle before the window is ever visible. `setWindowOpacity(0)` does NOT work (Wayland QPA doesn't support it). KWin's `skipCloseAnimation` doesn't work for surface recreation. |
 | Badge images showing wrong channel's sub badges | Per-channel `_badge_url_map` with channel-scoped cache keys |
 | Chat scrolls even when user scrolled up | Defer buffer trimming with `_trim_paused` flag, flush on scroll-to-bottom |
 | Twitch Turbo token "invalid" | Must use browser `auth-token` cookie (not OAuth access token) with `Authorization=OAuth` prefix. Token is client-ID-bound. |
@@ -296,7 +297,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `sys.stderr`/`sys.stdout` is `None` in windowed builds | Guard `faulthandler.enable()`, `StreamHandler`, `traceback.print_exc()` — use `logging.NullHandler()` fallback and `logger.error(..., exc_info=True)` instead |
 | Chaturbate cookie rotation loses sessionid | QWebEngine fires `cookieRemoved` then `cookieAdded` when rotating cookies. `_on_cookie_removed` must NOT remove from `_tracked_cookies` — cookies are only cleared on explicit logout via `clear_chaturbate_cookies()`. |
 | Chaturbate global keyboard interception | Chaturbate's JS intercepts keydown/keypress on document and window, blocking typing in the contenteditable chat input. Must add capture-phase `stopImmediatePropagation()` on both `document` AND `window` for `keydown`, `keypress`, `keyup`, `beforeinput`, `textInput`. Enter key must be let through for message sending. |
-| Chaturbate settings tab blank | The settings panel uses React components that require full page context. Hidden via `#settings-tab-default{display:none!important}` in isolation CSS. |
+| Chaturbate settings tab blank | Previously hidden. Now enabled — the tab-switching helper in `_ISOLATE_CHAT_JS` manages visibility of all 4 tab content panels including settings. |
 | New preferences not in export/import | When adding/removing settings (except cookies/tokens), update both `gui/dialogs/export.py` and `gui/main_window.py:_import_from_file()` to include the new fields |
 
 ## CI/CD

@@ -9,7 +9,7 @@ import time
 import traceback
 import weakref
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from ..__version__ import __version__
@@ -283,6 +283,13 @@ class Application(QApplication):
         from .chat.youtube_web_chat import _get_shared_profile
 
         _get_shared_profile()
+
+        # Also init Chaturbate profile early (same reason)
+        from .chat.chaturbate_web_chat import (
+            _get_shared_profile as _get_chaturbate_profile,
+        )
+
+        _get_chaturbate_profile()
 
         # Connect signal for notification watch button UI updates
         self.open_stream_requested.connect(self._on_notification_open_stream_ui)
@@ -589,6 +596,28 @@ class Application(QApplication):
                 self._chat_window.chat_settings_requested.connect(
                     self.main_window._show_chat_preferences
                 )
+
+            # Force the window surface type recreation BEFORE the window is
+            # ever visible.  Adding the first QWebEngineView to a visible
+            # window causes Qt to destroy/recreate the native surface, which
+            # triggers KDE's close animation on Wayland.  By adding a
+            # temporary QWebEngineView and doing a show()/hide() cycle here,
+            # the recreation happens while the window is unmapped and
+            # invisible to the compositor.
+            try:
+                from PySide6.QtWebEngineWidgets import QWebEngineView
+
+                dummy = QWebEngineView(self._chat_window)
+                dummy.setFixedSize(1, 1)
+                self._chat_window.show()
+                self.processEvents()
+                self.processEvents()
+                self._chat_window.hide()
+                dummy.setParent(None)
+                dummy.deleteLater()
+            except ImportError:
+                pass
+
         return self._chat_window
 
     def open_builtin_chat(self, livestream):
@@ -766,6 +795,12 @@ def run() -> int:
     # Import here to avoid circular imports
     from .main_window import MainWindow
     from .tray import TrayIcon, create_app_icon, is_tray_available
+
+    # Must be set before QApplication is created — QWebEngineView requires
+    # shared OpenGL contexts. Without this, Qt recreates window surfaces when
+    # the first web view is shown, causing a Wayland unmap/remap that triggers
+    # KDE's close animation.
+    Application.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = Application()
     app.initialize()
