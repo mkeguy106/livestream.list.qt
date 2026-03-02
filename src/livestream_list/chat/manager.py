@@ -831,6 +831,8 @@ class ChatManager(QObject):
                 for msg in processed:
                     if msg.is_raid:
                         self.raid_received.emit(channel_key, msg)
+                # Detect own resub USERNOTICE → dismiss anniversary banner
+                self._check_resub_shared(channel_key, processed)
 
         if not self._pending_messages:
             self._message_flush_timer.stop()
@@ -1198,6 +1200,33 @@ class ChatManager(QObject):
             f"{months} months, {days_left} days remaining"
         )
         self.sub_anniversary_fetched.emit(channel_key, sub_info)
+
+    def _check_resub_shared(
+        self, channel_key: str, messages: list[ChatMessage]
+    ) -> None:
+        """Detect own resub USERNOTICE and dismiss the anniversary banner.
+
+        When the user clicks "Share" on Twitch, a USERNOTICE with msg-id=resub
+        is broadcast in IRC. We detect this by checking for system messages from
+        our own Twitch username that contain "subscribed".
+        """
+        login = self.settings.twitch.login_name
+        if not login:
+            return
+        login_lower = login.lower()
+        for msg in messages:
+            if (
+                msg.is_system
+                and msg.platform == StreamPlatform.TWITCH
+                and msg.user.name.lower() == login_lower
+                and "subscribed" in (msg.system_text or "").lower()
+            ):
+                logger.info(
+                    f"Own resub detected for {channel_key}, "
+                    f"dismissing anniversary banner"
+                )
+                self.sub_anniversary_fetched.emit(channel_key, {"redeemed": True})
+                return
 
     def _on_emotes_fetched(self, channel_key: str, emotes: list) -> None:
         """Handle fetched emote list - add to map (images load on-demand when rendered)."""

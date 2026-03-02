@@ -2000,6 +2000,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def set_sub_anniversary(self, sub_info: dict) -> None:
         """Set Twitch subscription anniversary info and show banner."""
+        # Redeemed signal — permanently dismiss for this session
+        if sub_info.get("redeemed"):
+            self._sub_anniversary_dismissed = True
+            self._sub_anniversary_info = None
+            self._sub_anniversary_banner.hide()
+            return
+
         self._sub_anniversary_info = sub_info
 
         if (
