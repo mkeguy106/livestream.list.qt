@@ -68,6 +68,8 @@ class ChatManager(QObject):
     chat_error = Signal(str, str)
     # Emitted when channel socials are fetched (channel_key, {platform: url})
     socials_fetched = Signal(str, dict)
+    # Emitted when sub anniversary info is fetched (channel_key, sub_info dict)
+    sub_anniversary_fetched = Signal(str, dict)
     # Emitted when a whisper/DM is received (platform_str, ChatMessage)
     whisper_received = Signal(str, object)
     # Emitted when room state changes (channel_key, ChatRoomState)
@@ -98,6 +100,7 @@ class ChatManager(QObject):
         self._livestreams: dict[str, Livestream] = {}
         self._emote_fetch_workers: dict[str, EmoteFetchWorker] = {}
         self._socials_fetch_workers: dict[str, AsyncTaskWorker] = {}
+        self._sub_anniversary_workers: dict[str, AsyncTaskWorker] = {}
         self._global_emote_worker: AsyncTaskWorker | None = None
         self._user_emote_worker: AsyncTaskWorker | None = None
 
@@ -269,6 +272,9 @@ class ChatManager(QObject):
 
         # Start socials fetching for all platforms
         self._fetch_socials_for_channel(channel_key, livestream)
+
+        # Check for Twitch sub anniversary
+        self._fetch_sub_anniversary(channel_key, livestream)
 
         self.chat_opened.emit(channel_key, livestream)
 
@@ -1064,6 +1070,134 @@ class ChatManager(QObject):
             return
         logger.info(f"Fetched socials for {channel_key}: {list(socials.keys())}")
         self.socials_fetched.emit(channel_key, socials)
+
+    def _fetch_sub_anniversary(self, channel_key: str, livestream: Livestream) -> None:
+        """Fetch Twitch subscription info and detect if anniversary is shareable.
+
+        The anniversary share window is available for the first ~7 days after
+        a billing cycle renews. There is no direct GQL field for this, so we
+        compute it from ``renewsAt`` and ``subscriptionTenure.daysRemaining``.
+        """
+        if livestream.channel.platform != StreamPlatform.TWITCH:
+            return
+        if not self.settings.chat.builtin.show_sub_anniversary_banner:
+            return
+        # GQL requires browser auth token (OAuth access token is rejected)
+        auth_token = self.settings.twitch.browser_auth_token
+        if not auth_token:
+            return
+
+        channel_login = livestream.channel.channel_id
+
+        async def fetch():
+            import aiohttp
+
+            gql_url = "https://gql.twitch.tv/gql"
+            headers = {
+                "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+                "Authorization": f"OAuth {auth_token}",
+                "Content-Type": "application/json",
+            }
+            query = {
+                "query": """
+                    query SubAnniversary($login: String!) {
+                        user(login: $login) {
+                            id
+                            displayName
+                            self {
+                                subscriptionBenefit {
+                                    id
+                                    tier
+                                    renewsAt
+                                    purchasedWithPrime
+                                    gift {
+                                        isGift
+                                    }
+                                }
+                                subscriptionTenure(tenureMethod: CUMULATIVE) {
+                                    months
+                                    daysRemaining
+                                }
+                            }
+                        }
+                    }
+                """,
+                "variables": {"login": channel_login},
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(gql_url, json=query, headers=headers) as resp:
+                    if resp.status != 200:
+                        return (channel_key, None)
+                    data = await resp.json()
+
+            user = (data.get("data") or {}).get("user")
+            if not user:
+                return (channel_key, None)
+            self_data = user.get("self")
+            if not self_data:
+                return (channel_key, None)
+            sub_benefit = self_data.get("subscriptionBenefit")
+            if not sub_benefit:
+                return (channel_key, None)
+
+            tenure = self_data.get("subscriptionTenure") or {}
+            months = tenure.get("months", 0)
+            days_remaining = tenure.get("daysRemaining")
+
+            # Determine if the anniversary share window is active.
+            # renewsAt is when the NEXT billing cycle starts. If there
+            # are >= 22 days left, the sub renewed within the last ~8
+            # days and the anniversary share is likely still available.
+            renews_at_str = sub_benefit.get("renewsAt")
+            if not renews_at_str:
+                return (channel_key, None)
+            renews_at = datetime.fromisoformat(
+                renews_at_str.replace("Z", "+00:00")
+            )
+            now = datetime.now(timezone.utc)
+            days_until_renewal = (renews_at - now).total_seconds() / 86400
+            if days_until_renewal < 22:
+                return (channel_key, None)
+
+            tier = sub_benefit.get("tier", "1000")
+            is_prime = sub_benefit.get("purchasedWithPrime", False)
+            is_gift = False
+            gift = sub_benefit.get("gift")
+            if gift:
+                is_gift = gift.get("isGift", False)
+
+            return (
+                channel_key,
+                {
+                    "months": months,
+                    "days_remaining": days_remaining,
+                    "tier": tier,
+                    "is_prime": is_prime,
+                    "is_gift": is_gift,
+                    "channel_display_name": user.get(
+                        "displayName", channel_login
+                    ),
+                    "channel_login": channel_login,
+                },
+            )
+
+        worker = AsyncTaskWorker(fetch, error_log_level=logging.DEBUG, parent=self)
+        worker.result_ready.connect(self._on_sub_anniversary_fetched)
+        self._sub_anniversary_workers[channel_key] = worker
+        worker.start()
+
+    def _on_sub_anniversary_fetched(self, result: object) -> None:
+        """Handle fetched sub anniversary info - emit to UI."""
+        channel_key, sub_info = result
+        if not sub_info:
+            return
+        months = sub_info.get("months", 0)
+        days_left = sub_info.get("days_remaining")
+        logger.info(
+            f"Sub anniversary active for {channel_key}: "
+            f"{months} months, {days_left} days remaining"
+        )
+        self.sub_anniversary_fetched.emit(channel_key, sub_info)
 
     def _on_emotes_fetched(self, channel_key: str, emotes: list) -> None:
         """Handle fetched emote list - add to map (images load on-demand when rendered)."""

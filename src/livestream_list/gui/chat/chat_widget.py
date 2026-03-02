@@ -539,6 +539,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._socials: dict[str, str] = {}  # Stored socials for re-display on toggle
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
+        self._sub_anniversary_dismissed = False
+        self._sub_anniversary_info: dict | None = None
         self._reply_to_msg: ChatMessage | None = None  # Message being replied to
         self._slow_mode_remaining: int = 0
         self._slow_mode_timer = QTimer(self)
@@ -830,6 +832,41 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._room_state_widget.hide()
         self._room_state_dismissed = False
         layout.addWidget(self._room_state_widget)
+
+        # Sub anniversary banner (above input, raid-style)
+        self._sub_anniversary_banner = QWidget()
+        self._sub_anniversary_banner.setStyleSheet("""
+            QWidget {
+                background-color: #1a0a2e;
+                border: 1px solid #9146ff;
+                border-radius: 4px;
+            }
+        """)
+        sa_layout = QHBoxLayout(self._sub_anniversary_banner)
+        sa_layout.setContentsMargins(8, 4, 4, 4)
+        sa_layout.setSpacing(6)
+        self._sub_anniversary_label = QLabel()
+        self._sub_anniversary_label.setStyleSheet(
+            "color: #bf94ff; font-size: 11px; font-weight: bold; border: none;"
+        )
+        self._sub_anniversary_label.setWordWrap(True)
+        self._sub_anniversary_label.setOpenExternalLinks(True)
+        sa_layout.addWidget(self._sub_anniversary_label, 1)
+        sa_dismiss = QPushButton("\u2715")
+        sa_dismiss.setFixedSize(20, 20)
+        sa_dismiss.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #aaa;
+                border: none;
+                font-size: 12px;
+            }
+            QPushButton:hover { color: #fff; }
+        """)
+        sa_dismiss.clicked.connect(self._on_sub_anniversary_dismissed)
+        sa_layout.addWidget(sa_dismiss)
+        self._sub_anniversary_banner.hide()
+        layout.addWidget(self._sub_anniversary_banner)
 
         # Reply indicator (hidden by default)
         self._reply_widget = QWidget()
@@ -1956,6 +1993,40 @@ class ChatWidget(QWidget, ChatSearchMixin):
         """Handle socials banner dismissal."""
         self._socials_dismissed = True
 
+    def _on_sub_anniversary_dismissed(self) -> None:
+        """Handle sub anniversary banner dismissal."""
+        self._sub_anniversary_dismissed = True
+        self._sub_anniversary_banner.hide()
+
+    def set_sub_anniversary(self, sub_info: dict) -> None:
+        """Set Twitch subscription anniversary info and show banner."""
+        self._sub_anniversary_info = sub_info
+
+        if (
+            not sub_info
+            or self._sub_anniversary_dismissed
+            or not self.settings.show_sub_anniversary_banner
+        ):
+            self._sub_anniversary_banner.hide()
+            return
+
+        months = sub_info.get("months", 0)
+        channel_login = sub_info.get("channel_login", "")
+
+        month_word = "month" if months == 1 else "months"
+        url = f"https://twitch.tv/{channel_login}"
+        link = (
+            f'<a href="{url}" style="color: #bf94ff; text-decoration: underline;">'
+            f"Share on Twitch \u2197</a>"
+        )
+        text = (
+            f"\u2b50 It's your {months} {month_word} sub anniversary!"
+            f" &nbsp;\u2014&nbsp; {link}"
+        )
+
+        self._sub_anniversary_label.setText(text)
+        self._sub_anniversary_banner.show()
+
     def _format_title_with_commands(self, title: str) -> str:
         """Convert !command patterns in title to clickable links."""
         import html
@@ -2048,6 +2119,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 self.set_socials(self._socials)
         else:
             self._socials_banner.hide()
+
+        # Update sub anniversary visibility
+        if self.settings.show_sub_anniversary_banner:
+            self._sub_anniversary_dismissed = False
+            if self._sub_anniversary_info:
+                self.set_sub_anniversary(self._sub_anniversary_info)
+        else:
+            self._sub_anniversary_banner.hide()
 
     def update_room_state(self, state: ChatRoomState) -> None:
         """Update the room state indicator label."""
@@ -2375,6 +2454,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
         socials_action.setChecked(self.settings.show_socials_banner)
         socials_action.toggled.connect(self._toggle_socials_banner)
 
+        # Sub anniversary banner toggle
+        sub_anniv_action = menu.addAction("Show Sub Anniversary")
+        sub_anniv_action.setCheckable(True)
+        sub_anniv_action.setChecked(self.settings.show_sub_anniversary_banner)
+        sub_anniv_action.toggled.connect(self._toggle_sub_anniversary_banner)
+
         menu.addSeparator()
 
         # Always on top toggle
@@ -2454,6 +2539,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _toggle_socials_banner(self, checked: bool) -> None:
         """Toggle socials banner visibility."""
         self.settings.show_socials_banner = checked
+        self.update_banner_settings()
+        self.settings_changed.emit()
+
+    def _toggle_sub_anniversary_banner(self, checked: bool) -> None:
+        """Toggle sub anniversary banner visibility."""
+        self.settings.show_sub_anniversary_banner = checked
         self.update_banner_settings()
         self.settings_changed.emit()
 

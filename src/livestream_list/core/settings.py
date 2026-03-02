@@ -220,6 +220,7 @@ class BuiltinChatSettings:
     # Banner settings (stream title + socials)
     show_stream_title: bool = True
     show_socials_banner: bool = True
+    show_sub_anniversary_banner: bool = True
     spellcheck_enabled: bool = True
     autocorrect_enabled: bool = True
     moderated_message_display: str = "strikethrough"  # strikethrough, truncated, hidden
@@ -667,7 +668,9 @@ class Settings:
                 timeout_seconds=cls._validate_int(
                     n.get("timeout_seconds"), 0, min_val=0, max_val=60
                 ),
-                platform_filter=n.get("platform_filter", ["twitch", "youtube", "kick", "chaturbate"]),
+                platform_filter=n.get(
+                    "platform_filter", ["twitch", "youtube", "kick", "chaturbate"]
+                ),
                 quiet_hours_enabled=n.get("quiet_hours_enabled", False),
                 quiet_hours_start=n.get("quiet_hours_start", "22:00"),
                 quiet_hours_end=n.get("quiet_hours_end", "08:00"),
@@ -742,6 +745,9 @@ class Settings:
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
+                show_sub_anniversary_banner=builtin_data.get(
+                    "show_sub_anniversary_banner", True
+                ),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 autocorrect_enabled=builtin_data.get("autocorrect_enabled", True),
                 user_card_hover=builtin_data.get("user_card_hover", True),

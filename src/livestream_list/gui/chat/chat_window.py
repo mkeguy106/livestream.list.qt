@@ -749,6 +749,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.chat_reconnecting.connect(self._on_chat_reconnecting)
         self.chat_manager.chat_reconnect_failed.connect(self._on_chat_reconnect_failed)
         self.chat_manager.socials_fetched.connect(self._on_socials_fetched)
+        self.chat_manager.sub_anniversary_fetched.connect(self._on_sub_anniversary_fetched)
         self.chat_manager.whisper_received.connect(self._on_whisper_received)
         self.chat_manager.room_state_changed.connect(self._on_room_state_changed)
         self.chat_manager.hype_train_event.connect(self._on_hype_train_event)
@@ -1213,6 +1214,12 @@ class ChatWindow(QMainWindow):
         widget = self._widgets.get(channel_key)
         if widget:
             widget.set_socials(socials)
+
+    def _on_sub_anniversary_fetched(self, channel_key: str, sub_info: dict) -> None:
+        """Update a chat widget with fetched sub anniversary info."""
+        widget = self._widgets.get(channel_key)
+        if widget:
+            widget.set_sub_anniversary(sub_info)
 
     def _on_whisper_received(self, platform: str, message) -> None:
         """Handle an incoming or sent whisper — create/focus a DM tab."""
