@@ -1995,25 +1995,45 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def _on_sub_anniversary_dismissed(self) -> None:
         """Handle sub anniversary banner dismissal."""
+        self._dismiss_sub_anniversary()
+
+    def _dismiss_sub_anniversary(self) -> None:
+        """Persist sub anniversary dismissal for the current billing cycle."""
         self._sub_anniversary_dismissed = True
         self._sub_anniversary_banner.hide()
+        # Persist keyed by channel + renewsAt so it resets on next billing cycle
+        info = self._sub_anniversary_info
+        if info and info.get("renews_at"):
+            self.settings.dismissed_sub_anniversaries[self.channel_key] = (
+                info["renews_at"]
+            )
+            self.settings_changed.emit()
 
     def set_sub_anniversary(self, sub_info: dict) -> None:
         """Set Twitch subscription anniversary info and show banner."""
-        # Redeemed signal — permanently dismiss for this session
+        # Redeemed signal — permanently dismiss
         if sub_info.get("redeemed"):
-            self._sub_anniversary_dismissed = True
-            self._sub_anniversary_info = None
-            self._sub_anniversary_banner.hide()
+            self._sub_anniversary_info = sub_info
+            self._dismiss_sub_anniversary()
             return
 
         self._sub_anniversary_info = sub_info
 
-        if (
-            not sub_info
-            or self._sub_anniversary_dismissed
-            or not self.settings.show_sub_anniversary_banner
-        ):
+        if not sub_info or not self.settings.show_sub_anniversary_banner:
+            self._sub_anniversary_banner.hide()
+            return
+
+        # Check persistent dismissal (keyed by renewsAt so it resets each cycle)
+        renews_at = sub_info.get("renews_at", "")
+        dismissed_renews = self.settings.dismissed_sub_anniversaries.get(
+            self.channel_key
+        )
+        if dismissed_renews == renews_at:
+            self._sub_anniversary_dismissed = True
+            self._sub_anniversary_banner.hide()
+            return
+
+        if self._sub_anniversary_dismissed:
             self._sub_anniversary_banner.hide()
             return
 
@@ -2129,8 +2149,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Update sub anniversary visibility
         if self.settings.show_sub_anniversary_banner:
-            self._sub_anniversary_dismissed = False
-            if self._sub_anniversary_info:
+            if self._sub_anniversary_info and not self._sub_anniversary_dismissed:
                 self.set_sub_anniversary(self._sub_anniversary_info)
         else:
             self._sub_anniversary_banner.hide()
@@ -2552,6 +2571,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
     def _toggle_sub_anniversary_banner(self, checked: bool) -> None:
         """Toggle sub anniversary banner visibility."""
         self.settings.show_sub_anniversary_banner = checked
+        if checked:
+            # Re-enabling resets dismissal so the banner shows again
+            self._sub_anniversary_dismissed = False
+            self.settings.dismissed_sub_anniversaries.pop(self.channel_key, None)
         self.update_banner_settings()
         self.settings_changed.emit()
 

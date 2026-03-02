@@ -221,6 +221,9 @@ class BuiltinChatSettings:
     show_stream_title: bool = True
     show_socials_banner: bool = True
     show_sub_anniversary_banner: bool = True
+    dismissed_sub_anniversaries: dict[str, str] = field(
+        default_factory=dict
+    )  # channel_key → renewsAt (persists dismissal per billing cycle)
     spellcheck_enabled: bool = True
     autocorrect_enabled: bool = True
     moderated_message_display: str = "strikethrough"  # strikethrough, truncated, hidden
@@ -747,6 +750,9 @@ class Settings:
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
                 show_sub_anniversary_banner=builtin_data.get(
                     "show_sub_anniversary_banner", True
+                ),
+                dismissed_sub_anniversaries=builtin_data.get(
+                    "dismissed_sub_anniversaries", {}
                 ),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 autocorrect_enabled=builtin_data.get("autocorrect_enabled", True),

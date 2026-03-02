@@ -1180,6 +1180,7 @@ class ChatManager(QObject):
                         "displayName", channel_login
                     ),
                     "channel_login": channel_login,
+                    "renews_at": renews_at_str,
                 },
             )
 
