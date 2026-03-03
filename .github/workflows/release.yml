@@ -48,6 +48,15 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Update metainfo version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          DATE=$(date -u +%Y-%m-%d)
+          METAINFO="data/app.livestreamlist.LivestreamListQt.metainfo.xml"
+          if ! grep -q "version=\"${VERSION}\"" "$METAINFO"; then
+            sed -i "s|<releases>|<releases>\n    <release version=\"${VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
+          fi
+
       - name: Build Flatpak in Docker
         run: |
           CONTAINER_ID=$(docker create --privileged \

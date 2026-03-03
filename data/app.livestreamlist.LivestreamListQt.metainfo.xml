@@ -30,51 +30,9 @@
   <developer_name>Livestream List Contributors</developer_name>
 
   <releases>
-    <release version="0.5.18" date="2026-01-10">
-      <description>
-        <p>Fix Quit menu option to properly quit instead of minimizing to tray</p>
-      </description>
-    </release>
-    <release version="0.5.17" date="2026-01-10">
-      <description>
-        <p>Window position now preserved when minimizing to tray and restoring (Wayland fix)</p>
-      </description>
-    </release>
-    <release version="0.5.16" date="2026-01-10">
-      <description>
-        <p>Fix preferences not saving, fix window focus when restoring from tray</p>
-      </description>
-    </release>
-    <release version="0.5.15" date="2026-01-09">
-      <description>
-        <p>Fix YouTube browser button to open live stream instead of channel page</p>
-      </description>
-    </release>
-    <release version="0.5.14" date="2026-01-09">
-      <description>
-        <p>Fix notifications not appearing (invalid sound hint format)</p>
-      </description>
-    </release>
-    <release version="0.5.13" date="2026-01-09">
-      <description>
-        <p>Fix YouTube stream launching for channels with handles</p>
-      </description>
-    </release>
-    <release version="0.5.12" date="2026-01-09">
-      <description>
-        <p>Fix CI build for Docker-in-Docker environments</p>
-      </description>
-    </release>
-    <release version="0.5.11" date="2026-01-09">
-      <description>
-        <p>Fix Kick channel lookup (upgrade to KDE Platform 6.9), fix test notifications in flatpak</p>
-      </description>
-    </release>
-    <release version="0.5.6" date="2026-01-09">
-      <description>
-        <p>Initial Qt release - migrated from GTK4/Libadwaita to PySide6/Qt6</p>
-      </description>
-    </release>
+    <release version="1.5.4" date="2026-03-02"/>
+    <release version="1.5.3" date="2026-03-02"/>
+    <release version="1.5.0" date="2026-03-01"/>
   </releases>
 
   <content_rating type="oars-1.1"/>
