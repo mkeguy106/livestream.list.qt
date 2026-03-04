@@ -12,6 +12,7 @@ class StreamPlatform(str, Enum):
     YOUTUBE = "youtube"
     KICK = "kick"
     CHATURBATE = "chaturbate"
+    TIKTOK = "tiktok"
 
 
 class StreamQuality(str, Enum):
@@ -203,6 +204,8 @@ class Livestream:
             return f"https://kick.com/{self.channel.channel_id}"
         elif self.channel.platform == StreamPlatform.CHATURBATE:
             return f"https://chaturbate.com/{self.channel.channel_id}"
+        elif self.channel.platform == StreamPlatform.TIKTOK:
+            return f"https://www.tiktok.com/@{self.channel.channel_id}/live"
         return ""
 
     @property
@@ -218,6 +221,8 @@ class Livestream:
             return f"https://kick.com/popout/{self.channel.channel_id}/chat"
         elif self.channel.platform == StreamPlatform.CHATURBATE:
             return f"https://chaturbate.com/{self.channel.channel_id}"
+        elif self.channel.platform == StreamPlatform.TIKTOK:
+            return f"https://www.tiktok.com/@{self.channel.channel_id}/live"
         return ""
 
     def set_offline(self) -> None:

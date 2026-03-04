@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from ..api.base import BaseApiClient
 from ..api.chaturbate import ChaturbateApiClient
 from ..api.kick import KickApiClient
+from ..api.tiktok import TikTokApiClient
 from ..api.twitch import TwitchApiClient
 from ..api.youtube import YouTubeApiClient
 from .models import Channel, Livestream, StreamPlatform
@@ -69,6 +70,7 @@ class StreamMonitor:
             concurrency=self.settings.performance.kick_concurrency,
         )
         self._clients[StreamPlatform.CHATURBATE] = ChaturbateApiClient(self.settings.chaturbate)
+        self._clients[StreamPlatform.TIKTOK] = TikTokApiClient(self.settings.tiktok, concurrency=5)
 
     @property
     def channels(self) -> list[Channel]:

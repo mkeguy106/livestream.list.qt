@@ -352,6 +352,8 @@ class StreamlinkLauncher:
             return self.settings.kick_launch_method
         elif platform == StreamPlatform.CHATURBATE:
             return self.settings.chaturbate_launch_method
+        elif platform == StreamPlatform.TIKTOK:
+            return self.settings.tiktok_launch_method
         # Default to streamlink for unknown platforms
         return LaunchMethod.STREAMLINK
 

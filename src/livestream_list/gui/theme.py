@@ -258,6 +258,7 @@ PLATFORM_COLORS = {
     "youtube": "#FF0000",
     "kick": "#53FC18",
     "chaturbate": "#F47321",
+    "tiktok": "#69C9D0",
 }
 
 

@@ -24,6 +24,7 @@ PLATFORM_COLORS = {
     StreamPlatform.KICK: "#53FC18",
     StreamPlatform.YOUTUBE: "#FF0000",
     StreamPlatform.CHATURBATE: "#F47321",
+    StreamPlatform.TIKTOK: "#69C9D0",
 }
 
 # Platform icon text
@@ -32,6 +33,7 @@ PLATFORM_ICONS = {
     StreamPlatform.YOUTUBE: "Y",
     StreamPlatform.KICK: "K",
     StreamPlatform.CHATURBATE: "C",
+    StreamPlatform.TIKTOK: "Tk",
 }
 
 # UI style configurations

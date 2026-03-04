@@ -64,6 +64,7 @@ class StreamlinkSettings:
     youtube_launch_method: LaunchMethod = LaunchMethod.YT_DLP
     kick_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
     chaturbate_launch_method: LaunchMethod = LaunchMethod.YT_DLP
+    tiktok_launch_method: LaunchMethod = LaunchMethod.STREAMLINK
 
     # Pass Twitch OAuth token to streamlink for Turbo/subscriber ad-free viewing
     twitch_turbo: bool = True
@@ -93,7 +94,7 @@ class NotificationSettings:
     urgency: str = "normal"  # low, normal, critical
     timeout_seconds: int = 0  # 0 = system default
     platform_filter: list[str] = field(
-        default_factory=lambda: ["twitch", "youtube", "kick", "chaturbate"]
+        default_factory=lambda: ["twitch", "youtube", "kick", "chaturbate", "tiktok"]
     )
     quiet_hours_enabled: bool = False
     quiet_hours_start: str = "22:00"  # HH:MM 24h
@@ -141,6 +142,13 @@ class KickSettings:
 @dataclass
 class ChaturbateSettings:
     """Chaturbate settings."""
+
+    login_name: str = ""  # Username of logged-in account
+
+
+@dataclass
+class TikTokSettings:
+    """TikTok settings."""
 
     login_name: str = ""  # Username of logged-in account
 
@@ -339,6 +347,7 @@ class Settings:
     youtube: YouTubeSettings = field(default_factory=YouTubeSettings)
     kick: KickSettings = field(default_factory=KickSettings)
     chaturbate: ChaturbateSettings = field(default_factory=ChaturbateSettings)
+    tiktok: TikTokSettings = field(default_factory=TikTokSettings)
 
     # Feature settings
     streamlink: StreamlinkSettings = field(default_factory=StreamlinkSettings)
@@ -635,6 +644,10 @@ class Settings:
         if "chaturbate" in data:
             settings.chaturbate = cls._simple_dc_from_dict(ChaturbateSettings, data["chaturbate"])
 
+        # TikTok
+        if "tiktok" in data:
+            settings.tiktok = cls._simple_dc_from_dict(TikTokSettings, data["tiktok"])
+
         # Streamlink
         if "streamlink" in data:
             s = data["streamlink"]
@@ -649,6 +662,7 @@ class Settings:
                 youtube_launch_method=LaunchMethod(s.get("youtube_launch_method", "yt-dlp")),
                 kick_launch_method=LaunchMethod(s.get("kick_launch_method", "streamlink")),
                 chaturbate_launch_method=LaunchMethod(s.get("chaturbate_launch_method", "yt-dlp")),
+                tiktok_launch_method=LaunchMethod(s.get("tiktok_launch_method", "streamlink")),
                 twitch_turbo=s.get("twitch_turbo", False),
                 show_console=s.get("show_console", False),
                 auto_close_console=s.get("auto_close_console", True),
@@ -672,7 +686,7 @@ class Settings:
                     n.get("timeout_seconds"), 0, min_val=0, max_val=60
                 ),
                 platform_filter=n.get(
-                    "platform_filter", ["twitch", "youtube", "kick", "chaturbate"]
+                    "platform_filter", ["twitch", "youtube", "kick", "chaturbate", "tiktok"]
                 ),
                 quiet_hours_enabled=n.get("quiet_hours_enabled", False),
                 quiet_hours_start=n.get("quiet_hours_start", "22:00"),
@@ -748,12 +762,8 @@ class Settings:
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
-                show_sub_anniversary_banner=builtin_data.get(
-                    "show_sub_anniversary_banner", True
-                ),
-                dismissed_sub_anniversaries=builtin_data.get(
-                    "dismissed_sub_anniversaries", {}
-                ),
+                show_sub_anniversary_banner=builtin_data.get("show_sub_anniversary_banner", True),
+                dismissed_sub_anniversaries=builtin_data.get("dismissed_sub_anniversaries", {}),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 autocorrect_enabled=builtin_data.get("autocorrect_enabled", True),
                 user_card_hover=builtin_data.get("user_card_hover", True),

@@ -41,6 +41,7 @@ PLATFORM_COLORS = {
     StreamPlatform.YOUTUBE: QColor(THEME_PLATFORM_COLORS.get("youtube", "#ff0000")),
     StreamPlatform.KICK: QColor(THEME_PLATFORM_COLORS.get("kick", "#53fc18")),
     StreamPlatform.CHATURBATE: QColor(THEME_PLATFORM_COLORS.get("chaturbate", "#F47321")),
+    StreamPlatform.TIKTOK: QColor(THEME_PLATFORM_COLORS.get("tiktok", "#69C9D0")),
 }
 
 
@@ -801,11 +802,13 @@ class ChatWindow(QMainWindow):
 
         self._livestreams[channel_key] = livestream
 
-        # YouTube and Chaturbate use embedded web views for chat
+        # YouTube, Chaturbate, and TikTok use embedded web views for chat
         if livestream.channel.platform == StreamPlatform.YOUTUBE:
             widget = self._create_youtube_web_widget(channel_key, livestream)
         elif livestream.channel.platform == StreamPlatform.CHATURBATE:
             widget = self._create_chaturbate_web_widget(channel_key, livestream)
+        elif livestream.channel.platform == StreamPlatform.TIKTOK:
+            widget = self._create_tiktok_web_widget(channel_key, livestream)
         else:
             widget = self._create_native_chat_widget(channel_key, livestream)
 
@@ -835,13 +838,25 @@ class ChatWindow(QMainWindow):
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
         return widget
 
-    def _create_chaturbate_web_widget(
-        self, channel_key: str, livestream: Livestream
-    ) -> QWidget:
+    def _create_chaturbate_web_widget(self, channel_key: str, livestream: Livestream) -> QWidget:
         """Create a ChaturbateWebChatWidget for embedded Chaturbate chat."""
         from .chaturbate_web_chat import ChaturbateWebChatWidget
 
         widget = ChaturbateWebChatWidget(
+            channel_key=channel_key,
+            livestream=livestream,
+            settings=self.settings.chat.builtin,
+            parent=self._tab_widget,
+        )
+        widget.popout_requested.connect(self._on_popout_requested)
+        widget.settings_clicked.connect(self.chat_settings_requested.emit)
+        return widget
+
+    def _create_tiktok_web_widget(self, channel_key: str, livestream: Livestream) -> QWidget:
+        """Create a TikTokWebChatWidget for embedded TikTok LIVE chat."""
+        from .tiktok_web_chat import TikTokWebChatWidget
+
+        widget = TikTokWebChatWidget(
             channel_key=channel_key,
             livestream=livestream,
             settings=self.settings.chat.builtin,
@@ -1181,6 +1196,8 @@ class ChatWindow(QMainWindow):
                 auth = bool(self.settings.youtube.cookies)
             elif platform == StreamPlatform.CHATURBATE:
                 auth = bool(self.settings.chaturbate.login_name)
+            elif platform == StreamPlatform.TIKTOK:
+                auth = bool(self.settings.tiktok.login_name)
             else:
                 auth = bool(self.settings.twitch.access_token)
             widget.set_authenticated(auth)

@@ -25,6 +25,9 @@ from ..youtube_import import YouTubeImportDialog
 # Persistent Chaturbate login window — never destroyed (Wayland workaround).
 _chaturbate_login_window: _ChaturbateLoginWindow | None = None
 
+# Persistent TikTok login window — never destroyed (Wayland workaround).
+_tiktok_login_window: _TikTokLoginWindow | None = None
+
 if TYPE_CHECKING:
     from .dialog import PreferencesDialog
 
@@ -209,6 +212,90 @@ def _get_chaturbate_login_window() -> _ChaturbateLoginWindow:
     return _chaturbate_login_window
 
 
+class _TikTokLoginWindow(QWidget):
+    """Persistent top-level window for TikTok sign-in.
+
+    Uses the shared TikTok QWebEngineProfile. On login completion (or close),
+    navigates to about:blank and hides — never destroyed (Wayland workaround).
+    """
+
+    login_finished = Signal(bool)  # True if login completed
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Sign in to TikTok")
+        self.resize(500, 650)
+        self.setWindowFlag(Qt.WindowType.Dialog)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        from ...chat.tiktok_web_chat import _ensure_webengine, _get_shared_profile
+
+        self._web_view = None
+        if _ensure_webengine():
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+
+            profile = _get_shared_profile()
+            if profile is not None:
+                page = QWebEnginePage(profile, self)
+                self._web_view = QWebEngineView(self)
+                self._web_view.setPage(page)
+                self._web_view.urlChanged.connect(self._on_url_changed)
+                layout.addWidget(self._web_view)
+
+        self._active = False
+
+    def start_login(self, parent: QWidget | None = None) -> None:
+        """Load the TikTok login page and show the window."""
+        if self._web_view is None:
+            self.login_finished.emit(False)
+            return
+        self._active = True
+        self._web_view.setUrl(QUrl("https://www.tiktok.com/login"))
+        if parent:
+            parent_handle = parent.window().windowHandle()
+            if parent_handle:
+                self.winId()
+                self.windowHandle().setTransientParent(parent_handle)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _on_url_changed(self, url: QUrl) -> None:
+        """Detect login completion (navigated away from /login)."""
+        if not self._active:
+            return
+        path = url.path()
+        host = url.host()
+        if host and "tiktok.com" in host and "/login" not in path:
+            self._finish(True)
+
+    def _finish(self, success: bool) -> None:
+        if not self._active:
+            return
+        self._active = False
+        if self._web_view is not None:
+            self._web_view.setUrl(QUrl("about:blank"))
+        self.hide()
+        self.login_finished.emit(success)
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        event.ignore()
+        self._finish(False)
+
+
+def _get_tiktok_login_window() -> _TikTokLoginWindow:
+    """Get or create the persistent TikTok login window."""
+    global _tiktok_login_window
+    if _tiktok_login_window is None:
+        _tiktok_login_window = _TikTokLoginWindow()
+    return _tiktok_login_window
+
+
 class AccountsTab(QScrollArea):
     """Accounts settings tab."""
 
@@ -359,6 +446,45 @@ class AccountsTab(QScrollArea):
 
         layout.addWidget(cb_group)
 
+        # TikTok group
+        tk_group = QGroupBox("TikTok")
+        tk_layout = QVBoxLayout(tk_group)
+
+        self.tk_status = QLabel("Status: Not logged in")
+        self.tk_status.setStyleSheet("color: gray;")
+        tk_layout.addWidget(self.tk_status)
+
+        from ...chat.tiktok_web_chat import _ensure_webengine as _tk_ensure_webengine
+
+        self._tk_webengine_ok = _tk_ensure_webengine()
+
+        if not self._tk_webengine_ok:
+            tk_unavail = QLabel("TikTok sign-in unavailable (QWebEngine not installed)")
+            tk_unavail.setStyleSheet("color: orange;")
+            tk_layout.addWidget(tk_unavail)
+
+        tk_note = QLabel(
+            "<i>Login enables sending messages in TikTok LIVE chat. "
+            "Monitoring and chat reading work without login.</i>"
+        )
+        tk_note.setStyleSheet("color: gray;")
+        tk_note.setWordWrap(True)
+        tk_layout.addWidget(tk_note)
+
+        tk_buttons = QHBoxLayout()
+        self.tk_login_btn = QPushButton("Sign in")
+        self.tk_login_btn.clicked.connect(self._on_tk_login)
+        self.tk_login_btn.setEnabled(self._tk_webengine_ok)
+        tk_buttons.addWidget(self.tk_login_btn)
+        self.tk_logout_btn = QPushButton("Logout")
+        self.tk_logout_btn.setStyleSheet("color: red;")
+        self.tk_logout_btn.clicked.connect(self._on_tk_logout)
+        tk_buttons.addWidget(self.tk_logout_btn)
+        tk_buttons.addStretch()
+        tk_layout.addLayout(tk_buttons)
+
+        layout.addWidget(tk_group)
+
         layout.addStretch()
         self._update_account_buttons()
         self.setWidget(widget)
@@ -405,6 +531,9 @@ class AccountsTab(QScrollArea):
 
         # Chaturbate
         self._update_cb_status()
+
+        # TikTok
+        self._update_tk_status()
 
     def _update_cb_status(self):
         """Update Chaturbate login status display."""
@@ -674,4 +803,72 @@ class AccountsTab(QScrollArea):
         self.app.settings.chaturbate.login_name = ""
         self.app.save_settings()
         self._update_cb_status()
+        self._update_account_buttons()
+
+    # --- TikTok callbacks ---
+
+    def _update_tk_status(self):
+        """Update TikTok login status display."""
+        from ...chat.tiktok_web_chat import has_tiktok_login
+
+        is_logged_in = has_tiktok_login()
+
+        if is_logged_in:
+            login = self.app.settings.tiktok.login_name
+            if login:
+                self.tk_status.setText(f"Status: Logged in as {login}")
+            else:
+                self.tk_status.setText("Status: Logged in")
+            self.tk_status.setStyleSheet("color: green;")
+        else:
+            self.tk_status.setText("Status: Not logged in")
+            self.tk_status.setStyleSheet("color: gray;")
+
+        self.tk_login_btn.setVisible(not is_logged_in)
+        self.tk_logout_btn.setVisible(is_logged_in)
+
+    def _on_tk_login(self):
+        """Open persistent TikTok sign-in window."""
+        self.tk_login_btn.setEnabled(False)
+        win = _get_tiktok_login_window()
+        try:
+            win.login_finished.disconnect(self._on_tk_login_finished)
+        except RuntimeError:
+            pass
+        win.login_finished.connect(self._on_tk_login_finished)
+        win.start_login(parent=self)
+
+    def _on_tk_login_finished(self, success: bool) -> None:
+        """Handle TikTok login window result."""
+        self.tk_login_btn.setEnabled(True)
+        self.window().activateWindow()
+        self.window().raise_()
+        if success:
+            self._detect_tk_username()
+            self._update_tk_status()
+            self._update_account_buttons()
+            QMessageBox.information(
+                self,
+                "TikTok Login",
+                "Successfully signed in to TikTok.\n"
+                "TikTok LIVE chat tabs will now use your account.",
+            )
+
+    def _detect_tk_username(self) -> None:
+        """Mark TikTok as logged in after successful login."""
+        from ...chat.tiktok_web_chat import _get_all_cookies
+
+        cookies = _get_all_cookies()
+        if "sessionid" in cookies:
+            self.app.settings.tiktok.login_name = "(logged in)"
+            self.app.save_settings()
+
+    def _on_tk_logout(self):
+        """Clear TikTok cookies and reset login state."""
+        from ...chat.tiktok_web_chat import clear_tiktok_cookies
+
+        clear_tiktok_cookies()
+        self.app.settings.tiktok.login_name = ""
+        self.app.save_settings()
+        self._update_tk_status()
         self._update_account_buttons()

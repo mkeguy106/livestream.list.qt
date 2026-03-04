@@ -179,6 +179,18 @@ class PlaybackTab(QScrollArea):
         self.chaturbate_launch_combo.currentIndexChanged.connect(self._on_launch_method_changed)
         launch_layout.addRow("Chaturbate:", self.chaturbate_launch_combo)
 
+        # TikTok launch method
+        self.tiktok_launch_combo = QComboBox()
+        self.tiktok_launch_combo.addItem("Streamlink", "streamlink")
+        self.tiktok_launch_combo.addItem("yt-dlp (via player)", "yt-dlp")
+        current_tiktok = self.app.settings.streamlink.tiktok_launch_method.value
+        for i in range(self.tiktok_launch_combo.count()):
+            if self.tiktok_launch_combo.itemData(i) == current_tiktok:
+                self.tiktok_launch_combo.setCurrentIndex(i)
+                break
+        self.tiktok_launch_combo.currentIndexChanged.connect(self._on_launch_method_changed)
+        launch_layout.addRow("TikTok:", self.tiktok_launch_combo)
+
         layout.addWidget(launch_group)
 
         reset_btn = QPushButton("Reset to Defaults")
@@ -234,6 +246,9 @@ class PlaybackTab(QScrollArea):
         self.app.settings.streamlink.chaturbate_launch_method = LaunchMethod(
             self.chaturbate_launch_combo.currentData()
         )
+        self.app.settings.streamlink.tiktok_launch_method = LaunchMethod(
+            self.tiktok_launch_combo.currentData()
+        )
         self.app.save_settings()
 
     def reset_defaults(self) -> None:
@@ -265,6 +280,7 @@ class PlaybackTab(QScrollArea):
             (self.youtube_launch_combo, defaults.youtube_launch_method.value),
             (self.kick_launch_combo, defaults.kick_launch_method.value),
             (self.chaturbate_launch_combo, defaults.chaturbate_launch_method.value),
+            (self.tiktok_launch_combo, defaults.tiktok_launch_method.value),
         ):
             for i in range(combo.count()):
                 if combo.itemData(i) == value:

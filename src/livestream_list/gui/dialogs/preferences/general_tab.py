@@ -224,11 +224,15 @@ class GeneralTab(QScrollArea):
         self.notif_chaturbate_cb = QCheckBox("Chaturbate")
         self.notif_chaturbate_cb.setChecked("chaturbate" in pf)
         self.notif_chaturbate_cb.stateChanged.connect(self._on_notif_changed)
+        self.notif_tiktok_cb = QCheckBox("TikTok")
+        self.notif_tiktok_cb.setChecked("tiktok" in pf)
+        self.notif_tiktok_cb.stateChanged.connect(self._on_notif_changed)
         platform_row = QHBoxLayout()
         platform_row.addWidget(self.notif_twitch_cb)
         platform_row.addWidget(self.notif_youtube_cb)
         platform_row.addWidget(self.notif_kick_cb)
         platform_row.addWidget(self.notif_chaturbate_cb)
+        platform_row.addWidget(self.notif_tiktok_cb)
         platform_row.addStretch()
         notif_layout.addRow("Platforms:", platform_row)
 
@@ -395,6 +399,8 @@ class GeneralTab(QScrollArea):
             pf.append("kick")
         if self.notif_chaturbate_cb.isChecked():
             pf.append("chaturbate")
+        if self.notif_tiktok_cb.isChecked():
+            pf.append("tiktok")
         notif.platform_filter = pf
         # Quiet hours
         notif.quiet_hours_enabled = self.notif_quiet_cb.isChecked()
@@ -527,6 +533,7 @@ class GeneralTab(QScrollArea):
         self.notif_youtube_cb.setChecked("youtube" in notif_defaults.platform_filter)
         self.notif_kick_cb.setChecked("kick" in notif_defaults.platform_filter)
         self.notif_chaturbate_cb.setChecked("chaturbate" in notif_defaults.platform_filter)
+        self.notif_tiktok_cb.setChecked("tiktok" in notif_defaults.platform_filter)
         self.notif_quiet_cb.setChecked(notif_defaults.quiet_hours_enabled)
         from PySide6.QtCore import QTime
 
