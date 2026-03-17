@@ -306,17 +306,33 @@ class YouTubeWebChatWidget(QWidget):
             escaped = html.escape(title)
             html_title = _COMMAND_RE.sub(r"<b>\1</b>", escaped)
 
-            # Append viewer count and uptime
+            # Append viewer count, uptime, and category
             meta_parts: list[str] = []
+            category_html = ""
             if self.livestream and self.livestream.live:
                 if self.livestream.viewers:
                     meta_parts.append(f"\U0001f464 {self.livestream.viewers_str}")
                 uptime = self.livestream.uptime_str
                 if uptime:
                     meta_parts.append(f"\U0001f550 {uptime}")
-            if meta_parts:
+                if self.livestream.game:
+                    cat_url = self.livestream.category_url
+                    game_escaped = html.escape(self.livestream.game)
+                    if cat_url:
+                        category_html = (
+                            f' &nbsp;\u00b7&nbsp; \U0001f3ae '
+                            f'<a href="{cat_url}" style="font-size: 10px; '
+                            f'color: #6db3f2; text-decoration: none;">'
+                            f"{game_escaped}</a>"
+                        )
+                    else:
+                        meta_parts.append(f"\U0001f3ae {game_escaped}")
+            if meta_parts or category_html:
                 meta_html = " &nbsp;\u00b7&nbsp; ".join(meta_parts)
-                html_title += f'<br><span style="font-size: 10px; opacity: 0.7;">{meta_html}</span>'
+                html_title += (
+                    f'<br><span style="font-size: 10px; opacity: 0.7;">'
+                    f"{meta_html}</span>{category_html}"
+                )
 
             self._title_banner.setText(html_title)
             self._title_banner.setToolTip(title)

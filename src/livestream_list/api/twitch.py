@@ -333,6 +333,7 @@ class TwitchApiClient(BaseApiClient):
                     createdAt
                     game {
                         name
+                        slug
                     }
                 }
                 lastBroadcast {
@@ -377,6 +378,7 @@ class TwitchApiClient(BaseApiClient):
                 createdAt
                 game {
                     name
+                    slug
                 }
             }
             lastBroadcast {
@@ -481,11 +483,13 @@ class TwitchApiClient(BaseApiClient):
                     except ValueError:
                         pass
 
+                game_data = stream.get("game") or {}
                 return Livestream(
                     channel=channel,
                     live=True,
                     title=stream.get("title"),
-                    game=stream.get("game", {}).get("name") if stream.get("game") else None,
+                    game=game_data.get("name") if game_data else None,
+                    game_slug=game_data.get("slug") if game_data else None,
                     viewers=stream.get("viewersCount", 0),
                     start_time=start_time,
                 )
@@ -567,14 +571,14 @@ class TwitchApiClient(BaseApiClient):
                             except ValueError:
                                 pass
 
+                        game_data = stream.get("game") or {}
                         result.append(
                             Livestream(
                                 channel=channel,
                                 live=True,
                                 title=stream.get("title"),
-                                game=stream.get("game", {}).get("name")
-                                if stream.get("game")
-                                else None,
+                                game=game_data.get("name") if game_data else None,
+                                game_slug=game_data.get("slug") if game_data else None,
                                 viewers=stream.get("viewersCount", 0),
                                 start_time=start_time,
                             )

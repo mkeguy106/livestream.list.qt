@@ -167,9 +167,11 @@ class KickApiClient(BaseApiClient):
 
                 # Get category/game
                 game = None
+                game_slug = None
                 categories = livestream_data.get("categories", [])
                 if categories:
                     game = categories[0].get("name")
+                    game_slug = categories[0].get("slug")
 
                 # Handle thumbnail safely (can be None or a dict)
                 thumbnail = livestream_data.get("thumbnail")
@@ -186,6 +188,7 @@ class KickApiClient(BaseApiClient):
                     live=True,
                     title=livestream_data.get("session_title"),
                     game=game,
+                    game_slug=game_slug,
                     viewers=livestream_data.get("viewer_count", 0),
                     start_time=start_time,
                     thumbnail_url=thumbnail_url,
@@ -277,9 +280,11 @@ class KickApiClient(BaseApiClient):
                             pass
 
                     game = None
+                    game_slug = None
                     categories = stream_data.get("categories", [])
                     if categories:
                         game = categories[0].get("name")
+                        game_slug = categories[0].get("slug")
 
                     channel = Channel(
                         channel_id=channel_data.get("slug", ""),
@@ -297,6 +302,7 @@ class KickApiClient(BaseApiClient):
                             live=True,
                             title=stream_data.get("session_title"),
                             game=game,
+                            game_slug=game_slug,
                             viewers=stream_data.get("viewer_count", 0),
                             start_time=start_time,
                             thumbnail_url=thumbnail_url,

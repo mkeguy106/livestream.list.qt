@@ -85,6 +85,7 @@ class Livestream:
     live: bool = False
     title: str | None = None
     game: str | None = None
+    game_slug: str | None = None
     viewers: int = 0
     start_time: datetime | None = None
     last_live_time: datetime | None = None
@@ -220,6 +221,18 @@ class Livestream:
             return f"https://chaturbate.com/{self.channel.channel_id}"
         return ""
 
+    @property
+    def category_url(self) -> str:
+        """Get the URL for this stream's category/game page."""
+        if not self.game:
+            return ""
+        platform = self.channel.platform
+        if platform == StreamPlatform.TWITCH and self.game_slug:
+            return f"https://www.twitch.tv/directory/category/{self.game_slug}"
+        if platform == StreamPlatform.KICK and self.game_slug:
+            return f"https://kick.com/category/{self.game_slug}"
+        return ""
+
     def set_offline(self) -> None:
         """Mark the stream as offline."""
         self.live = False
@@ -236,6 +249,7 @@ class Livestream:
         self.live = other.live
         self.title = other.title
         self.game = other.game
+        self.game_slug = other.game_slug
         self.viewers = other.viewers
         self.start_time = other.start_time
         self.thumbnail_url = other.thumbnail_url

@@ -491,9 +491,17 @@ class StreamMonitor:
                 data = json.load(f)
 
             for ch_data in data:
+                try:
+                    platform = StreamPlatform(ch_data["platform"])
+                except ValueError:
+                    logger.warning(
+                        "Skipping channel with unknown platform: %s",
+                        ch_data.get("platform"),
+                    )
+                    continue
                 channel = Channel(
                     channel_id=ch_data["channel_id"],
-                    platform=StreamPlatform(ch_data["platform"]),
+                    platform=platform,
                     display_name=ch_data.get("display_name"),
                     imported_by=ch_data.get("imported_by"),
                     dont_notify=ch_data.get("dont_notify", False),

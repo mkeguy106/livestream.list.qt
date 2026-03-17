@@ -1,5 +1,6 @@
 """Single-channel chat widget with message list and input."""
 
+import html
 import logging
 import re
 import time
@@ -17,6 +18,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QShortcut,
+    QTextDocument,
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
@@ -63,7 +65,12 @@ ANIMATION_BUFFER_ROWS = 50
 
 
 class ClickableTitleLabel(QLabel):
-    """QLabel that supports clickable !command links."""
+    """QLabel that supports clickable links via linkActivated signal.
+
+    Qt's rich text engine sometimes fails to emit linkActivated for <a> tags
+    after <br> or inside certain HTML structures. This subclass uses anchorAt()
+    as a fallback to reliably detect link clicks.
+    """
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -72,6 +79,20 @@ class ClickableTitleLabel(QLabel):
             Qt.TextInteractionFlag.TextBrowserInteraction
             | Qt.TextInteractionFlag.LinksAccessibleByMouse
         )
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        """Detect link clicks using QTextDocument hit-testing."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            doc = QTextDocument()
+            doc.setHtml(self.text())
+            doc.setTextWidth(self.contentsRect().width())
+            # Adjust click position relative to content area
+            pos = event.position().toPoint() - self.contentsRect().topLeft()
+            anchor = doc.documentLayout().anchorAt(pos)
+            if anchor:
+                self.linkActivated.emit(anchor)
+                return
+        super().mouseReleaseEvent(event)
 
 
 class DismissibleBanner(QWidget):
@@ -1967,17 +1988,33 @@ class ChatWidget(QWidget, ChatSearchMixin):
         if title and self.settings.show_stream_title and not self._title_dismissed:
             # Convert !commands to clickable links
             html_title = self._format_title_with_commands(title)
-            # Append viewer count and uptime on a second line
+            # Append viewer count, uptime, and category on a second line
             meta_parts: list[str] = []
+            category_html = ""
             if self.livestream and self.livestream.live:
                 if self.livestream.viewers:
                     meta_parts.append(f"\U0001f464 {self.livestream.viewers_str}")
                 uptime = self.livestream.uptime_str
                 if uptime:
                     meta_parts.append(f"\U0001f550 {uptime}")
-            if meta_parts:
+                if self.livestream.game:
+                    cat_url = self.livestream.category_url
+                    game_escaped = html.escape(self.livestream.game)
+                    if cat_url:
+                        category_html = (
+                            f' &nbsp;\u00b7&nbsp; \U0001f3ae '
+                            f'<a href="{cat_url}" style="font-size: 10px; '
+                            f'color: #6db3f2; text-decoration: none;">'
+                            f"{game_escaped}</a>"
+                        )
+                    else:
+                        meta_parts.append(f"\U0001f3ae {game_escaped}")
+            if meta_parts or category_html:
                 meta_html = " &nbsp;\u00b7&nbsp; ".join(meta_parts)
-                html_title += f'<br><span style="font-size: 10px; opacity: 0.7;">{meta_html}</span>'
+                html_title += (
+                    f'<br><span style="font-size: 10px; opacity: 0.7;">'
+                    f"{meta_html}</span>{category_html}"
+                )
             self._title_banner.setText(html_title)
             self._title_banner.setToolTip(title)  # Full title on hover (plain text)
             self._title_banner.show()
@@ -2004,9 +2041,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Persist keyed by channel + renewsAt so it resets on next billing cycle
         info = self._sub_anniversary_info
         if info and info.get("renews_at"):
-            self.settings.dismissed_sub_anniversaries[self.channel_key] = (
-                info["renews_at"]
-            )
+            self.settings.dismissed_sub_anniversaries[self.channel_key] = info["renews_at"]
             self.settings_changed.emit()
 
     def set_sub_anniversary(self, sub_info: dict) -> None:
@@ -2025,9 +2060,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         # Check persistent dismissal (keyed by renewsAt so it resets each cycle)
         renews_at = sub_info.get("renews_at", "")
-        dismissed_renews = self.settings.dismissed_sub_anniversaries.get(
-            self.channel_key
-        )
+        dismissed_renews = self.settings.dismissed_sub_anniversaries.get(self.channel_key)
         if dismissed_renews == renews_at:
             self._sub_anniversary_dismissed = True
             self._sub_anniversary_banner.hide()
@@ -2046,18 +2079,13 @@ class ChatWidget(QWidget, ChatSearchMixin):
             f'<a href="{url}" style="color: #bf94ff; text-decoration: underline;">'
             f"Share on Twitch \u2197</a>"
         )
-        text = (
-            f"\u2b50 It's your {months} {month_word} sub anniversary!"
-            f" &nbsp;\u2014&nbsp; {link}"
-        )
+        text = f"\u2b50 It's your {months} {month_word} sub anniversary! &nbsp;\u2014&nbsp; {link}"
 
         self._sub_anniversary_label.setText(text)
         self._sub_anniversary_banner.show()
 
     def _format_title_with_commands(self, title: str) -> str:
         """Convert !command patterns in title to clickable links."""
-        import html
-
         # Escape HTML entities first
         escaped = html.escape(title)
         # Replace !command patterns with links
@@ -2068,13 +2096,18 @@ class ChatWidget(QWidget, ChatSearchMixin):
         return html_title
 
     def _on_title_link_clicked(self, url: str) -> None:
-        """Handle clicks on !command links in the title."""
+        """Handle clicks on links in the title banner."""
+        logger.debug("Title link clicked: %s", url)
         if url.startswith("cmd:"):
             command = url[4:]  # Remove "cmd:" prefix
             # Normalize Unicode fancy text (italic/bold/script) to plain ASCII
             command = unicodedata.normalize("NFKC", command)
             self._input.setText(command)
             self._input.setFocus()
+        elif url.startswith("http"):
+            import threading
+
+            threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
 
     def update_livestream(self, livestream: Livestream) -> None:
         """Update the livestream data and refresh the title."""

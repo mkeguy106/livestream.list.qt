@@ -416,9 +416,7 @@ class ChaturbateWebChatWidget(QWidget):
             hide_script = QWebEngineScript()
             hide_script.setName("chaturbate-pre-isolate")
             hide_script.setWorldId(0)
-            hide_script.setInjectionPoint(
-                QWebEngineScript.InjectionPoint.DocumentCreation
-            )
+            hide_script.setInjectionPoint(QWebEngineScript.InjectionPoint.DocumentCreation)
             hide_script.setSourceCode(
                 "if(location.hostname&&location.hostname.indexOf('chaturbate.com')>=0){"
                 "var c=document.createElement('div');c.id='llqt-cover';"
@@ -530,9 +528,7 @@ class ChaturbateWebChatWidget(QWidget):
             render_widget.installEventFilter(self)
         # Start isolation: dismiss age gate first
         self._isolation_attempts = 0
-        self._web_view.page().runJavaScript(
-            _DISMISS_AGE_GATE_JS, 0, self._on_age_gate_result
-        )
+        self._web_view.page().runJavaScript(_DISMISS_AGE_GATE_JS, 0, self._on_age_gate_result)
 
     def _on_age_gate_result(self, result) -> None:
         """Handle age gate dismissal, then isolate chat."""
@@ -551,9 +547,7 @@ class ChaturbateWebChatWidget(QWidget):
         """Inject JS to find and isolate the chat panel."""
         if not self._web_view:
             return
-        self._web_view.page().runJavaScript(
-            _ISOLATE_CHAT_JS, 0, self._on_isolation_result
-        )
+        self._web_view.page().runJavaScript(_ISOLATE_CHAT_JS, 0, self._on_isolation_result)
 
     def _on_isolation_result(self, result) -> None:
         """Handle chat isolation result."""
@@ -592,8 +586,7 @@ class ChaturbateWebChatWidget(QWidget):
             candidates = data.get("candidates", [])
             self._isolation_attempts += 1
             logger.debug(
-                f"Chat not found (attempt {self._isolation_attempts}), "
-                f"candidates: {candidates}"
+                f"Chat not found (attempt {self._isolation_attempts}), candidates: {candidates}"
             )
             if self._isolation_attempts < 5:
                 QTimer.singleShot(2000, self._try_isolate_chat)
@@ -606,11 +599,11 @@ class ChaturbateWebChatWidget(QWidget):
                 if self._web_view:
                     self._web_view.page().setHtml(
                         '<html><body style="background:#1a1a2e;color:#888;'
-                        'display:flex;align-items:center;justify-content:center;'
-                        'height:100vh;margin:0;font-family:sans-serif;'
+                        "display:flex;align-items:center;justify-content:center;"
+                        "height:100vh;margin:0;font-family:sans-serif;"
                         'font-size:13px;text-align:center">'
-                        'Chat not available<br>(room may be offline)'
-                        '</body></html>'
+                        "Chat not available<br>(room may be offline)"
+                        "</body></html>"
                     )
                 self._remove_loading_overlay()
 
@@ -631,16 +624,30 @@ class ChaturbateWebChatWidget(QWidget):
             html_title = _COMMAND_RE.sub(r"<b>\1</b>", escaped)
 
             meta_parts: list[str] = []
+            category_html = ""
             if self.livestream and self.livestream.live:
                 if self.livestream.viewers:
                     meta_parts.append(f"\U0001f464 {self.livestream.viewers_str}")
                 uptime = self.livestream.uptime_str
                 if uptime:
                     meta_parts.append(f"\U0001f550 {uptime}")
-            if meta_parts:
+                if self.livestream.game:
+                    cat_url = self.livestream.category_url
+                    game_escaped = html.escape(self.livestream.game)
+                    if cat_url:
+                        category_html = (
+                            f' &nbsp;\u00b7&nbsp; \U0001f3ae '
+                            f'<a href="{cat_url}" style="font-size: 10px; '
+                            f'color: #6db3f2; text-decoration: none;">'
+                            f"{game_escaped}</a>"
+                        )
+                    else:
+                        meta_parts.append(f"\U0001f3ae {game_escaped}")
+            if meta_parts or category_html:
                 meta_html = " &nbsp;\u00b7&nbsp; ".join(meta_parts)
                 html_title += (
-                    f'<br><span style="font-size: 10px; opacity: 0.7;">{meta_html}</span>'
+                    f'<br><span style="font-size: 10px; opacity: 0.7;">'
+                    f"{meta_html}</span>{category_html}"
                 )
 
             self._title_banner.setText(html_title)
