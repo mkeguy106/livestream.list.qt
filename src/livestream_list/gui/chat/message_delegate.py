@@ -604,19 +604,21 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 has_content = False
 
-        # Reply context
+        # Reply context (word-wrapped)
         reply_rect = QRect()
         if has_content and message.reply_parent_display_name:
             reply_text = message.reply_parent_text
-            if len(reply_text) > 50:
-                reply_text = reply_text[:50] + "\u2026"
             reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
-            reply_width = fb.reply_fm.horizontalAdvance(reply_str)
-            remaining = available_width - (x - rect_x)
-            reply_rect = QRect(
-                int(x), int(y), min(int(reply_width), int(remaining)), fb.reply_fm.height()
+            remaining = int(available_width - (x - rect_x))
+            # Use boundingRect with WordWrap for accurate wrapped height
+            bound = fb.reply_fm.boundingRect(
+                QRect(0, 0, remaining, 10000),
+                Qt.TextFlag.TextWordWrap,
+                reply_str,
             )
-            y += fb.reply_fm.height() + 2
+            reply_height = bound.height()
+            reply_rect = QRect(int(x), int(y), remaining, reply_height)
+            y += reply_height + 2
             x = rect_x
 
         # Content line starts here
@@ -772,23 +774,13 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 painter.restore()
                 return
 
-        # Reply context (shown above the message on its own line)
+        # Reply context (word-wrapped, shown above the message)
         if message.reply_parent_display_name and not layout.reply_rect.isEmpty():
             painter.setFont(fb.reply)
             painter.setPen(highlight_color if is_selected else self._text_muted_color)
             reply_text = message.reply_parent_text
-            if len(reply_text) > 50:
-                reply_text = reply_text[:50] + "\u2026"
             reply_str = f"Replying to @{message.reply_parent_display_name}: {reply_text}"
-            remaining = layout.available_width - (layout.reply_rect.x() - layout.rect_x)
-            painter.drawText(
-                layout.reply_rect.x(),
-                layout.reply_rect.y(),
-                remaining,
-                layout.line_height,
-                ALIGN_LEFT_VCENTER,
-                reply_str,
-            )
+            painter.drawText(layout.reply_rect, ALIGN_WRAP, reply_str)
             painter.setFont(fb.main)
 
         # Badges (draw at layout-computed positions)
@@ -1316,10 +1308,19 @@ class ChatMessageDelegate(QStyledItemDelegate):
                     message.text, first_line_width, fm, wrap_width=available_width
                 )
 
-        # Reply context needs an extra line
+        # Reply context (word-wrapped height)
         extra_reply_height = 0
         if message.reply_parent_display_name:
-            extra_reply_height = fb.reply_fm.height() + 2
+            reply_str = (
+                f"Replying to @{message.reply_parent_display_name}: "
+                f"{message.reply_parent_text}"
+            )
+            bound = fb.reply_fm.boundingRect(
+                QRect(0, 0, int(available_width), 10000),
+                Qt.TextFlag.TextWordWrap,
+                reply_str,
+            )
+            extra_reply_height = bound.height() + 2
 
         # System messages need extra lines for system_text
         # System text is drawn after timestamp only (before badges/username), so use ts_width_only

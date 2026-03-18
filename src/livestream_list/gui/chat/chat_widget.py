@@ -2668,9 +2668,16 @@ class ChatWidget(QWidget, ChatSearchMixin):
                             return True
                         reply_rect = self._delegate._get_reply_context_rect(option, message)
                         if reply_rect.isValid() and reply_rect.contains(event.pos()):
-                            # Open reply thread rooted at the parent message
-                            root_id = message.reply_parent_msg_id or message.id
-                            self._show_reply_thread(root_id)
+                            # Open conversation between the replier and the
+                            # person being replied to (shows all @mention
+                            # exchanges, not just the strict reply chain)
+                            replier = message.user.display_name
+                            replied_to = message.reply_parent_display_name
+                            if replied_to and replier.lower() != replied_to.lower():
+                                self._show_conversation(replier, replied_to)
+                            else:
+                                root_id = message.reply_parent_msg_id or message.id
+                                self._show_reply_thread(root_id)
                             return True
 
         # Cursor changes for clickable elements (URLs, usernames, @mentions, reply context)
