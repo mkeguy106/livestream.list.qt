@@ -1309,14 +1309,16 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 )
 
         # Reply context (word-wrapped height)
+        # Use width after timestamp offset, matching the paint layout
         extra_reply_height = 0
         if message.reply_parent_display_name:
             reply_str = (
                 f"Replying to @{message.reply_parent_display_name}: "
                 f"{message.reply_parent_text}"
             )
+            reply_available = int(available_width - ts_width_only)
             bound = fb.reply_fm.boundingRect(
-                QRect(0, 0, int(available_width), 10000),
+                QRect(0, 0, reply_available, 10000),
                 Qt.TextFlag.TextWordWrap,
                 reply_str,
             )

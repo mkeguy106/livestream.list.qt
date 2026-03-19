@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -1136,6 +1137,46 @@ class MainWindow(QMainWindow):
         """Handle opening in browser."""
         self._chat_launcher.open_channel(channel_id, platform)
 
+    def _show_stream_context_menu(self, pos, livestream: Livestream) -> None:
+        """Show right-click context menu for a stream."""
+        menu = QMenu(self)
+        channel = livestream.channel
+
+        is_playing = (
+            self._stream_model
+            and channel.unique_key in self._stream_model._playing_keys
+        )
+        if is_playing:
+            stop_action = menu.addAction("\u25a0 Close Channel")
+            stop_action.triggered.connect(
+                lambda: self._on_stop_stream(channel.unique_key)
+            )
+        else:
+            play_action = menu.addAction("\u25b6 Play Channel")
+            play_action.triggered.connect(lambda: self._on_play_stream(livestream))
+
+        chat_action = menu.addAction("\U0001f4ac Open Chat")
+        chat_action.triggered.connect(
+            lambda: self._on_open_chat(
+                channel.channel_id,
+                channel.platform.value,
+                livestream.video_id or "",
+            )
+        )
+
+        browser_action = menu.addAction("\U0001f310 Open in Browser")
+        browser_action.triggered.connect(
+            lambda: self._on_open_browser(channel.channel_id, channel.platform.value)
+        )
+
+        menu.addSeparator()
+
+        fav_label = "\u2605 Unfavorite" if channel.favorite else "\u2606 Favorite"
+        fav_action = menu.addAction(fav_label)
+        fav_action.triggered.connect(lambda: self._on_toggle_favorite(channel.unique_key))
+
+        menu.exec(pos)
+
     def _toggle_selection_mode(self):
         """Toggle selection mode."""
         if self._stream_model:
@@ -1470,6 +1511,18 @@ class MainWindow(QMainWindow):
                 if self._stream_model:
                     self._stream_model.layoutChanged.emit()
                 return True
+
+        # Right-click context menu
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and event.button() == Qt.MouseButton.RightButton
+        ):
+            index = self.stream_list.indexAt(event.pos())
+            if index.isValid():
+                livestream = index.data(StreamRole)
+                if livestream:
+                    self._show_stream_context_menu(event.globalPosition().toPoint(), livestream)
+                    return True
 
         # Selection mode: shift+click for range, track anchor on normal click
         if (
