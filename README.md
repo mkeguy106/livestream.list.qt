@@ -14,14 +14,32 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 ---
 
+**Stream list with live status, viewers, and duration across all platforms:**
+
 ![Main Window - Dark Theme](docs/screenshots/main-window-dark.png)
 ![Main Window - Light Theme](docs/screenshots/main-window-light.png)
+
+**Compact mode for a minimal, dense layout:**
+
 ![Compact Mode](docs/screenshots/compact-mode.png)
+
+**Built-in chat with emotes, badges, replies, and sub notifications:**
+
+![Chat Window](docs/screenshots/chat-animated.gif)
+
+**Launch streams in mpv with streamlink integration:**
+
+![mpv Playback](docs/screenshots/mpv-playback.png)
 
 <details>
 <summary>More screenshots</summary>
 
+**Chat (static):**
+
 ![Chat Window](docs/screenshots/chat-window.png)
+
+**Preferences — General, Chat, and Appearance tabs:**
+
 ![Preferences - General](docs/screenshots/preferences-general.png)
 ![Preferences - Chat](docs/screenshots/preferences-chat.png)
 ![Preferences - Appearance](docs/screenshots/preferences-appearance.png)

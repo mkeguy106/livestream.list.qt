@@ -28,7 +28,9 @@ jobs:
           sudo apt-get install -y libhunspell-dev libegl1
 
       - name: Install Python dependencies
-        run: pip install -e .
+        run: |
+          pip install -e .
+          pip install Pillow
 
       - name: Capture screenshots
         env:
