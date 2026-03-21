@@ -306,15 +306,78 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 
 ## CI/CD
 
-The release workflow (`.github/workflows/release.yml`) runs 3 jobs on tag push (`v*`):
+The release workflow (`.github/workflows/release.yml`) runs 5 jobs on tag push (`v*`):
 
-1. **build-flatpak** — Self-hosted Linux runner (`docker01.dd.local`), builds Flatpak in Docker
-2. **build-windows** — GitHub-hosted `windows-latest`, builds PyInstaller exe + Inno Setup installer
-3. **release** — Collects both artifacts and creates the GitHub Release
+1. **create-release** — GitHub-hosted `ubuntu-latest`, creates draft release
+2. **build-flatpak** — Self-hosted Linux runner (`docker01.dd.local`), builds Flatpak in Docker
+3. **build-windows** — GitHub-hosted `windows-latest`, builds PyInstaller exe + Inno Setup installer
+4. **update-screenshots** — Calls the reusable `screenshots.yml` workflow (see below)
+5. **publish-release** — Undrafts the release after both builds succeed
 
 **Flatpak runner location**: `docker01.dd.local:/share/bsv/docker-compose/github-runner/`
 
 **Windows build files**: `livestream-list-qt.spec` (PyInstaller), `installer/livestream-list-qt.iss` (Inno Setup)
+
+### Automated Screenshots (`.github/workflows/screenshots.yml`)
+
+A separate reusable workflow that auto-generates README screenshots. Runs on `ubuntu-latest` with `QT_QPA_PLATFORM=offscreen`. Triggered two ways:
+- **Automatically** on every release (called from `release.yml`)
+- **Manually** from the GitHub Actions tab (`workflow_dispatch`)
+
+```bash
+# Trigger manually
+gh workflow run screenshots.yml
+
+# Watch the run
+gh run watch <run-id> --exit-status
+```
+
+**What it captures** (`scripts/capture_screenshots.py`):
+
+| Screenshot | Description |
+|------------|-------------|
+| `main-window-dark.png` | Main window, dark theme, 540x700 |
+| `main-window-light.png` | Main window, light theme |
+| `compact-mode.png` | Compact UIStyle.COMPACT_2, 360x700 |
+| `chat-window.png` | Chat with real emotes (static), 450x600 |
+| `chat-animated.gif` | Chat with animated emotes cycling |
+| `mpv-playback.gif` | Live stream capture via streamlink+ffmpeg |
+| `preferences-*.png` | General, Chat, Appearance tabs |
+
+**How it works**:
+1. Creates a `MockApplication` (QObject with Qt Signals) that proxies `QApplication` methods — avoids full `Application.initialize()` (no network, no timers, no ChatManager)
+2. Injects sample `Channel`/`Livestream` objects directly into `StreamMonitor._channels`/`_livestreams`
+3. Creates `MainWindow` with `_initial_check_complete = True` and calls `refresh_stream_list()`
+4. Downloads real emotes from 7TV/Twitch CDN, extracts animated frames via `QImageReader`, populates `EmoteCache._memory`/`_animated`/`_frame_delays`
+5. Creates `ChatWidget` with `set_connected()`, injects `ChatMessage` objects with `emote_positions` pointing to pre-loaded `ImageSet`/`ImageRef` objects
+6. Captures animated GIF by advancing `delegate.set_animation_frame(elapsed_ms)` and grabbing frames via `QWidget.grab()` → PIL
+7. mpv capture: finds a live streamer via Twitch GraphQL, runs `streamlink | ffmpeg` to extract frames, composites mpv OSD overlay via PIL
+
+**Testing locally**:
+```bash
+# With real display (dev machine) — includes mpv live capture
+python scripts/capture_screenshots.py
+
+# Simulating CI (offscreen platform) — mpv capture skipped if no streamlink/ffmpeg
+QT_QPA_PLATFORM=offscreen python scripts/capture_screenshots.py
+```
+
+**Dependencies**: `pip install -e .` + `Pillow` (for GIF creation). CI installs Pillow separately. Local dev needs `streamlink` and `ffmpeg` for the mpv capture.
+
+### Screenshot Pitfalls
+
+| Issue | Solution |
+|-------|----------|
+| `MockApplication` missing attribute | `MainWindow` uses `self.app` as both `Application` and `QApplication` — proxy any missing QApplication methods (e.g., `styleSheet()`, `setStyleSheet()`) to `QApplication.instance()`. Add missing attributes like `tray_icon = None`. |
+| Theme doesn't switch (dark stays dark) | Clear `_stylesheet_cache` before switching. Also clear the app stylesheet (`qt_app.setStyleSheet("")`) before calling `window._apply_theme()` — it skips if the stylesheet matches. |
+| Chat shows "Loading channels..." | The `QStackedWidget` defaults to index 0 (loading). Set `window._initial_check_complete = True` and call `refresh_stream_list()` to switch to the stream list. |
+| Chat shows "Connecting to chat..." | `ChatWidget` hides `_list_view` and shows `_connecting_label` by default. Call `chat_widget.set_connected()` to swap them. |
+| Emotes render as text instead of images | Need `ImageSet` → `ImageRef` → `EmoteCache` pipeline. Put pixmaps in `cache._memory[key]`, create `ImageRef(store=cache)` bound to that key, wrap in `ImageSet`, assign to `ChatEmote.image_set`. Set `delegate.set_image_store(cache)`. |
+| Animated emotes don't cycle in GIF | Must call `delegate.set_animation_frame(elapsed_ms)` with advancing values and `viewport().update()` + `processEvents()` between frame captures. Frames stored in `cache._animated[key]` with delays in `cache._frame_delays[key]`. |
+| `libgl1-mesa-glx` not available on Ubuntu 24.04 | Replaced by `libgl1`. |
+| Qt xcb plugin fails in CI | Use `QT_QPA_PLATFORM=offscreen` — no X11/Xvfb needed. |
+| mpv capture fails in CI | Requires `streamlink` + `ffmpeg` + network access + live stream. Script skips gracefully if unavailable. |
+| Emote CDN URLs change | 7TV emote IDs are stable. If URLs break, use the 7TV GraphQL API to search: `query SearchEmotes($query: String!) { emotes(query: $query, limit: 1) { items { id host { url files { name format } } } } }` |
 
 ### Troubleshooting Release Builds
 
