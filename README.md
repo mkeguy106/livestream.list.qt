@@ -29,7 +29,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 **Launch streams in mpv with streamlink integration:**
 
-![mpv Playback](docs/screenshots/mpv-playback.png)
+![mpv Playback](docs/screenshots/mpv-playback.gif)
 
 <details>
 <summary>More screenshots</summary>

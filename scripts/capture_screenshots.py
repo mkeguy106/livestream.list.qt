@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from livestream_list.chat.emotes.cache import EmoteCache
@@ -110,6 +110,75 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
                 last_live_time=now - timedelta(days=1, hours=8),
             ),
         ),
+        # ── Additional channels to fill out the list ──
+        (
+            Channel("tarik", StreamPlatform.TWITCH, "tarik"),
+            Livestream(
+                channel=None, live=True,
+                title="VALORANT ranked with the boys",
+                game="VALORANT", viewers=31_420,
+                start_time=now - timedelta(hours=4, minutes=5),
+            ),
+        ),
+        (
+            Channel("hasanabi", StreamPlatform.TWITCH, "HasanAbi"),
+            Livestream(
+                channel=None, live=True,
+                title="NEWS & POLITICS | reacting to everything",
+                game="Just Chatting", viewers=24_870,
+                start_time=now - timedelta(hours=6, minutes=40),
+            ),
+        ),
+        (
+            Channel("kaicenat", StreamPlatform.TWITCH, "KaiCenat"),
+            Livestream(channel=None, live=False, last_live_time=now - timedelta(hours=2)),
+        ),
+        (
+            Channel("ironmouse", StreamPlatform.TWITCH, "ironmouse", favorite=True),
+            Livestream(
+                channel=None, live=True,
+                title="SINGING STREAM!! come hang out",
+                game="Music", viewers=12_340,
+                start_time=now - timedelta(hours=2, minutes=50),
+            ),
+        ),
+        (
+            Channel("amouranth", StreamPlatform.KICK, "Amouranth"),
+            Livestream(
+                channel=None, live=True,
+                title="IRL stream from the ranch",
+                game="IRL", viewers=9_876,
+                start_time=now - timedelta(hours=1, minutes=20),
+            ),
+        ),
+        (
+            Channel("trainwreckstv", StreamPlatform.KICK, "Trainwreckstv"),
+            Livestream(channel=None, live=False, last_live_time=now - timedelta(days=2)),
+        ),
+        (
+            Channel("UCHcMjkuAVZvHoc6Wmj-VCuA", StreamPlatform.YOUTUBE, "Valkyrae"),
+            Livestream(
+                channel=None, live=True,
+                title="Late night gaming with friends!!",
+                game="Fortnite", viewers=15_600,
+                start_time=now - timedelta(hours=3, minutes=10),
+            ),
+        ),
+        (
+            Channel("UCq6VFHwMzcMXbuKyG7SQYIg", StreamPlatform.YOUTUBE, "Sykkuno"),
+            Livestream(channel=None, live=False, last_live_time=now - timedelta(hours=18)),
+        ),
+        (
+            Channel("thirdroom", StreamPlatform.CHATURBATE, "thirdroom"),
+            Livestream(
+                channel=None, live=True, title="", viewers=1_205,
+                start_time=now - timedelta(hours=2, minutes=30),
+            ),
+        ),
+        (
+            Channel("sodapoppin", StreamPlatform.TWITCH, "sodapoppin"),
+            Livestream(channel=None, live=False, last_live_time=now - timedelta(days=1)),
+        ),
     ]
     for channel, livestream in data:
         livestream.channel = channel
@@ -118,90 +187,105 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
 
 # ── Emote helpers ───────────────────────────────────────────────────
 
-# Emote definitions: (name, background_color, text_color, emoji_char, animated)
-EMOTE_DEFS = {
-    "LUL": ("#FFD700", "#000", "\U0001f602", False),
-    "Kappa": ("#6441A5", "#FFF", "\U0001f60f", False),
-    "PogChamp": ("#FF4500", "#FFF", "\U0001f632", False),
-    "catJAM": ("#FF69B4", "#FFF", "\U0001f431", True),   # Animated
-    "KEKW": ("#32CD32", "#000", "\U0001f923", False),
-    "monkaS": ("#8B4513", "#FFF", "\U0001f630", False),
-    "peepoHappy": ("#90EE90", "#000", "\U0001f60a", True),  # Animated
-    "OMEGALUL": ("#FF6347", "#FFF", "\U0001f606", True),  # Animated
-    "Sadge": ("#4682B4", "#FFF", "\U0001f622", False),
-    "EZ": ("#00CED1", "#000", "\U0001f60e", False),
+# Real emote URLs from 7TV and Twitch CDN
+# Format: name -> (provider, url)
+EMOTE_URLS = {
+    # 7TV emotes (static)
+    "KEKW": ("7tv", "https://cdn.7tv.app/emote/01KKS9SWWTC1YVVCWVZ7RJ7B7M/2x.webp"),
+    "monkaS": ("7tv", "https://cdn.7tv.app/emote/01KKTY56JYKWMRAHYEN8ZAXHC2/2x.webp"),
+    "OMEGALUL": ("7tv", "https://cdn.7tv.app/emote/01KM7YKT43NBMNTAT2D2QBGGMN/2x.webp"),
+    "Sadge": ("7tv", "https://cdn.7tv.app/emote/01KKNEHEJDY4QXKE0F8PSEGZ7X/2x.webp"),
+    "EZ": ("7tv", "https://cdn.7tv.app/emote/01KM6S0VF4JHTCDVG56VJZ51K8/2x.webp"),
+    "PogChamp": ("7tv", "https://cdn.7tv.app/emote/01KKZ80Y19BF5EHNASGZ0A584Z/2x.webp"),
+    # 7TV emotes (animated)
+    "catJAM": ("7tv", "https://cdn.7tv.app/emote/01KJY840CHFM7VRBZTX8FTQHTB/2x.webp"),
+    "peepoHappy": ("7tv", "https://cdn.7tv.app/emote/01KE35Y6NCX9WJTJNEJDKG44YJ/2x.webp"),
+    "Clap": ("7tv", "https://cdn.7tv.app/emote/01KKEGSN981ABHPCYABEC05SBH/2x.webp"),
+    "pepeDS": ("7tv", "https://cdn.7tv.app/emote/01F7A76NER000AYA348VR68XJT/2x.webp"),
+    # Twitch global emotes
+    "Kappa": ("twitch", "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0"),
+    "LUL": ("twitch", "https://static-cdn.jtvnw.net/emoticons/v2/425618/default/dark/2.0"),
+    "4Head": ("twitch", "https://static-cdn.jtvnw.net/emoticons/v2/354/default/dark/2.0"),
 }
 
-ANIMATED_FRAME_COUNT = 8
-ANIMATED_FRAME_DELAY_MS = 100
+# Track which emotes are animated (populated during download)
+_animated_emotes: set[str] = set()
 
 
-def create_emote_pixmap(
-    bg_color: str, text_color: str, emoji: str, hue_shift: int = 0,
-) -> QPixmap:
-    """Create a small emote-like pixmap with an emoji character."""
-    size = 56  # 2x for HiDPI scaling
-    pixmap = QPixmap(size, size)
-    pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
+def _download_emote(name: str, url: str) -> bytes | None:
+    """Download an emote image from CDN."""
+    import urllib.request
 
-    bg = QColor(bg_color)
-    if hue_shift:
-        h, s, v, a = bg.getHsv()
-        bg.setHsv((h + hue_shift) % 360, s, v, a)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    # Draw rounded background
-    painter.setBrush(bg)
-    painter.setPen(QColor(0, 0, 0, 0))
-    painter.drawRoundedRect(2, 2, size - 4, size - 4, 8, 8)
-
-    # Draw emoji
-    font = QFont()
-    font.setPixelSize(32)
-    painter.setFont(font)
-    painter.setPen(QColor(text_color))
-    painter.drawText(pixmap.rect(), 0x0084, emoji)  # AlignCenter
-
-    painter.end()
-    return pixmap
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        return resp.read()
+    except Exception as e:
+        print(f"  Warning: failed to download {name}: {e}")
+        return None
 
 
 def setup_emote_cache() -> EmoteCache:
-    """Create an EmoteCache pre-populated with static and animated emotes."""
+    """Create an EmoteCache pre-populated with real emotes from CDN."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+    from PySide6.QtGui import QImageReader
+
     cache = EmoteCache()
 
-    for name, (bg, fg, emoji, animated) in EMOTE_DEFS.items():
-        key = f"emote:7tv:{name}"
-        if animated:
-            # Create multiple frames with hue rotation for animation effect
+    print("  Downloading emotes from CDN...")
+    for name, (provider, url) in EMOTE_URLS.items():
+        data = _download_emote(name, url)
+        if not data:
+            continue
+
+        key = f"emote:{provider}:{name}"
+        qdata = QByteArray(data)
+        buf = QBuffer(qdata)
+        buf.open(QIODevice.OpenModeFlag.ReadOnly)
+        reader = QImageReader(buf)
+
+        if reader.supportsAnimation() and reader.imageCount() > 1:
+            # Animated emote — extract all frames
+            _animated_emotes.add(name)
             frames = []
             delays = []
-            for i in range(ANIMATED_FRAME_COUNT):
-                hue_shift = int(360 * i / ANIMATED_FRAME_COUNT)
-                frame = create_emote_pixmap(bg, fg, emoji, hue_shift=hue_shift)
-                frames.append(frame)
-                delays.append(ANIMATED_FRAME_DELAY_MS)
-            cache._animated[key] = frames
-            cache._frame_delays[key] = delays
-            # Also put the first frame as static fallback
-            cache._memory[key] = frames[0]
+            while reader.canRead():
+                delay = max(reader.nextImageDelay(), 20)
+                qimage = reader.read()
+                if qimage.isNull():
+                    break
+                frames.append(QPixmap.fromImage(qimage))
+                delays.append(delay)
+            if frames:
+                cache._animated[key] = frames
+                cache._frame_delays[key] = delays
+                cache._memory[key] = frames[0]  # Static fallback
+                print(f"    {name}: {len(frames)} frames (animated)")
         else:
-            pixmap = create_emote_pixmap(bg, fg, emoji)
-            cache._memory[key] = pixmap
+            # Static emote
+            buf.seek(0)
+            reader2 = QImageReader(buf)
+            qimage = reader2.read()
+            if not qimage.isNull():
+                cache._memory[key] = QPixmap.fromImage(qimage)
+                print(f"    {name}: static")
+            else:
+                print(f"    {name}: decode failed")
+
+        buf.close()
 
     return cache
 
 
 def make_emote(name: str, cache: EmoteCache) -> ChatEmote:
     """Create a ChatEmote with a pre-loaded ImageSet."""
-    key = f"emote:7tv:{name}"
-    animated = EMOTE_DEFS.get(name, ("", "", "", False))[3]
+    provider = EMOTE_URLS.get(name, ("7tv", ""))[0]
+    key = f"emote:{provider}:{name}"
+    animated = name in _animated_emotes
     image_ref = ImageRef(scale=2, key=key, url="", store=cache, animated=animated)
     image_set = ImageSet({2: image_ref})
     return ChatEmote(
-        id=name, name=name, url_template="", provider="7tv",
+        id=name, name=name, url_template="", provider=provider,
         image_set=image_set,
     )
 
@@ -302,7 +386,7 @@ def create_sample_chat_messages(cache: EmoteCache) -> list[ChatMessage]:
     msg("m7", 22, "subscribed for 6 months! catJAM", u_pixel, ["catJAM"],
         is_system=True,
         system_text="PixelWarrior subscribed at Tier 1. They've subscribed for 6 months!")
-    msg("m8", 25, "LET'S GO SHROUD PogChamp PogChamp", u_hype, ["PogChamp"])
+    msg("m8", 25, "LET'S GO SHROUD PogChamp Clap", u_hype, ["PogChamp", "Clap"])
     msg("m9", 30, "400 IQ play right there KEKW", u_gamer, ["KEKW"],
         reply_parent_msg_id="m4", reply_parent_display_name="NightOwl_TV",
         reply_parent_text="GG EZ no re Kappa")
@@ -310,7 +394,7 @@ def create_sample_chat_messages(cache: EmoteCache) -> list[ChatMessage]:
     msg("m11", 38, "this map is so good for cs2", u_map)
     msg("m12", 42, "@NewViewer2024 welcome! peepoHappy you picked a great stream",
         u_owl, ["peepoHappy"])
-    msg("m13", 46, "ace ace ace!!! OMEGALUL LETS GOOO", u_frag, ["OMEGALUL"])
+    msg("m13", 46, "ace ace ace!!! OMEGALUL LETS GOOO pepeDS", u_frag, ["OMEGALUL", "pepeDS"])
     msg("m14", 50, "how does he make it look so easy Sadge", u_sniper, ["Sadge"])
 
     return msgs
@@ -446,14 +530,14 @@ def main():
         window.refresh_stream_list()
         qt_app.processEvents()
 
-        # ── 4. Chat window (dark theme) ──
-        capture_chat_window(settings, qt_app)
+        # ── 4–5. Chat window + animated GIF (dark theme) ──
+        # Share the emote cache between static and animated captures
+        emote_cache = setup_emote_cache()
+        capture_chat_window(settings, qt_app, emote_cache)
+        capture_chat_animated_gif(settings, qt_app, emote_cache)
 
-        # ── 5. Animated chat GIF (dark theme) ──
-        capture_chat_animated_gif(settings, qt_app)
-
-        # ── 6. mpv player window ──
-        capture_mpv_window(qt_app)
+        # ── 6. mpv player (real stream capture) ──
+        capture_mpv_playback()
 
         # ── 7. Preferences dialogs (dark theme) ──
         capture_preferences(mock_app, window, qt_app)
@@ -465,7 +549,7 @@ def main():
     qt_app.exec()
 
 
-def capture_chat_window(settings, qt_app):
+def capture_chat_window(settings, qt_app, emote_cache):
     """Capture a standalone chat widget with sample messages and emotes."""
     from livestream_list.gui.chat.chat_widget import ChatWidget
 
@@ -480,13 +564,11 @@ def capture_chat_window(settings, qt_app):
     )
 
     chat_settings = BuiltinChatSettings(
+        font_size=10,
         show_timestamps=True,
         timestamp_format="24h",
         show_alternating_rows=True,
     )
-
-    # Set up emote cache with pre-populated emotes
-    emote_cache = setup_emote_cache()
 
     # Wrap ChatWidget in a QMainWindow for proper window chrome
     chat_window = QMainWindow()
@@ -553,74 +635,134 @@ def capture_preferences(mock_app, parent_window, qt_app):
         qt_app.processEvents()
 
 
-def capture_mpv_window(qt_app):
-    """Generate a fake mpv player window with a streamer-like image."""
-    from PySide6.QtGui import QLinearGradient
+def capture_mpv_playback():
+    """Capture a real live stream via streamlink+ffmpeg and create an mpv-style GIF."""
+    import glob
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+    import urllib.request
 
-    width, height = 640, 360
-    pixmap = QPixmap(width, height)
-
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    # Draw a colorful gradient background (simulating a game/stream scene)
-    gradient = QLinearGradient(0, 0, width, height)
-    gradient.setColorAt(0.0, QColor("#1a1a2e"))
-    gradient.setColorAt(0.25, QColor("#16213e"))
-    gradient.setColorAt(0.5, QColor("#0f3460"))
-    gradient.setColorAt(0.75, QColor("#533483"))
-    gradient.setColorAt(1.0, QColor("#e94560"))
-    painter.fillRect(0, 0, width, height, gradient)
-
-    # Add some "game elements" — colored rectangles to simulate a scene
-    painter.setOpacity(0.3)
-    painter.fillRect(50, 200, 200, 120, QColor("#2ecc71"))
-    painter.fillRect(300, 150, 180, 150, QColor("#3498db"))
-    painter.fillRect(150, 80, 250, 100, QColor("#e74c3c"))
-    painter.setOpacity(1.0)
-
-    # Draw mpv OSD-style overlay text (top-left)
-    font = QFont("monospace", 11)
-    painter.setFont(font)
-    painter.setPen(QColor(255, 255, 255, 200))
-
-    # Shadow for readability
-    shadow_color = QColor(0, 0, 0, 180)
-    osd_lines = [
-        "Twitch: shroud",
-        "480p | 3.2 Mbps",
-        "streamlink 7.1.3",
-    ]
-    y = 16
-    for line in osd_lines:
-        painter.setPen(shadow_color)
-        painter.drawText(13, y + 1, line)
-        painter.setPen(QColor(255, 255, 255, 220))
-        painter.drawText(12, y, line)
-        y += 18
-
-    # mpv bottom bar
-    bar_h = 28
-    painter.fillRect(0, height - bar_h, width, bar_h, QColor(0, 0, 0, 160))
-    painter.setPen(QColor(200, 200, 200))
-    font.setPointSize(9)
-    painter.setFont(font)
-    painter.drawText(10, height - 8, "03:22:15")
-    painter.drawText(width - 80, height - 8, "LIVE")
-
-    # Progress line
-    painter.fillRect(80, height - 15, width - 170, 2, QColor(100, 100, 100))
-    painter.fillRect(80, height - 15, width - 190, 2, QColor("#e94560"))
-
-    painter.end()
+    from PIL import Image as PILImage
+    from PIL import ImageDraw, ImageFont
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT_DIR / "mpv-playback.png"
-    pixmap.save(str(path))
-    print(f"  Saved: {path}")
+    output_path = OUTPUT_DIR / "mpv-playback.gif"
+
+    # Find a live Rocket League streamer via Twitch GraphQL
+    print("  Finding Rocket League stream...")
+    query = (
+        '{ game(name: "Rocket League") { streams(first: 1) '
+        "{ edges { node { broadcaster { login displayName } } } } } }"
+    )
+    try:
+        req = urllib.request.Request(
+            "https://gql.twitch.tv/gql",
+            data=json.dumps({"query": query}).encode(),
+            headers={
+                "Client-Id": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+                "Content-Type": "application/json",
+            },
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        edges = data["data"]["game"]["streams"]["edges"]
+        if not edges:
+            print("  No Rocket League streams live, skipping mpv capture")
+            return
+        streamer = edges[0]["node"]["broadcaster"]
+        login = streamer["login"]
+        display = streamer["displayName"]
+    except Exception as e:
+        print(f"  Failed to find stream: {e}, skipping mpv capture")
+        return
+
+    print(f"  Capturing stream: {display} ({login})")
+
+    # Capture 2 seconds of video via streamlink + ffmpeg
+    tmp_dir = tempfile.mkdtemp(prefix="mpv-capture-")
+    try:
+        subprocess.run(
+            f"streamlink twitch.tv/{login} best --stdout 2>/dev/null | "
+            f"ffmpeg -y -i pipe:0 -t 2 -vf 'fps=5,scale=640:360' "
+            f"{tmp_dir}/frame_%03d.png",
+            shell=True,
+            capture_output=True,
+            timeout=30,
+        )
+        frame_files = sorted(glob.glob(f"{tmp_dir}/frame_*.png"))
+        if not frame_files:
+            print("  No frames captured, skipping mpv capture")
+            return
+
+        print(f"  Captured {len(frame_files)} frames")
+
+        # Load frames and add mpv-style OSD overlay
+        osd_frames = []
+        try:
+            pil_font = ImageFont.truetype(
+                "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf", 14
+            )
+            pil_font_small = ImageFont.truetype(
+                "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf", 11
+            )
+        except OSError:
+            pil_font = ImageFont.load_default()
+            pil_font_small = pil_font
+
+        for frame_path in frame_files:
+            frame = PILImage.open(frame_path).convert("RGBA")
+            overlay = PILImage.new("RGBA", frame.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            w, h = frame.size
+
+            # OSD text (top-left)
+            osd_lines = [
+                f"Twitch: {display}",
+                "1080p | 6.8 Mbps",
+                "streamlink 8.2.1",
+            ]
+            y = 10
+            for line in osd_lines:
+                draw.text((11, y + 1), line, fill=(0, 0, 0, 200), font=pil_font)
+                draw.text((10, y), line, fill=(255, 255, 255, 230), font=pil_font)
+                y += 20
+
+            # Bottom bar
+            bar_h = 26
+            draw.rectangle([(0, h - bar_h), (w, h)], fill=(0, 0, 0, 160))
+            draw.text((8, h - 20), "03:22:15", fill=(200, 200, 200), font=pil_font_small)
+            draw.text((w - 50, h - 20), "LIVE", fill=(200, 200, 200), font=pil_font_small)
+
+            # Progress bar
+            bar_y = h - 14
+            draw.rectangle([(70, bar_y), (w - 60, bar_y + 2)], fill=(100, 100, 100))
+            progress_w = int((w - 130) * 0.85)
+            draw.rectangle([(70, bar_y), (70 + progress_w, bar_y + 2)], fill=(233, 69, 96))
+
+            composited = PILImage.alpha_composite(frame, overlay).convert("RGB")
+            # Quantize for smaller GIF
+            osd_frames.append(
+                composited.quantize(colors=128, method=PILImage.Quantize.MEDIANCUT).convert("RGB")
+            )
+
+        osd_frames[0].save(
+            str(output_path),
+            save_all=True,
+            append_images=osd_frames[1:],
+            duration=200,
+            loop=0,
+            optimize=True,
+        )
+        size_kb = output_path.stat().st_size // 1024
+        print(f"  Saved: {output_path} ({size_kb}KB, {len(osd_frames)} frames)")
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def capture_chat_animated_gif(settings, qt_app):
+def capture_chat_animated_gif(settings, qt_app, emote_cache):
     """Capture animated GIF of chat with animated emotes cycling."""
     from PIL import Image as PILImage
 
@@ -636,13 +778,12 @@ def capture_chat_animated_gif(settings, qt_app):
     )
 
     chat_settings = BuiltinChatSettings(
+        font_size=10,
         show_timestamps=True,
         timestamp_format="24h",
         show_alternating_rows=True,
         animate_emotes=True,
     )
-
-    emote_cache = setup_emote_cache()
 
     chat_window = QMainWindow()
     chat_window.setWindowTitle("Chat - shroud")
@@ -675,9 +816,14 @@ def capture_chat_animated_gif(settings, qt_app):
     qt_app.processEvents()
 
     # Capture frames at different animation times
-    total_duration_ms = ANIMATED_FRAME_COUNT * ANIMATED_FRAME_DELAY_MS  # 800ms
-    frame_interval_ms = ANIMATED_FRAME_DELAY_MS  # 100ms per GIF frame
-    num_frames = total_duration_ms // frame_interval_ms
+    # Find the longest animation cycle from the cache
+    max_duration = 800  # fallback
+    for key, delays in emote_cache._frame_delays.items():
+        total = sum(delays)
+        if total > max_duration:
+            max_duration = total
+    frame_interval_ms = 100  # 100ms per GIF frame
+    num_frames = max(8, max_duration // frame_interval_ms)
 
     pil_frames = []
     for i in range(num_frames):
