@@ -16,11 +16,11 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 ![Main Window - Dark Theme](docs/screenshots/main-window-dark.png)
 ![Main Window - Light Theme](docs/screenshots/main-window-light.png)
+![Compact Mode](docs/screenshots/compact-mode.png)
 
 <details>
 <summary>More screenshots</summary>
 
-![Compact Mode](docs/screenshots/compact-mode.png)
 ![Chat Window](docs/screenshots/chat-window.png)
 ![Preferences - General](docs/screenshots/preferences-general.png)
 ![Preferences - Chat](docs/screenshots/preferences-chat.png)

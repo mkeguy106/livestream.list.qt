@@ -19,9 +19,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMainWindow
 
-from livestream_list.chat.models import ChatBadge, ChatMessage, ChatUser
+from livestream_list.chat.emotes.cache import EmoteCache
+from livestream_list.chat.emotes.image import ImageRef, ImageSet
+from livestream_list.chat.models import ChatBadge, ChatEmote, ChatMessage, ChatUser
 from livestream_list.core.models import Channel, Livestream, StreamPlatform, UIStyle
 from livestream_list.core.monitor import StreamMonitor
 from livestream_list.core.settings import BuiltinChatSettings, Settings, ThemeMode
@@ -113,10 +116,83 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
     return data
 
 
+# ── Emote helpers ───────────────────────────────────────────────────
+
+# Emote definitions: (name, background_color, text_color, emoji_char)
+EMOTE_DEFS = {
+    "LUL": ("#FFD700", "#000", "\U0001f602"),
+    "Kappa": ("#6441A5", "#FFF", "\U0001f60f"),
+    "PogChamp": ("#FF4500", "#FFF", "\U0001f632"),
+    "catJAM": ("#FF69B4", "#FFF", "\U0001f431"),
+    "KEKW": ("#32CD32", "#000", "\U0001f923"),
+    "monkaS": ("#8B4513", "#FFF", "\U0001f630"),
+    "peepoHappy": ("#90EE90", "#000", "\U0001f60a"),
+    "OMEGALUL": ("#FF6347", "#FFF", "\U0001f606"),
+    "Sadge": ("#4682B4", "#FFF", "\U0001f622"),
+    "EZ": ("#00CED1", "#000", "\U0001f60e"),
+}
+
+
+def create_emote_pixmap(bg_color: str, text_color: str, emoji: str) -> QPixmap:
+    """Create a small emote-like pixmap with an emoji character."""
+    size = 56  # 2x for HiDPI scaling
+    pixmap = QPixmap(size, size)
+    pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    # Draw rounded background
+    painter.setBrush(QColor(bg_color))
+    painter.setPen(QColor(0, 0, 0, 0))
+    painter.drawRoundedRect(2, 2, size - 4, size - 4, 8, 8)
+
+    # Draw emoji
+    font = QFont()
+    font.setPixelSize(32)
+    painter.setFont(font)
+    painter.setPen(QColor(text_color))
+    painter.drawText(pixmap.rect(), 0x0084, emoji)  # AlignCenter
+
+    painter.end()
+    return pixmap
+
+
+def setup_emote_cache() -> EmoteCache:
+    """Create an EmoteCache pre-populated with sample emotes."""
+    cache = EmoteCache()
+
+    for name, (bg, fg, emoji) in EMOTE_DEFS.items():
+        key = f"emote:7tv:{name}"
+        pixmap = create_emote_pixmap(bg, fg, emoji)
+        cache._memory[key] = pixmap
+
+    return cache
+
+
+def make_emote(name: str, cache: EmoteCache) -> ChatEmote:
+    """Create a ChatEmote with a pre-loaded ImageSet."""
+    key = f"emote:7tv:{name}"
+    image_ref = ImageRef(scale=2, key=key, url="", store=cache)
+    image_set = ImageSet({2: image_ref})
+    return ChatEmote(
+        id=name, name=name, url_template="", provider="7tv",
+        image_set=image_set,
+    )
+
+
+def emote_pos(text: str, emote_name: str, cache: EmoteCache):
+    """Find emote position in text and return (start, end, ChatEmote) tuple."""
+    start = text.find(emote_name)
+    if start == -1:
+        return None
+    return (start, start + len(emote_name), make_emote(emote_name, cache))
+
+
 # ── Sample chat messages ────────────────────────────────────────────
 
 
-def create_sample_chat_messages() -> list[ChatMessage]:
+def create_sample_chat_messages(cache: EmoteCache) -> list[ChatMessage]:
     """Create realistic chat messages for screenshot."""
     now = datetime.now(timezone.utc)
     t = now - timedelta(minutes=5)
@@ -124,138 +200,95 @@ def create_sample_chat_messages() -> list[ChatMessage]:
     def ts(offset_s: int) -> datetime:
         return t + timedelta(seconds=offset_s)
 
-    messages = [
-        ChatMessage(
-            id="m1", platform=StreamPlatform.TWITCH, timestamp=ts(0),
-            text="let's gooo shroud is live!",
-            user=ChatUser(
-                id="u1", name="gamerfan42", display_name="GamerFan42",
-                platform=StreamPlatform.TWITCH, color="#1E90FF", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m2", platform=StreamPlatform.TWITCH, timestamp=ts(3),
-            text="that clutch was insane",
-            user=ChatUser(
-                id="u2", name="pixelwarrior", display_name="PixelWarrior",
-                platform=StreamPlatform.TWITCH, color="#FF6347",
-                badges=[ChatBadge(id="subscriber/12", name="subscriber", image_url="")],
-            ),
-        ),
-        ChatMessage(
-            id="m3", platform=StreamPlatform.TWITCH, timestamp=ts(7),
-            text="@GamerFan42 yeah he's been playing really well today",
-            user=ChatUser(
-                id="u3", name="streamsniper99", display_name="StreamSniper99",
-                platform=StreamPlatform.TWITCH, color="#9ACD32", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m4", platform=StreamPlatform.TWITCH, timestamp=ts(12),
-            text="GG EZ no re",
-            user=ChatUser(
-                id="u4", name="nightowl_tv", display_name="NightOwl_TV",
-                platform=StreamPlatform.TWITCH, color="#DDA0DD",
-                badges=[
-                    ChatBadge(id="moderator/1", name="moderator", image_url=""),
-                    ChatBadge(id="subscriber/24", name="subscriber", image_url=""),
-                ],
-            ),
-        ),
-        ChatMessage(
-            id="m5", platform=StreamPlatform.TWITCH, timestamp=ts(15),
-            text="first time watching, this is amazing",
-            is_first_message=True,
-            user=ChatUser(
-                id="u5", name="newviewer2024", display_name="NewViewer2024",
-                platform=StreamPlatform.TWITCH, color="#FFD700", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m6", platform=StreamPlatform.TWITCH, timestamp=ts(18),
-            text="anyone know what sens he uses?",
-            user=ChatUser(
-                id="u6", name="csgo_tips", display_name="CSGO_Tips",
-                platform=StreamPlatform.TWITCH, color="#00CED1", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m7", platform=StreamPlatform.TWITCH, timestamp=ts(22),
-            text="subscribed for 6 months!",
-            is_system=True,
-            system_text="PixelWarrior subscribed at Tier 1. They've subscribed for 6 months!",
-            user=ChatUser(
-                id="u2", name="pixelwarrior", display_name="PixelWarrior",
-                platform=StreamPlatform.TWITCH, color="#FF6347",
-                badges=[ChatBadge(id="subscriber/12", name="subscriber", image_url="")],
-            ),
-        ),
-        ChatMessage(
-            id="m8", platform=StreamPlatform.TWITCH, timestamp=ts(25),
-            text="LET'S GO SHROUD",
-            user=ChatUser(
-                id="u7", name="hypemaster", display_name="HypeMaster",
-                platform=StreamPlatform.TWITCH, color="#FF4500", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m9", platform=StreamPlatform.TWITCH, timestamp=ts(30),
-            text="400 IQ play right there",
-            reply_parent_msg_id="m4",
-            reply_parent_display_name="NightOwl_TV",
-            reply_parent_text="GG EZ no re",
-            user=ChatUser(
-                id="u1", name="gamerfan42", display_name="GamerFan42",
-                platform=StreamPlatform.TWITCH, color="#1E90FF", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m10", platform=StreamPlatform.TWITCH, timestamp=ts(34),
-            text="can someone clip that? I missed it",
-            user=ChatUser(
-                id="u8", name="clipchamp", display_name="ClipChamp",
-                platform=StreamPlatform.TWITCH, color="#20B2AA",
-                badges=[ChatBadge(id="subscriber/3", name="subscriber", image_url="")],
-            ),
-        ),
-        ChatMessage(
-            id="m11", platform=StreamPlatform.TWITCH, timestamp=ts(38),
-            text="this map is so good for cs2",
-            user=ChatUser(
-                id="u9", name="mapexpert", display_name="MapExpert",
-                platform=StreamPlatform.TWITCH, color="#BA55D3", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m12", platform=StreamPlatform.TWITCH, timestamp=ts(42),
-            text="@NewViewer2024 welcome! you picked a great stream to start with",
-            user=ChatUser(
-                id="u4", name="nightowl_tv", display_name="NightOwl_TV",
-                platform=StreamPlatform.TWITCH, color="#DDA0DD",
-                badges=[
-                    ChatBadge(id="moderator/1", name="moderator", image_url=""),
-                    ChatBadge(id="subscriber/24", name="subscriber", image_url=""),
-                ],
-            ),
-        ),
-        ChatMessage(
-            id="m13", platform=StreamPlatform.TWITCH, timestamp=ts(46),
-            text="ace ace ace!!! LETS GOOO",
-            user=ChatUser(
-                id="u10", name="fragmovie", display_name="FragMovie",
-                platform=StreamPlatform.TWITCH, color="#FF1493", badges=[],
-            ),
-        ),
-        ChatMessage(
-            id="m14", platform=StreamPlatform.TWITCH, timestamp=ts(50),
-            text="how does he make it look so easy",
-            user=ChatUser(
-                id="u3", name="streamsniper99", display_name="StreamSniper99",
-                platform=StreamPlatform.TWITCH, color="#9ACD32", badges=[],
-            ),
-        ),
-    ]
-    return messages
+    def ep(text, name):
+        """Shorthand for emote_pos."""
+        return emote_pos(text, name, cache)
+
+    msgs = []
+
+    def msg(id, ts_offset, text, user, emote_names=None, **kwargs):
+        positions = []
+        if emote_names:
+            for name in emote_names:
+                pos = ep(text, name)
+                if pos:
+                    positions.append(pos)
+        msgs.append(ChatMessage(
+            id=id, platform=StreamPlatform.TWITCH, timestamp=ts(ts_offset),
+            text=text, user=user, emote_positions=positions, **kwargs,
+        ))
+
+    # Users
+    u_gamer = ChatUser(
+        id="u1", name="gamerfan42", display_name="GamerFan42",
+        platform=StreamPlatform.TWITCH, color="#1E90FF", badges=[],
+    )
+    u_pixel = ChatUser(
+        id="u2", name="pixelwarrior", display_name="PixelWarrior",
+        platform=StreamPlatform.TWITCH, color="#FF6347",
+        badges=[ChatBadge(id="subscriber/12", name="subscriber", image_url="")],
+    )
+    u_sniper = ChatUser(
+        id="u3", name="streamsniper99", display_name="StreamSniper99",
+        platform=StreamPlatform.TWITCH, color="#9ACD32", badges=[],
+    )
+    u_owl = ChatUser(
+        id="u4", name="nightowl_tv", display_name="NightOwl_TV",
+        platform=StreamPlatform.TWITCH, color="#DDA0DD",
+        badges=[
+            ChatBadge(id="moderator/1", name="moderator", image_url=""),
+            ChatBadge(id="subscriber/24", name="subscriber", image_url=""),
+        ],
+    )
+    u_new = ChatUser(
+        id="u5", name="newviewer2024", display_name="NewViewer2024",
+        platform=StreamPlatform.TWITCH, color="#FFD700", badges=[],
+    )
+    u_tips = ChatUser(
+        id="u6", name="csgo_tips", display_name="CSGO_Tips",
+        platform=StreamPlatform.TWITCH, color="#00CED1", badges=[],
+    )
+    u_hype = ChatUser(
+        id="u7", name="hypemaster", display_name="HypeMaster",
+        platform=StreamPlatform.TWITCH, color="#FF4500", badges=[],
+    )
+    u_clip = ChatUser(
+        id="u8", name="clipchamp", display_name="ClipChamp",
+        platform=StreamPlatform.TWITCH, color="#20B2AA",
+        badges=[ChatBadge(id="subscriber/3", name="subscriber", image_url="")],
+    )
+    u_map = ChatUser(
+        id="u9", name="mapexpert", display_name="MapExpert",
+        platform=StreamPlatform.TWITCH, color="#BA55D3", badges=[],
+    )
+    u_frag = ChatUser(
+        id="u10", name="fragmovie", display_name="FragMovie",
+        platform=StreamPlatform.TWITCH, color="#FF1493", badges=[],
+    )
+
+    # Messages with emotes
+    msg("m1", 0, "let's gooo shroud is live! PogChamp", u_gamer, ["PogChamp"])
+    msg("m2", 3, "that clutch was insane LUL", u_pixel, ["LUL"])
+    msg("m3", 7, "@GamerFan42 yeah he's been playing really well today", u_sniper)
+    msg("m4", 12, "GG EZ no re Kappa", u_owl, ["EZ", "Kappa"])
+    msg("m5", 15, "first time watching, this is amazing peepoHappy",
+        u_new, ["peepoHappy"], is_first_message=True)
+    msg("m6", 18, "anyone know what sens he uses?", u_tips)
+    msg("m7", 22, "subscribed for 6 months! catJAM", u_pixel, ["catJAM"],
+        is_system=True,
+        system_text="PixelWarrior subscribed at Tier 1. They've subscribed for 6 months!")
+    msg("m8", 25, "LET'S GO SHROUD PogChamp PogChamp", u_hype, ["PogChamp"])
+    msg("m9", 30, "400 IQ play right there KEKW", u_gamer, ["KEKW"],
+        reply_parent_msg_id="m4", reply_parent_display_name="NightOwl_TV",
+        reply_parent_text="GG EZ no re Kappa")
+    msg("m10", 34, "can someone clip that? monkaS I missed it", u_clip, ["monkaS"])
+    msg("m11", 38, "this map is so good for cs2", u_map)
+    msg("m12", 42, "@NewViewer2024 welcome! peepoHappy you picked a great stream",
+        u_owl, ["peepoHappy"])
+    msg("m13", 46, "ace ace ace!!! OMEGALUL LETS GOOO", u_frag, ["OMEGALUL"])
+    msg("m14", 50, "how does he make it look so easy Sadge", u_sniper, ["Sadge"])
+
+    return msgs
 
 
 # ── Mock Application ────────────────────────────────────────────────
@@ -353,7 +386,7 @@ def main():
 
     window = MainWindow(mock_app)
     window._initial_check_complete = True
-    window.resize(900, 700)
+    window.resize(540, 700)  # 900 * 0.6 = 540 (40% narrower)
     window.show()
     window.refresh_stream_list()
     qt_app.processEvents()
@@ -373,14 +406,16 @@ def main():
         # ── 3. Main window - compact mode (dark) ──
         apply_theme(settings, ThemeMode.DARK, qt_app, window)
         settings.ui_style = UIStyle.COMPACT_2
+        window.resize(360, 700)  # 900 * 0.4 = 360 (60% narrower)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
         window.refresh_stream_list()
         qt_app.processEvents()
         capture_screenshot(window, "compact-mode.png")
 
-        # Reset to default style
+        # Reset to default style and size
         settings.ui_style = UIStyle.DEFAULT
+        window.resize(540, 700)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
         window.refresh_stream_list()
@@ -400,7 +435,7 @@ def main():
 
 
 def capture_chat_window(settings, qt_app):
-    """Capture a standalone chat widget with sample messages."""
+    """Capture a standalone chat widget with sample messages and emotes."""
     from livestream_list.gui.chat.chat_widget import ChatWidget
 
     # Create a livestream for the chat title banner
@@ -419,6 +454,9 @@ def capture_chat_window(settings, qt_app):
         show_alternating_rows=True,
     )
 
+    # Set up emote cache with pre-populated emotes
+    emote_cache = setup_emote_cache()
+
     # Wrap ChatWidget in a QMainWindow for proper window chrome
     chat_window = QMainWindow()
     chat_window.setWindowTitle("Chat - shroud")
@@ -432,6 +470,9 @@ def capture_chat_window(settings, qt_app):
         parent=chat_window,
     )
 
+    # Inject emote cache into the delegate so it can render emote pixmaps
+    chat_widget._delegate.set_image_store(emote_cache)
+
     chat_window.setCentralWidget(chat_widget)
     chat_window.show()
     qt_app.processEvents()
@@ -439,8 +480,8 @@ def capture_chat_window(settings, qt_app):
     # Switch from "Connecting..." to message list view
     chat_widget.set_connected()
 
-    # Add sample messages
-    messages = create_sample_chat_messages()
+    # Add sample messages with emotes
+    messages = create_sample_chat_messages(emote_cache)
     chat_widget._model.add_messages(messages)
 
     # Scroll to bottom
