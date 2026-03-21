@@ -104,7 +104,9 @@ class ChaturbateApiClient(BaseApiClient):
                 is_live = room_status == "public"
 
                 if not is_live:
-                    return Livestream(channel=channel, live=False)
+                    return Livestream(
+                        channel=channel, live=False, room_status=room_status
+                    )
 
                 viewers = data.get("num_viewers", 0)
                 if isinstance(viewers, str):
@@ -122,6 +124,7 @@ class ChaturbateApiClient(BaseApiClient):
                     viewers=viewers,
                     start_time=datetime.now(timezone.utc),
                     is_mature=True,
+                    room_status="public",
                 )
 
         try:
@@ -191,7 +194,7 @@ class ChaturbateApiClient(BaseApiClient):
                         return None
                     data = await safe_json(resp)
                     if not data or not isinstance(data, dict):
-                        logger.warning(f"Chaturbate bulk API: invalid response")
+                        logger.warning("Chaturbate bulk API: invalid response")
                         return None
 
                     rooms = data.get("rooms", [])
@@ -224,21 +227,54 @@ class ChaturbateApiClient(BaseApiClient):
 
         # Build results
         results: list[Livestream] = []
+        live_indices: list[int] = []
         for channel in channels:
             cid = channel.channel_id.lower()
             room = online_rooms.get(cid)
             if room:
+                live_indices.append(len(results))
                 results.append(self._room_to_livestream(channel, room))
             else:
                 results.append(Livestream(channel=channel, live=False))
 
+        # Check room_status for live channels (small set, fast)
+        # to detect private/hidden shows reported as online by bulk API
+        if live_indices:
+            live_channels = [results[i].channel for i in live_indices]
+            statuses = await asyncio.gather(
+                *[self._get_room_status(ch) for ch in live_channels]
+            )
+            for idx, status in zip(live_indices, statuses):
+                results[idx].room_status = status
+
         live_count = sum(1 for r in results if r.live)
+        private_count = sum(
+            1 for r in results
+            if r.room_status and r.room_status not in ("public", "offline")
+        )
         logger.info(
-            f"Chaturbate bulk: {live_count} online, "
+            f"Chaturbate bulk: {live_count} online"
+            f" ({private_count} private/hidden), "
             f"{len(channels) - live_count} offline "
             f"({len(channels)} total)"
         )
         return results
+
+    async def _get_room_status(self, channel: Channel) -> str:
+        """Get room_status for a single channel via individual API."""
+        try:
+            url = f"{BASE_URL}/api/chatvideocontext/{channel.channel_id}/"
+            async with self.session.get(
+                url, headers=self._get_headers(), timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    return "offline"
+                data = await safe_json(resp)
+                if not data or not isinstance(data, dict):
+                    return "offline"
+                return data.get("room_status", "offline")
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            return "offline"
 
     async def _get_livestreams_individual(
         self, channels: list[Channel]

@@ -4,12 +4,13 @@ import logging
 import time
 
 from PySide6.QtCore import QEvent, QLineF, QModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QHelpEvent, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QToolTip,
 )
 
 from ...core.models import Livestream, StreamPlatform, UIStyle
@@ -87,6 +88,7 @@ class StreamRowDelegate(QStyledItemDelegate):
     favorite_clicked = Signal(str)  # channel_key
     chat_clicked = Signal(str, str, str)  # channel_id, platform, video_id
     browser_clicked = Signal(str, str)  # channel_id, platform
+    room_status_requested = Signal(object)  # Livestream needing room status check
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -328,8 +330,18 @@ class StreamRowDelegate(QStyledItemDelegate):
         bold_font.setBold(True)
         painter.setFont(bold_font)
 
+        is_private_room = (
+            channel.platform == StreamPlatform.CHATURBATE
+            and livestream.room_status
+            and livestream.room_status not in ("public", "offline", "checking")
+        )
         if is_selected:
             name_color = self._selection_text
+        elif is_private_room and self._settings.platform_colors:
+            # Dimmed platform color for private/hidden Chaturbate rooms
+            color = QColor(PLATFORM_COLORS.get(channel.platform, "#888888"))
+            color.setAlpha(90)
+            name_color = color
         elif self._settings.platform_colors:
             name_color = QColor(PLATFORM_COLORS.get(channel.platform, "#888888"))
         else:
@@ -595,6 +607,46 @@ class StreamRowDelegate(QStyledItemDelegate):
             self.browser_clicked.emit(channel.channel_id, channel.platform.value)
             return True
 
+        return False
+
+    def helpEvent(  # noqa: N802
+        self,
+        event: QHelpEvent,
+        view,
+        option: QStyleOptionViewItem,
+        index: QModelIndex,
+    ) -> bool:
+        """Show tooltip for private/hidden Chaturbate rooms."""
+        if event.type() != QEvent.Type.ToolTip:
+            return super().helpEvent(event, view, option, index)
+
+        livestream: Livestream | None = index.data(StreamRole)
+        if not livestream:
+            return False
+
+        _delegate_logger.info(
+            "helpEvent: %s platform=%s live=%s room_status=%s",
+            livestream.channel.channel_id,
+            livestream.channel.platform.value,
+            livestream.live,
+            livestream.room_status,
+        )
+
+        if livestream.channel.platform == StreamPlatform.CHATURBATE:
+            if livestream.room_status is None:
+                # Trigger background check
+                self.room_status_requested.emit(livestream)
+                return False
+            if livestream.room_status not in ("public", "offline", "checking"):
+                label = livestream.room_status.replace("_", " ").title()
+                QToolTip.showText(
+                    event.globalPos(),
+                    f"Room is in a {label} show \u2014 stream unavailable",
+                    view,
+                )
+                return True
+
+        QToolTip.hideText()
         return False
 
     def clear_button_rects(self) -> None:

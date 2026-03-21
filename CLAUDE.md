@@ -136,7 +136,7 @@ Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a 
 - **Twitch**: Helix API (authenticated) + GraphQL (unauthenticated, for public data). GraphQL uses batched queries (up to 35 channels/request). GraphQL works without authentication.
 - **YouTube**: yt-dlp subprocess (`yt-dlp --dump-json --no-download <url>`), batch size 5.
 - **Kick**: Direct REST API. Uses `start_time` field (not `created_at`) for stream duration.
-- **Chaturbate**: REST API (`/api/chatvideocontext/{username}/` for individual, `/api/ts/roomlist/room-list/?follow=true` for bulk). Bulk API requires session cookies (from QWebEngine login). Individual endpoint is public/unauthenticated. WebSocket chat connection for native chat.
+- **Chaturbate**: REST API (`/api/chatvideocontext/{username}/` for individual, `/api/ts/roomlist/room-list/?follow=true` for bulk). Bulk API requires session cookies (from QWebEngine login). Individual endpoint is public/unauthenticated. WebSocket chat connection for native chat. `room_status` field from individual API detects private/hidden/group shows — bulk API only returns public rooms, so live channels are verified via individual API concurrently during refresh.
 
 ### Flatpak Support
 
@@ -171,11 +171,11 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 
 **Whisper/DM system**: EventSub WebSocket (`WhisperEventSubWorker` in manager.py) for receiving whispers, Helix API for sending. Persisted via `WhisperStore`.
 
-**Reply threading**: Twitch uses `@reply-parent-msg-id` IRC tag, Kick uses `reply_to_original_message_id` API field.
+**Reply threading**: Twitch uses `@reply-parent-msg-id` IRC tag, Kick uses `reply_to_original_message_id` API field. Reply context text word-wraps (no truncation) with height calculated via `QFontMetrics.boundingRect(TextWordWrap)`. Clicking the reply context opens a `ConversationDialog` showing the full @mention conversation between the two users (not just the narrow reply chain).
 
 **Per-channel badge caching**: `_badge_url_map` is `dict[str, dict[str, tuple[str, str]]]` (channel_key → badge_id → (url, title)). Badge images are cached per-channel to avoid showing wrong channel's sub badges.
 
-**Banners**: `DismissibleBanner` in `chat_widget.py` uses overlay X button pattern (button as child widget, NOT in layout, repositioned in `resizeEvent`). Used for title banner, socials banner. Hype Chat banner is a simpler inline widget.
+**Banners**: `DismissibleBanner` in `chat_widget.py` uses overlay X button pattern (button as child widget, NOT in layout, repositioned in `resizeEvent`). Used for title banner, socials banner. Hype Chat banner is a simpler inline widget. Title banner shows clickable category/game link (Twitch/Kick) via `category_url` property — link is placed outside the opacity `<span>` because Qt's `linkActivated` doesn't fire for `<a>` tags inside styled spans. `ClickableTitleLabel` uses `QTextDocument.documentLayout().anchorAt()` for reliable hit-testing.
 
 **Socials Banner**: Fetched via `SocialsFetchWorker`. Twitch uses GraphQL, YouTube scrapes `/about` page (note: `UC...` IDs need `/channel/UC.../about` format), Kick uses REST API.
 
@@ -242,7 +242,7 @@ Version is defined in `src/livestream_list/__version__.py`. Update `__version__ 
 ### Key Data Structures
 
 - **Channel**: `channel_id`, `platform` (enum), `display_name`, `favorite`, `dont_notify`, `added_at`, `imported_by`
-- **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `start_time`, `last_live_time`, `video_id` (YouTube), `chatroom_id` (Kick), `thumbnail_url`
+- **Livestream**: Wraps Channel with live status, `viewers`, `title`, `game`, `game_slug` (URL slug for category links), `start_time`, `last_live_time`, `video_id` (YouTube), `chatroom_id` (Kick), `thumbnail_url`, `room_status` (Chaturbate: public/private/hidden/offline)
 - **unique_key**: `"{platform}:{channel_id}"` - used as dict key throughout
 
 ### Windows Support
@@ -299,6 +299,10 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | Chaturbate global keyboard interception | Chaturbate's JS intercepts keydown/keypress on document and window, blocking typing in the contenteditable chat input. Must add capture-phase `stopImmediatePropagation()` on both `document` AND `window` for `keydown`, `keypress`, `keyup`, `beforeinput`, `textInput`. Enter key must be let through for message sending. |
 | Chaturbate settings tab blank | Previously hidden. Now enabled — the tab-switching helper in `_ISOLATE_CHAT_JS` manages visibility of all 4 tab content panels including settings. |
 | New preferences not in export/import | When adding/removing settings (except cookies/tokens), update both `gui/dialogs/export.py` and `gui/main_window.py:_import_from_file()` to include the new fields |
+| Qt `linkActivated` not firing for `<a>` after `<br>` | `ClickableTitleLabel` uses `QTextDocument.documentLayout().anchorAt()` in `mouseReleaseEvent` as fallback — Qt's rich text engine doesn't reliably emit `linkActivated` for links after line breaks or inside styled `<span>` tags |
+| `webbrowser.open()` blocks main thread | Python's `webbrowser` module calls `subprocess.wait(5)` internally, blocking for ~4.5s. Run on a daemon thread: `threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()` |
+| Unknown platform in channels.json | `_load_channels` in `monitor.py` skips channels with unknown `StreamPlatform` values (e.g., from experimental branches) with a warning instead of crashing |
+| Chaturbate private room shows as live | Bulk API returns private rooms as "online". Individual API `room_status` field detects private/hidden/group shows. Live Chaturbate channels are verified via concurrent individual API checks during refresh. Stream delegate shows dimmed color + tooltip for non-public rooms. |
 
 ## CI/CD
 

@@ -52,10 +52,11 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Kick OAuth 2.1 + PKCE login for sending messages
   - Chaturbate sign-in via embedded browser (session cookies)
   - Twitch whispers/DMs (send and receive direct messages)
-  - Reply to messages (right-click → Reply, with visual indicator)
+  - Reply to messages (right-click → Reply, with visual indicator showing full parent message)
   - @mention autocomplete (type @ to suggest usernames)
   - @mention highlighting with tab flashing for notifications
-  - Conversation view (click @mention or reply to see back-and-forth)
+  - Conversation view (click @mention or reply context to see full back-and-forth)
+  - Clickable category/game in title banner (opens Twitch/Kick category page)
   - Real-time spellcheck (hunspell) with custom dictionary and auto-correct
   - Chat scroll pause in busy channels (auto-resumes after 5 min)
   - Recent chat history on channel join (Twitch)
@@ -97,6 +98,8 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 - **Favorites** - Star your favorite channels and filter to show only favorites
 - **Last Seen** - Offline channels show when they were last live (e.g., "2h ago", "3d ago")
 - **Platform Filter** - Filter by platform (All, Twitch, YouTube, Kick, Chaturbate)
+- **Stream List Context Menu** - Right-click: Play/Close Channel, Open Chat, Open in Browser, Favorite/Unfavorite
+- **Chaturbate Private Room Detection** - Dimmed channel name and tooltip when a room is in a private/hidden show
 - **Platform Colors** - Color channel names by platform (purple for Twitch, green for Kick, orange for Chaturbate)
 - **Name Filter** - Filter channels by name with wildcard support (e.g., `*gaming*`)
 - **Sort Options** - Sort by Name, Viewers, or Playing status

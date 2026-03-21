@@ -175,6 +175,8 @@ class MainWindow(QMainWindow):
     """Main application window."""
 
     _console_requested = Signal(str, str, object)  # channel_key, channel_name, process
+    _play_blocked = Signal(str)  # status message when play is blocked
+    _room_status_checked = Signal()  # Chaturbate room status updated, repaint needed
 
     def __init__(self, app: "Application"):
         super().__init__()
@@ -190,6 +192,8 @@ class MainWindow(QMainWindow):
         self._last_clicked_index = None  # Anchor for shift+click range selection
         self._console_windows: dict = {}  # channel_key -> StreamlinkConsoleWindow
         self._console_requested.connect(self._open_console_window)
+        self._play_blocked.connect(self.set_status)
+        self._room_status_checked.connect(self._on_room_status_checked)
 
         # Debounce mechanism for refresh_stream_list to prevent rapid successive calls
         self._refresh_pending = False
@@ -296,6 +300,7 @@ class MainWindow(QMainWindow):
         self._stream_delegate.favorite_clicked.connect(self._on_toggle_favorite)
         self._stream_delegate.chat_clicked.connect(self._on_open_chat)
         self._stream_delegate.browser_clicked.connect(self._on_open_browser)
+        self._stream_delegate.room_status_requested.connect(self._check_room_status_async)
 
         # Create virtualized list view
         self.stream_list = QListView()
@@ -306,6 +311,10 @@ class MainWindow(QMainWindow):
         self.stream_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.stream_list.setUniformItemSizes(False)
         self.stream_list.setSpacing(0)
+
+        # Enable mouse tracking for tooltip events on hover
+        self.stream_list.setMouseTracking(True)
+        self.stream_list.viewport().setMouseTracking(True)
 
         # Connect signals
         self.stream_list.doubleClicked.connect(self._on_item_double_clicked)
@@ -1038,6 +1047,15 @@ class MainWindow(QMainWindow):
         # Launch in background
         def launch():
             try:
+                # Pre-check Chaturbate room status before launching
+                if livestream.channel.platform == StreamPlatform.CHATURBATE:
+                    status = self._check_chaturbate_room_status(livestream.channel.channel_id)
+                    if status and status != "public":
+                        label = status.replace("_", " ").title()
+                        name = livestream.channel.display_name or livestream.channel.channel_id
+                        self._play_blocked.emit(f"{name} is in a {label} show")
+                        return
+
                 process = self.app.streamlink.launch(livestream)
                 if process and process.stdout and self.app.settings.streamlink.show_console:
                     self._console_requested.emit(
@@ -1094,6 +1112,39 @@ class MainWindow(QMainWindow):
                 self._console_windows.pop(channel_key).close()
             self.refresh_stream_list()
             self.set_status("Playback stopped")
+
+    def _check_room_status_async(self, livestream: Livestream) -> None:
+        """Check Chaturbate room status in background, update model on completion."""
+        channel_id = livestream.channel.channel_id
+        # Mark as checking to prevent repeated requests
+        livestream.room_status = "checking"
+
+        def check():
+            status = self._check_chaturbate_room_status(channel_id)
+            livestream.room_status = status or "offline"
+            self._room_status_checked.emit()
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _on_room_status_checked(self) -> None:
+        """Repaint stream list after room status check completes."""
+        self.stream_list.viewport().update()
+
+    @staticmethod
+    def _check_chaturbate_room_status(channel_id: str) -> str:
+        """Check Chaturbate room status via public API. Returns room_status string."""
+        import json
+        import urllib.request
+
+        url = f"https://chaturbate.com/api/chatvideocontext/{channel_id}/"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+                return data.get("room_status", "offline")
+        except Exception as e:
+            logger.debug(f"Chaturbate room status check failed: {e}")
+            return ""  # Empty = couldn't check, allow launch
 
     def _on_toggle_favorite(self, channel_key: str):
         """Handle toggling favorite status."""

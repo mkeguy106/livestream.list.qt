@@ -1,6 +1,5 @@
 """Chaturbate chat connection via WebSocket."""
 
-import asyncio
 import json
 import logging
 import random
@@ -255,7 +254,6 @@ class ChaturbateChatConnection(BaseChatConnection):
         gender = from_user.get("gender", "")
         is_mod = from_user.get("is_mod", False)
         in_fanclub = from_user.get("in_fanclub", False)
-        has_tokens = from_user.get("has_tokens", False)
         tipped_recently = from_user.get("tipped_recently", False)
 
         # Build badges

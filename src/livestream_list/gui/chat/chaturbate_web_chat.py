@@ -240,12 +240,28 @@ _ISOLATE_CHAT_JS = """
 
     var style = document.createElement('style');
     style.id = 'llqt-chat-iso';
-    style.textContent =
-        'html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:#1a1a2e!important}'
-        + 'body>*:not([data-llqt-path]):not([data-llqt-chat]):not([data-llqt-popup]){display:none!important}'
-        + '[data-llqt-path]>*:not([data-llqt-path]):not([data-llqt-chat]):not([data-llqt-popup]){display:none!important}'
-        + '[data-llqt-path]{display:block!important;position:static!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;max-width:none!important;max-height:none!important;overflow:visible!important;float:none!important;flex:1 1 100%!important}'
-        + '[data-llqt-chat]{display:flex!important;flex-direction:column!important;position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;z-index:999999!important}';
+    var css = 'html,body{margin:0!important;padding:0!important;'
+        + 'overflow:hidden!important;background:#1a1a2e!important}'
+        + 'body>*:not([data-llqt-path]):not([data-llqt-chat])'
+        + ':not([data-llqt-popup]){display:none!important}'
+        + '[data-llqt-path]>*:not([data-llqt-path])'
+        + ':not([data-llqt-chat]):not([data-llqt-popup])'
+        + '{display:none!important}'
+        + '[data-llqt-path]{display:block!important;'
+        + 'position:static!important;margin:0!important;'
+        + 'padding:0!important;width:100%!important;'
+        + 'height:100%!important;max-width:none!important;'
+        + 'max-height:none!important;'
+        + 'overflow:visible!important;'
+        + 'float:none!important;flex:1 1 100%!important}'
+        + '[data-llqt-chat]{display:flex!important;'
+        + 'flex-direction:column!important;'
+        + 'position:fixed!important;top:0!important;'
+        + 'left:0!important;width:100vw!important;'
+        + 'height:100vh!important;max-width:none!important;'
+        + 'max-height:none!important;'
+        + 'z-index:999999!important}';
+    style.textContent = css;
     document.head.appendChild(style);
 
     // Watch for dynamically added popups/overlays (settings panels, modals)

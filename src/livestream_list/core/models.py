@@ -96,6 +96,7 @@ class Livestream:
     error_message: str | None = None
     video_id: str | None = None  # YouTube video ID for live chat
     chatroom_id: int | None = None  # Kick chatroom ID for built-in chat
+    room_status: str | None = None  # Chaturbate room status (public/private/hidden/offline)
 
     @property
     def display_name(self) -> str:
@@ -258,6 +259,7 @@ class Livestream:
         self.is_mature = other.is_mature
         self.error_message = other.error_message
         self.video_id = other.video_id
+        self.room_status = other.room_status
 
         if other.live:
             self.last_live_time = datetime.now(timezone.utc)
