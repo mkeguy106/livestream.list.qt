@@ -139,7 +139,51 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # Job 4: Publish release (undraft) after both builds succeed
+  # Job 4: Update screenshots for README
+  # ──────────────────────────────────────────────
+  update-screenshots:
+    name: Update Screenshots
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libxkbcommon-x11-0 libxcb-icccm4 \
+            libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 \
+            libgl1-mesa-glx libegl1
+
+      - name: Install Python dependencies
+        run: pip install -e .
+
+      - name: Capture screenshots
+        env:
+          DISPLAY: ':99'
+          QT_QPA_PLATFORM: xcb
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 1
+          python scripts/capture_screenshots.py
+
+      - name: Commit updated screenshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots/
+          git diff --cached --quiet || (git commit -m "Update screenshots for $(git describe --tags --abbrev=0)" && git push)
+
+  # ──────────────────────────────────────────────
+  # Job 5: Publish release (undraft) after both builds succeed
   # ──────────────────────────────────────────────
   publish-release:
     name: Publish Release

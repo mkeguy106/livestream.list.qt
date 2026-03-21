@@ -14,6 +14,8 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 ---
 
+![Main Window - Dark Theme](docs/screenshots/main-window-dark.png)
+
 ## Features
 
 - **Multi-Platform Support** - Add channels from Twitch, YouTube, Kick, and Chaturbate
