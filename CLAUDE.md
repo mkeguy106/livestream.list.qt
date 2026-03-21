@@ -377,6 +377,13 @@ After pushing a new release, perform these cleanup checks:
    gh api repos/mkeguy106/livestream.list.qt --jq '.size'  # KB
    ```
 
+5. **Sync documentation**: Review all changes since the last release and ensure CLAUDE.md, README.md, and the wiki are up to date. Use the decision matrix in the [Documentation Maintenance](#documentation-maintenance) section to determine what needs updating. At minimum:
+   - Compare `git log <previous-tag>..HEAD` to identify all changes included in the release
+   - Update CLAUDE.md for any new pitfalls, architecture changes, or API changes
+   - Update README.md feature list, keyboard shortcuts, and roadmap checkboxes
+   - Clone/pull the wiki and update relevant pages (Features, Chat, Preferences, Troubleshooting, etc.)
+   - Commit and push wiki changes
+
 ## Git Commits
 
 Never include in commit messages:
@@ -384,38 +391,81 @@ Never include in commit messages:
 - "Co-Authored-By: Claude"
 - Any reference to AI, Claude, or automated generation
 
-## Wiki Maintenance
+## Documentation Maintenance
 
-When adding new features, shortcuts, settings, or making architecture changes, keep the wiki up to date.
+When making changes to the codebase, **all three documentation targets must be kept in sync**: CLAUDE.md, README.md, and the wiki. Each serves a different audience and purpose — update the relevant ones for every change.
 
 ### When to Update
 
-- New features or settings added
-- Keyboard shortcuts added or changed
-- Architecture changes (new files, renamed modules, new patterns)
-- API client changes (new endpoints, auth flow changes)
-- Known pitfalls discovered
+| Change type | CLAUDE.md | README.md | Wiki |
+|-------------|-----------|-----------|------|
+| New feature added | Architecture/chat/theme sections if non-trivial | Features list, keyboard shortcuts | `Features.md`, `Chat.md`, `Preferences.md`, `Keyboard-Shortcuts.md` |
+| Feature removed | Remove from relevant sections | Remove from features list, roadmap | Remove from all relevant pages |
+| New setting/preference | Only if architecturally significant | — | `Preferences.md` |
+| New keyboard shortcut | — | Keyboard Shortcuts section | `Keyboard-Shortcuts.md` |
+| Architecture change | Module structure, threading, data flow sections | — | `Architecture.md`, `Contributing.md` |
+| New API endpoint or auth flow | API Clients section | — | `API-Clients.md` |
+| Chat system change | Built-in Chat System section | — | `Chat-System.md`, `Chat.md` |
+| New platform added | Multiple sections (API, chat, models, etc.) | Features, requirements, adding channels | Multiple wiki pages |
+| New pitfall discovered | Known Pitfalls table | — | `Troubleshooting.md` or `Known-Issues.md` |
+| New known issue/limitation | Known Pitfalls table (if dev-facing) | — | `Known-Issues.md` |
+| CI/CD or build change | CI/CD section | — | `Contributing.md` |
+| Streamlink/playback change | — | Streamlink Settings section | `Streamlink.md` |
+| New export/import fields | Known Pitfalls (the existing reminder) | — | `Preferences.md` |
+| Windows support change | Windows Support table | — | `Installation.md`, `Contributing.md` |
+| Flatpak change | Flatpak Support section | Installation section | `Installation.md` |
+| Roadmap item completed | — | Move from `[ ]` to `[x]` in Roadmap | `Features.md` if not already listed |
+| FAQ-worthy behavior | — | — | `FAQ.md` |
 
-### How to Update
+### What Goes Where
+
+- **CLAUDE.md** — Developer-facing: architecture, threading rules, pitfalls, data structures, API details, CI/CD. Things that require reading multiple files to understand. Don't duplicate what's obvious from reading a single file.
+- **README.md** — User-facing: feature list, installation, usage, keyboard shortcuts, configuration, roadmap. Keep the feature list comprehensive but concise (one line per feature with sub-bullets for details).
+- **Wiki** — Both audiences, expanded: detailed guides, step-by-step instructions, troubleshooting, FAQ. The wiki is the most detailed reference and should be the most thorough.
+
+### How to Update the Wiki
 
 ```bash
-# Clone the wiki repo
+# Clone the wiki repo (if not already cloned)
 git clone https://github.com/mkeguy106/livestream.list.qt.wiki.git /tmp/wiki
 cd /tmp/wiki
+
+# Or pull latest if already cloned
+cd /tmp/wiki && git pull
 
 # Edit relevant pages, then commit and push
 git add -A && git commit -m "Update wiki for <feature>" && git push origin master
 ```
 
-### Key Wiki Pages
+### Wiki Page Reference
+
+**User Guide:**
 
 | Page | Covers |
 |------|--------|
-| `Features.md` | Feature list and descriptions |
-| `Preferences.md` | Settings tables and configuration |
-| `Keyboard-Shortcuts.md` | All keyboard shortcuts |
-| `Chat-System.md` | Chat architecture and data models |
-| `API-Clients.md` | Platform API endpoints and patterns |
-| `Contributing.md` | Project structure, pitfalls, dev guide |
-| `FAQ.md` | Common user questions |
-| `Streamlink.md` | Playback configuration |
+| `Home.md` | Landing page with navigation links |
+| `Installation.md` | Flatpak, Windows, and source install instructions |
+| `Getting-Started.md` | First launch walkthrough, basic usage |
+| `Adding-Channels.md` | URL detection, importing follows, manual entry |
+| `Features.md` | Comprehensive feature list |
+| `Preferences.md` | All settings tabs: General, Playback, Accounts, Chat, Themes, Notifications |
+
+**User Reference:**
+
+| Page | Covers |
+|------|--------|
+| `Chat.md` | Built-in chat UI, tabs, pop-out, banners, emotes, badges, sending |
+| `Keyboard-Shortcuts.md` | All shortcuts: main window, channel list, chat, selection mode |
+| `Streamlink.md` | Player setup, quality, latency, Turbo auth, recording |
+| `Troubleshooting.md` | Stream launch, chat connection, player, performance, crash logs |
+| `Known-Issues.md` | Current limitations (YouTube, Kick rate limits, etc.) |
+| `FAQ.md` | Organized by topic: General, YouTube, Kick, Twitch, Chaturbate, Notifications |
+
+**Developer Documentation:**
+
+| Page | Covers |
+|------|--------|
+| `Architecture.md` | Threading model, data flow, key patterns |
+| `API-Clients.md` | Twitch (Helix + GraphQL), YouTube (yt-dlp), Kick (REST), Chaturbate (bulk + individual) |
+| `Chat-System.md` | ChatManager, connections, emotes, message rendering, event routing |
+| `Contributing.md` | Dev setup (Linux/Windows), commands, coding patterns, project structure |
