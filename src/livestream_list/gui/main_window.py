@@ -1418,6 +1418,8 @@ class MainWindow(QMainWindow):
                     platform=platform,
                     display_name=ch_data.get("display_name"),
                     favorite=ch_data.get("favorite", False),
+                    auto_launch=ch_data.get("auto_launch", False),
+                    dont_notify=ch_data.get("dont_notify", False),
                 )
 
                 if self.app.monitor.add_channel_direct(channel):
@@ -1471,6 +1473,7 @@ class MainWindow(QMainWindow):
                     "sort_mode",
                     "hide_offline",
                     "favorites_only",
+                    "auto_launch_only",
                     "ui_style",
                     "platform_colors",
                     "font_size",

@@ -78,6 +78,8 @@ class ExportDialog(QDialog):
                     "platform": channel.platform.value,
                     "display_name": channel.display_name,
                     "favorite": channel.favorite,
+                    "auto_launch": channel.auto_launch,
+                    "dont_notify": channel.dont_notify,
                 }
                 data["channels"].append(ch_data)
 
