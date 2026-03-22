@@ -41,12 +41,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ──────────────────────────────────────────────
-  # Job 2: Build Flatpak on self-hosted Linux runner
+  # Job 2: Build Flatpak on GitHub-hosted runner
   # ──────────────────────────────────────────────
   build-flatpak:
     name: Build Flatpak (Linux)
     needs: create-release
-    runs-on: [self-hosted, linux, x64, docker]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7
+      options: --privileged
 
     steps:
       - name: Checkout
@@ -69,27 +72,13 @@ jobs:
             sed -i "s|<releases>|<releases>\n    <release version=\"${SAFE_VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
           fi
 
-      - name: Build Flatpak in Docker
+      - name: Build Flatpak
         run: |
-          CONTAINER_ID=$(docker create --privileged \
-            -w /workspace \
-            ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
-            bash -c "
-              set -e
-              dbus-uuidgen > /etc/machine-id
-              echo 'Contents of /workspace:'
-              ls -la /workspace/
-              flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-              flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
-              flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir /workspace/app.livestreamlist.LivestreamListQt.yml
-              flatpak build-bundle ~/.local/share/flatpak/repo /workspace/livestreamListQt.flatpak app.livestreamlist.LivestreamListQt
-            ")
-
-          echo "Container ID: $CONTAINER_ID"
-          docker cp "${{ github.workspace }}/." "$CONTAINER_ID:/workspace/"
-          docker start -a "$CONTAINER_ID"
-          docker cp "$CONTAINER_ID:/workspace/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak"
-          docker rm "$CONTAINER_ID"
+          dbus-uuidgen > /etc/machine-id
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
+          flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir app.livestreamlist.LivestreamListQt.yml
+          flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak app.livestreamlist.LivestreamListQt
 
       - name: Upload Flatpak to release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
