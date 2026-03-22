@@ -129,9 +129,7 @@ class _SpellBackend:
 
         # Fall back to pyspellchecker (pure Python, cross-platform)
         try:
-            from spellchecker import (
-                SpellChecker as PySpellChecker,  # type: ignore[import-not-found]
-            )
+            from spellchecker import SpellChecker as PySpellChecker
 
             self._engine = PySpellChecker(distance=1)
             self.name = "pyspellchecker"

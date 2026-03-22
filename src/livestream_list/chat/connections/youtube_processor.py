@@ -6,8 +6,11 @@ Extends pytchat's DefaultProcessor to additionally capture:
 - liveChatModeChangeMessageRenderer (subscriber-only, slow mode, etc.)
 """
 
+from __future__ import annotations
+
 import logging
 import threading
+from typing import Any
 
 from pytchat.processors.default.processor import DefaultProcessor  # type: ignore[import-untyped]
 
@@ -16,17 +19,17 @@ from ..models import ChatRoomState, ModerationEvent
 logger = logging.getLogger(__name__)
 
 
-class LivestreamListProcessor(DefaultProcessor):
+class LivestreamListProcessor(DefaultProcessor):  # type: ignore[misc]
     """Extended pytchat processor with moderation and mode change support."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._moderation_events: list[ModerationEvent] = []
         self._room_state_changes: list[ChatRoomState] = []
         self._system_messages: list[tuple[str, str]] = []  # (id, text) pairs
         self._lock = threading.Lock()
 
-    def process(self, chat_components: list):
+    def process(self, chat_components: list[dict[str, Any] | None]) -> object:
         """Process chat data, capturing moderation events and mode changes."""
         # Let DefaultProcessor handle normal messages
         chatdata = super().process(chat_components)
@@ -46,7 +49,7 @@ class LivestreamListProcessor(DefaultProcessor):
 
         return chatdata
 
-    def _process_extra_action(self, action: dict) -> None:
+    def _process_extra_action(self, action: dict[str, Any]) -> None:
         """Process action types that DefaultProcessor ignores."""
         # Single message deletion
         deleted = action.get("markChatItemAsDeletedAction")
@@ -65,7 +68,7 @@ class LivestreamListProcessor(DefaultProcessor):
             if item and "liveChatModeChangeMessageRenderer" in item:
                 self._handle_mode_change(item["liveChatModeChangeMessageRenderer"])
 
-    def _handle_message_deleted(self, deleted: dict) -> None:
+    def _handle_message_deleted(self, deleted: dict[str, Any]) -> None:
         """Handle a single message deletion."""
         target_id = deleted.get("targetItemId", "")
         if not target_id:
@@ -79,7 +82,7 @@ class LivestreamListProcessor(DefaultProcessor):
                 self._moderation_events.append(event)
             logger.debug(f"YouTube message deleted: {target_id}")
 
-    def _handle_author_banned(self, author_deleted: dict) -> None:
+    def _handle_author_banned(self, author_deleted: dict[str, Any]) -> None:
         """Handle bulk deletion by author (ban/timeout)."""
         channel_id = author_deleted.get("externalChannelId", "")
         if channel_id:
@@ -88,7 +91,7 @@ class LivestreamListProcessor(DefaultProcessor):
                 self._moderation_events.append(event)
             logger.debug(f"YouTube author banned: {channel_id}")
 
-    def _handle_mode_change(self, renderer: dict) -> None:
+    def _handle_mode_change(self, renderer: dict[str, Any]) -> None:
         """Handle liveChatModeChangeMessageRenderer."""
         # Extract text from runs
         text_runs = renderer.get("text", {}).get("runs", [])

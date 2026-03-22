@@ -1,12 +1,16 @@
 """Two-tier emote cache (memory LRU + disk)."""
 
+from __future__ import annotations
+
 import hashlib
 import logging
 import queue
 import threading
 import time
 from collections import OrderedDict, deque
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QImage, QImageReader, QPixmap
@@ -124,8 +128,8 @@ def _encode_png_bytes(image: QImage) -> bytes | None:
         return None
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-    ok = image.save(buffer, "PNG")
-    data = bytes(buffer.data()) if ok else None
+    ok = image.save(buffer, b"PNG")
+    data = bytes(buffer.data().data()) if ok else None
     buffer.close()
     if not data:
         return None
@@ -140,7 +144,7 @@ def _is_nonempty_file(path: Path) -> bool:
         return False
 
 
-def _decode_first_frame_image(data: bytes):
+def _decode_first_frame_image(data: bytes) -> QImage | None:
     """Decode just the first frame to a QImage."""
     if not data:
         return None
@@ -306,7 +310,9 @@ class _DiskCacheWorker(threading.Thread):
 
     _RECALIBRATE_INTERVAL_S = 300.0  # 5 minutes
 
-    def __init__(self, cache_dir: Path, get_limit_bytes, logger_obj) -> None:
+    def __init__(
+        self, cache_dir: Path, get_limit_bytes: Callable[[], int], logger_obj: logging.Logger
+    ) -> None:
         super().__init__(daemon=True)
         self._cache_dir = cache_dir
         self._get_limit_bytes = get_limit_bytes
@@ -386,7 +392,7 @@ class _DiskCacheWorker(threading.Thread):
                 self._run_eviction_if_needed()
 
 
-def _enforce_disk_limit(cache_dir: Path, max_bytes: int, logger_obj) -> int:
+def _enforce_disk_limit(cache_dir: Path, max_bytes: int, logger_obj: logging.Logger) -> int:
     """Enforce disk cache size limit by evicting oldest files."""
     try:
         files = list(cache_dir.iterdir())
@@ -476,7 +482,7 @@ class EmoteCache(QObject):
         self._frame_worker: EmoteFrameWorker | None = None
         self._frame_convert_queue: deque[tuple[str, list[QImage], list[int]]] = deque()
         self._frame_convert_pending: set[str] = set()
-        self._frame_convert_current: dict | None = None
+        self._frame_convert_current: dict[str, Any] | None = None
         self._frame_convert_timer = QTimer(self)
         self._frame_convert_timer.setInterval(FRAME_CONVERT_INTERVAL_MS)
         self._frame_convert_timer.timeout.connect(self._process_frame_conversions)
@@ -784,7 +790,7 @@ class EmoteCache(QObject):
             self._decode_timer.stop()
 
     def _on_emote_downloaded(
-        self, key: str, raw_data: bytes, image, png_bytes: bytes | None
+        self, key: str, raw_data: bytes, image: QImage | None, png_bytes: bytes | None
     ) -> None:
         """Handle a downloaded emote/badge image - create QPixmap on main thread (legacy)."""
         if not raw_data:
@@ -807,7 +813,7 @@ class EmoteCache(QObject):
         self._clear_download_attempts(key)
 
     def _on_animated_emote_downloaded(
-        self, key: str, raw_data: bytes, image, png_bytes: bytes | None
+        self, key: str, raw_data: bytes, image: QImage | None, png_bytes: bytes | None
     ) -> None:
         """Handle a downloaded animated emote - store raw data (legacy)."""
         if not raw_data:
@@ -1002,7 +1008,7 @@ class EmoteCache(QObject):
         if not self._frame_extract_queue:
             self._frame_extract_timer.stop()
 
-    def _on_frames_ready(self, key: str, frames, delays) -> None:
+    def _on_frames_ready(self, key: str, frames: list[QImage], delays: list[int]) -> None:
         """Handle decoded animation frames - queue for conversion."""
         if not frames:
             return
@@ -1117,7 +1123,7 @@ class EmoteCache(QObject):
             buffer = QBuffer()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
             pixmap.save(buffer, "PNG")
-            data = bytes(buffer.data())
+            data = bytes(buffer.data().data())
             buffer.close()
             if data:
                 self._disk_worker.enqueue_write(disk_path, data)
@@ -1212,7 +1218,7 @@ class EmoteLoaderWorker(QThread):
         timeout = aiohttp.ClientTimeout(total=10)
         connector = aiohttp.TCPConnector(limit=20, limit_per_host=8)
         async with aiohttp.ClientSession(connector=connector) as session:
-            tasks: set[asyncio.Task] = set()
+            tasks: set[asyncio.Task[None]] = set()
 
             while not self._should_stop or tasks:
                 # Drain available items from queue (non-blocking)
@@ -1233,7 +1239,7 @@ class EmoteLoaderWorker(QThread):
                 elif not self._should_stop:
                     await asyncio.sleep(0.1)
 
-    async def _download_one(self, session, sem, timeout, key: str, url: str) -> None:
+    async def _download_one(self, session: Any, sem: Any, timeout: Any, key: str, url: str) -> None:
         """Download a single emote image."""
         async with sem:
             try:

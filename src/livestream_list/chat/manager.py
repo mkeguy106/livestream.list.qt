@@ -1,16 +1,20 @@
 """Chat manager - orchestrates connections, emote loading, and badge fetching."""
 
+from __future__ import annotations
+
 import asyncio
+import concurrent.futures
 import logging
 import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from ..core.models import Livestream, StreamPlatform
-from ..core.settings import Settings
+from ..core.settings import ChatLoggingSettings, Settings
 from .chat_log_store import ChatLogWriter
 from .connections.base import BaseChatConnection
 from .emotes.cache import DOWNLOAD_PRIORITY_HIGH, EmoteCache
@@ -91,7 +95,7 @@ class ChatManager(QObject):
     # Emitted when settings were modified and need saving
     settings_changed = Signal()
 
-    def __init__(self, settings: Settings, monitor=None, parent: QObject | None = None):
+    def __init__(self, settings: Settings, monitor: Any = None, parent: QObject | None = None):
         super().__init__(parent)
         self.settings = settings
         self._monitor = monitor
@@ -465,7 +469,7 @@ class ChatManager(QObject):
             connection.send_message(text, reply_to_msg_id), worker._loop
         )
 
-        def _on_send_done(f: "asyncio.Future[bool]") -> None:
+        def _on_send_done(f: concurrent.futures.Future[bool]) -> None:
             try:
                 f.result()
             except Exception as e:
@@ -551,9 +555,10 @@ class ChatManager(QObject):
                 worker = self._workers.get(key)
                 break
 
-        if connection and worker and worker._loop:
+        if connection and worker and worker._loop and hasattr(connection, "send_whisper"):
             asyncio.run_coroutine_threadsafe(
-                connection.send_whisper(to_user_id, text), worker._loop
+                connection.send_whisper(to_user_id, text),
+                worker._loop,
             )
         elif self.settings.twitch.access_token:
             # No active chat connection — send directly via background thread
@@ -593,7 +598,7 @@ class ChatManager(QObject):
         token = self.settings.twitch.access_token
         client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
 
-        async def send():
+        async def send() -> None:
             import aiohttp
 
             async with aiohttp.ClientSession() as session:
@@ -793,7 +798,7 @@ class ChatManager(QObject):
         badge.image_set = image_set
         return image_set
 
-    def _on_messages_received(self, channel_key: str, messages: list) -> None:
+    def _on_messages_received(self, channel_key: str, messages: list[Any]) -> None:
         """Enqueue incoming messages for throttled processing."""
         if not messages:
             return
@@ -915,7 +920,7 @@ class ChatManager(QObject):
         """Expose the chat log writer for external use (e.g., loading history)."""
         return self._chat_log_writer
 
-    def update_chat_logging_settings(self, settings) -> None:
+    def update_chat_logging_settings(self, settings: ChatLoggingSettings) -> None:
         """Update chat logging settings and start/stop timers accordingly."""
         self._chat_log_writer.settings = settings
         if settings.enabled:
@@ -939,7 +944,7 @@ class ChatManager(QObject):
             return []
 
         # YouTube connections carry a pre-built list of name variants
-        variants = getattr(connection, "_nick_variants", None)
+        variants: list[str] | None = getattr(connection, "_nick_variants", None)
         if variants:
             return variants
 
@@ -1055,7 +1060,7 @@ class ChatManager(QObject):
         channel_id = livestream.channel.channel_id
         platform = livestream.channel.platform
 
-        async def fetch():
+        async def fetch() -> tuple[str, dict[str, str]]:
             from .socials import fetch_socials
 
             return (channel_key, await fetch_socials(channel_id, platform))
@@ -1067,7 +1072,10 @@ class ChatManager(QObject):
 
     def _on_socials_fetched(self, result: object) -> None:
         """Handle fetched social links - emit to UI."""
-        channel_key, socials = result
+        if not isinstance(result, tuple) or len(result) != 2:
+            return
+        channel_key: str = result[0]
+        socials: dict[str, str] = result[1]
         if not socials:
             return
         logger.info(f"Fetched socials for {channel_key}: {list(socials.keys())}")
@@ -1091,7 +1099,7 @@ class ChatManager(QObject):
 
         channel_login = livestream.channel.channel_id
 
-        async def fetch():
+        async def fetch() -> tuple[str, dict[str, Any] | None]:
             import aiohttp
 
             gql_url = "https://gql.twitch.tv/gql"
@@ -1187,7 +1195,10 @@ class ChatManager(QObject):
 
     def _on_sub_anniversary_fetched(self, result: object) -> None:
         """Handle fetched sub anniversary info - emit to UI."""
-        channel_key, sub_info = result
+        if not isinstance(result, tuple) or len(result) != 2:
+            return
+        channel_key: str = result[0]
+        sub_info: dict[str, Any] | None = result[1]
         if not sub_info:
             return
         months = sub_info.get("months", 0)
@@ -1219,7 +1230,7 @@ class ChatManager(QObject):
                 self.sub_anniversary_fetched.emit(channel_key, {"redeemed": True})
                 return
 
-    def _on_emotes_fetched(self, channel_key: str, emotes: list) -> None:
+    def _on_emotes_fetched(self, channel_key: str, emotes: list[Any]) -> None:
         """Handle fetched emote list - add to map (images load on-demand when rendered)."""
         channel_map = self._channel_emote_maps.setdefault(channel_key, {})
         for emote in emotes:
@@ -1250,7 +1261,7 @@ class ChatManager(QObject):
 
         # Downloads are handled by the image store
 
-    def _on_user_emotes_fetched(self, emotes: list) -> None:
+    def _on_user_emotes_fetched(self, emotes: list[Any]) -> None:
         """Handle fresh user emotes from background fetch - update cache.
 
         Part of stale-while-revalidate: this is called when fresh emotes arrive.
@@ -1288,7 +1299,7 @@ class ChatManager(QObject):
 
         self._user_emotes_fetched_at = time.monotonic()
 
-    def _on_badges_fetched(self, channel_key: str, badge_map: dict) -> None:
+    def _on_badges_fetched(self, channel_key: str, badge_map: dict[str, tuple[str, str]]) -> None:
         """Handle fetched badge data from Twitch API.
 
         badge_map: {badge_id: (image_url, title)}
@@ -1378,7 +1389,7 @@ class ChatManager(QObject):
         oauth_token = self.settings.twitch.access_token
         client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
 
-        async def fetch():
+        async def fetch() -> dict[str, list[ChatEmote]]:
             return await _fetch_global_emotes(providers, oauth_token, client_id)
 
         self._global_emote_worker = AsyncTaskWorker(fetch, parent=self)
@@ -1387,10 +1398,10 @@ class ChatManager(QObject):
 
     def _on_global_emotes_fetched(self, payload: object) -> None:
         """Handle global emote fetch results."""
-        if not payload:
+        if not isinstance(payload, dict):
             return
-        twitch_list = payload.get("twitch", [])
-        common_list = payload.get("common", [])
+        twitch_list: list[Any] = payload.get("twitch", [])
+        common_list: list[Any] = payload.get("common", [])
         self._global_twitch_emotes = {}
         for emote in twitch_list:
             if not isinstance(emote, ChatEmote):
@@ -1428,7 +1439,7 @@ class ChatManager(QObject):
         oauth_token = self.settings.twitch.access_token
         client_id = self.settings.twitch.client_id or _DEFAULT_TWITCH_CLIENT_ID
 
-        async def fetch():
+        async def fetch() -> list[ChatEmote]:
             return await _fetch_user_emotes(oauth_token, client_id)
 
         self._user_emote_worker = AsyncTaskWorker(fetch, parent=self)
@@ -1474,9 +1485,9 @@ class ChatManager(QObject):
             return ChaturbateChatConnection(parent=self)
         return None
 
-    def _get_connection_kwargs(self, livestream: Livestream) -> dict:
+    def _get_connection_kwargs(self, livestream: Livestream) -> dict[str, Any]:
         """Get platform-specific connection kwargs."""
-        kwargs: dict = {}
+        kwargs: dict[str, Any] = {}
         if livestream.channel.platform == StreamPlatform.KICK:
             kwargs["chatroom_id"] = getattr(livestream, "chatroom_id", None)
         elif livestream.channel.platform == StreamPlatform.YOUTUBE:

@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ..core.models import StreamPlatform
 from ..core.settings import get_data_dir
@@ -27,7 +28,7 @@ def _conversation_path(partner_name: str) -> Path:
     return _whisper_dir() / f"{safe_name}.json"
 
 
-def _msg_to_dict(msg: ChatMessage) -> dict:
+def _msg_to_dict(msg: ChatMessage) -> dict[str, Any]:
     """Serialize a ChatMessage to a dict for JSON storage."""
     return {
         "id": msg.id,
@@ -41,7 +42,7 @@ def _msg_to_dict(msg: ChatMessage) -> dict:
     }
 
 
-def _dict_to_msg(d: dict) -> ChatMessage:
+def _dict_to_msg(d: dict[str, Any]) -> ChatMessage:
     """Deserialize a dict back to a ChatMessage."""
     user = ChatUser(
         id=d.get("user_id", ""),
@@ -91,7 +92,7 @@ def load_whispers(partner_name: str) -> list[ChatMessage]:
     return messages
 
 
-def _load_raw(path: Path) -> list[dict]:
+def _load_raw(path: Path) -> list[dict[str, Any]]:
     """Load raw JSON array from file."""
     if not path.exists():
         return []

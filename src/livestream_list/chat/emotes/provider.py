@@ -1,8 +1,11 @@
 """Emote providers for Twitch, Kick, 7TV, BTTV, and FFZ."""
 
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
+from typing import Any
 
 import aiohttp
 
@@ -17,7 +20,7 @@ _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 @asynccontextmanager
-async def _optional_session(session=None, **kwargs):
+async def _optional_session(session: aiohttp.ClientSession | None = None, **kwargs: Any):  # type: ignore[no-untyped-def]
     """Use an existing session or create a temporary one."""
     if session is not None:
         yield session
@@ -35,12 +38,14 @@ class BaseEmoteProvider(ABC):
         """Provider name."""
 
     @abstractmethod
-    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
+    async def get_global_emotes(
+        self, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch global emotes for this provider."""
 
     @abstractmethod
     async def get_channel_emotes(
-        self, platform: str, channel_id: str, session=None
+        self, platform: str, channel_id: str, session: aiohttp.ClientSession | None = None
     ) -> list[ChatEmote]:
         """Fetch channel-specific emotes.
 
@@ -63,14 +68,16 @@ class TwitchProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "twitch"
 
-    def _get_headers(self) -> dict:
+    def _get_headers(self) -> dict[str, str]:
         """Get headers for Twitch API requests."""
         headers = {"Client-Id": self.client_id}
         if self.oauth_token:
             headers["Authorization"] = f"Bearer {self.oauth_token}"
         return headers
 
-    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
+    async def get_global_emotes(
+        self, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch Twitch global emotes."""
         emotes: list[ChatEmote] = []
         try:
@@ -95,7 +102,7 @@ class TwitchProvider(BaseEmoteProvider):
         return emotes
 
     async def get_channel_emotes(
-        self, platform: str, channel_id: str, session=None
+        self, platform: str, channel_id: str, session: aiohttp.ClientSession | None = None
     ) -> list[ChatEmote]:
         """Fetch Twitch channel emotes (subscriber emotes)."""
         emotes: list[ChatEmote] = []
@@ -124,7 +131,9 @@ class TwitchProvider(BaseEmoteProvider):
 
         return emotes
 
-    async def get_user_emotes(self, user_id: str, session=None) -> list[ChatEmote]:
+    async def get_user_emotes(
+        self, user_id: str, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch all emotes the authenticated user has access to.
 
         This includes subscriber emotes from channels they're subscribed to,
@@ -165,7 +174,7 @@ class TwitchProvider(BaseEmoteProvider):
 
         return emotes
 
-    def _parse_emote(self, data: dict) -> ChatEmote | None:
+    def _parse_emote(self, data: dict[str, Any]) -> ChatEmote | None:
         """Parse a Twitch emote from Helix API data."""
         emote_id = data.get("id", "")
         name = data.get("name", "")
@@ -211,7 +220,9 @@ class SevenTVProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "7tv"
 
-    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
+    async def get_global_emotes(
+        self, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch 7TV global emotes."""
         emotes: list[ChatEmote] = []
         try:
@@ -234,7 +245,7 @@ class SevenTVProvider(BaseEmoteProvider):
         return emotes
 
     async def get_channel_emotes(
-        self, platform: str, channel_id: str, session=None
+        self, platform: str, channel_id: str, session: aiohttp.ClientSession | None = None
     ) -> list[ChatEmote]:
         """Fetch 7TV channel emotes."""
         emotes: list[ChatEmote] = []
@@ -258,7 +269,7 @@ class SevenTVProvider(BaseEmoteProvider):
 
         return emotes
 
-    def _parse_emote(self, data: dict) -> ChatEmote | None:
+    def _parse_emote(self, data: dict[str, Any]) -> ChatEmote | None:
         """Parse a 7TV emote from API data."""
         emote_data = data.get("data", data)
         emote_id = emote_data.get("id", data.get("id", ""))
@@ -303,7 +314,9 @@ class BTTVProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "bttv"
 
-    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
+    async def get_global_emotes(
+        self, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch BTTV global emotes."""
         emotes: list[ChatEmote] = []
         try:
@@ -326,7 +339,7 @@ class BTTVProvider(BaseEmoteProvider):
         return emotes
 
     async def get_channel_emotes(
-        self, platform: str, channel_id: str, session=None
+        self, platform: str, channel_id: str, session: aiohttp.ClientSession | None = None
     ) -> list[ChatEmote]:
         """Fetch BTTV channel emotes."""
         emotes: list[ChatEmote] = []
@@ -360,7 +373,7 @@ class BTTVProvider(BaseEmoteProvider):
 
         return emotes
 
-    def _parse_emote(self, data: dict) -> ChatEmote | None:
+    def _parse_emote(self, data: dict[str, Any]) -> ChatEmote | None:
         """Parse a BTTV emote from API data."""
         emote_id = data.get("id", "")
         code = data.get("code", "")
@@ -395,7 +408,9 @@ class FFZProvider(BaseEmoteProvider):
     def name(self) -> str:
         return "ffz"
 
-    async def get_global_emotes(self, session=None) -> list[ChatEmote]:
+    async def get_global_emotes(
+        self, session: aiohttp.ClientSession | None = None
+    ) -> list[ChatEmote]:
         """Fetch FFZ global emotes."""
         emotes: list[ChatEmote] = []
         try:
@@ -420,7 +435,7 @@ class FFZProvider(BaseEmoteProvider):
         return emotes
 
     async def get_channel_emotes(
-        self, platform: str, channel_id: str, session=None
+        self, platform: str, channel_id: str, session: aiohttp.ClientSession | None = None
     ) -> list[ChatEmote]:
         """Fetch FFZ channel emotes."""
         emotes: list[ChatEmote] = []
@@ -448,7 +463,7 @@ class FFZProvider(BaseEmoteProvider):
 
         return emotes
 
-    def _parse_emote(self, data: dict) -> ChatEmote | None:
+    def _parse_emote(self, data: dict[str, Any]) -> ChatEmote | None:
         """Parse an FFZ emote from API data."""
         emote_id = str(data.get("id", ""))
         name = data.get("name", "")

@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from ..core.models import StreamPlatform
 from ..core.settings import ChatLoggingSettings, get_data_dir
@@ -28,9 +29,9 @@ def _channel_log_dir(channel_key: str) -> Path:
     return path
 
 
-def _msg_to_dict(msg: ChatMessage) -> dict:
+def _msg_to_dict(msg: ChatMessage) -> dict[str, Any]:
     """Serialize a ChatMessage to a compact dict for JSONL storage."""
-    d: dict = {
+    d: dict[str, Any] = {
         "id": msg.id,
         "ts": msg.timestamp.isoformat(),
         "uid": msg.user.id,
@@ -54,7 +55,7 @@ def _msg_to_dict(msg: ChatMessage) -> dict:
     return d
 
 
-def _dict_to_msg(d: dict) -> ChatMessage:
+def _dict_to_msg(d: dict[str, Any]) -> ChatMessage:
     """Deserialize a dict back to a ChatMessage for history loading."""
     try:
         platform = StreamPlatform(d.get("p", "twitch"))
