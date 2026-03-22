@@ -45,7 +45,6 @@ from .dialogs import (
     PreferencesDialog,
 )
 from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
-from .stream_list.video_preview import VideoPreviewController
 from .theme import ThemeManager, get_app_stylesheet, get_theme
 from .window_utils import apply_always_on_top
 
@@ -326,8 +325,8 @@ class MainWindow(QMainWindow):
             lambda: self._stream_delegate.clear_button_rects()
         )
 
-        # Video preview on hover (lazy — controller checks mpv availability)
-        self._preview_controller: VideoPreviewController | None = None
+        # Video preview on hover (lazy init — QtMultimedia may not be available in CI)
+        self._preview_controller = None
         self._preview_controller_checked = False
 
         list_layout.addWidget(self.stream_list)
@@ -1616,7 +1615,7 @@ class MainWindow(QMainWindow):
 
         return super().eventFilter(obj, event)
 
-    def _ensure_preview_controller(self) -> VideoPreviewController | None:
+    def _ensure_preview_controller(self):
         """Lazily create the video preview controller."""
         if self._preview_controller is not None:
             return self._preview_controller
@@ -1625,12 +1624,17 @@ class MainWindow(QMainWindow):
         self._preview_controller_checked = True
         if not self.app.streamlink:
             return None
-        self._preview_controller = VideoPreviewController(
-            settings=self.app.settings,
-            launcher=self.app.streamlink,
-            main_window=self,
-            parent=self,
-        )
+        try:
+            from .stream_list.video_preview import VideoPreviewController
+
+            self._preview_controller = VideoPreviewController(
+                settings=self.app.settings,
+                launcher=self.app.streamlink,
+                main_window=self,
+                parent=self,
+            )
+        except ImportError:
+            logger.warning("Video preview unavailable (QtMultimedia not installed)")
         return self._preview_controller
 
     # --- Trash dialog ---
