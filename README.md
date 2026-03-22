@@ -16,33 +16,37 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 
 **Stream list with live status, viewers, and duration across all platforms:**
 
-![Main Window - Dark Theme](docs/screenshots/main-window-dark.png)
-![Main Window - Light Theme](docs/screenshots/main-window-light.png)
+<p>
+  <img src="docs/screenshots/main-window-dark.png" alt="Main Window - Dark Theme" width="420">
+  <img src="docs/screenshots/main-window-light.png" alt="Main Window - Light Theme" width="420">
+</p>
 
 **Compact mode for a minimal, dense layout:**
 
-![Compact Mode](docs/screenshots/compact-mode.png)
+<img src="docs/screenshots/compact-mode.png" alt="Compact Mode" width="280">
 
 **Built-in chat with emotes, badges, replies, and sub notifications:**
 
-![Chat Window](docs/screenshots/chat-animated.gif)
+<img src="docs/screenshots/chat-animated.gif" alt="Chat Window" width="360">
 
 **Launch streams in mpv with streamlink integration:**
 
-![mpv Playback](docs/screenshots/mpv-playback.gif)
+<img src="docs/screenshots/mpv-playback.gif" alt="mpv Playback" width="500">
 
 <details>
 <summary>More screenshots</summary>
 
 **Chat (static):**
 
-![Chat Window](docs/screenshots/chat-window.png)
+<img src="docs/screenshots/chat-window.png" alt="Chat Window" width="360">
 
 **Preferences — General, Chat, and Appearance tabs:**
 
-![Preferences - General](docs/screenshots/preferences-general.png)
-![Preferences - Chat](docs/screenshots/preferences-chat.png)
-![Preferences - Appearance](docs/screenshots/preferences-appearance.png)
+<p>
+  <img src="docs/screenshots/preferences-general.png" alt="Preferences - General" width="380">
+  <img src="docs/screenshots/preferences-chat.png" alt="Preferences - Chat" width="380">
+  <img src="docs/screenshots/preferences-appearance.png" alt="Preferences - Appearance" width="380">
+</p>
 
 </details>
 
