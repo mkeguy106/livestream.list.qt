@@ -7,9 +7,10 @@ on:
 jobs:
   flatpak:
     name: Test Flatpak Build
-    # Only run for PRs from this repo, not forks (self-hosted runner security)
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, docker]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7
+      options: --privileged
 
     steps:
       - name: Checkout
@@ -17,38 +18,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build Flatpak in Docker
+      - name: Build Flatpak
         run: |
-          # Docker-in-Docker: volume mounts don't work because paths are relative to host
-          # Use docker cp instead to copy files into/out of container
-
-          # Create container (don't start yet)
-          CONTAINER_ID=$(docker create --privileged \
-            -w /workspace \
-            ghcr.io/flathub-infra/flatpak-github-actions:kde-6.7 \
-            bash -c "
-              set -e
-              # Create machine-id for D-Bus (required by flatpak-builder)
-              dbus-uuidgen > /etc/machine-id
-              flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-              flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
-              flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir app.livestreamlist.LivestreamListQt.yml
-              flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt.flatpak app.livestreamlist.LivestreamListQt
-            ")
-
-          echo "Container ID: $CONTAINER_ID"
-
-          # Copy workspace into container
-          docker cp "${{ github.workspace }}/." "$CONTAINER_ID:/workspace/"
-
-          # Start container and wait for completion
-          docker start -a "$CONTAINER_ID"
-
-          # Copy flatpak out of container
-          docker cp "$CONTAINER_ID:/workspace/livestreamListQt.flatpak" "${{ github.workspace }}/livestreamListQt.flatpak"
-
-          # Clean up container
-          docker rm "$CONTAINER_ID"
+          dbus-uuidgen > /etc/machine-id
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.kde.Sdk//6.9 org.kde.Platform//6.9
+          flatpak-builder --user --install --force-clean --disable-rofiles-fuse build-dir app.livestreamlist.LivestreamListQt.yml
+          flatpak build-bundle ~/.local/share/flatpak/repo livestreamListQt.flatpak app.livestreamlist.LivestreamListQt
 
       - name: Upload Flatpak artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
