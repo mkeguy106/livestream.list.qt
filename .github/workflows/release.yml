@@ -157,6 +157,7 @@ jobs:
   # ──────────────────────────────────────────────
   update-screenshots:
     uses: ./.github/workflows/screenshots.yml
+    secrets: inherit
 
   # ──────────────────────────────────────────────
   # Job 5: Publish release (undraft) after both builds succeed
