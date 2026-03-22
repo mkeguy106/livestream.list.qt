@@ -1313,8 +1313,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         extra_reply_height = 0
         if message.reply_parent_display_name:
             reply_str = (
-                f"Replying to @{message.reply_parent_display_name}: "
-                f"{message.reply_parent_text}"
+                f"Replying to @{message.reply_parent_display_name}: {message.reply_parent_text}"
             )
             reply_available = int(available_width - ts_width_only)
             bound = fb.reply_fm.boundingRect(

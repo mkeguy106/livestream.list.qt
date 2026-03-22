@@ -104,9 +104,7 @@ class ChaturbateApiClient(BaseApiClient):
                 is_live = room_status == "public"
 
                 if not is_live:
-                    return Livestream(
-                        channel=channel, live=False, room_status=room_status
-                    )
+                    return Livestream(channel=channel, live=False, room_status=room_status)
 
                 viewers = data.get("num_viewers", 0)
                 if isinstance(viewers, str):
@@ -157,9 +155,7 @@ class ChaturbateApiClient(BaseApiClient):
         # Fallback: individual requests with throttling
         return await self._get_livestreams_individual(channels)
 
-    async def _get_livestreams_bulk(
-        self, channels: list[Channel]
-    ) -> list[Livestream] | None:
+    async def _get_livestreams_bulk(self, channels: list[Channel]) -> list[Livestream] | None:
         """Use room-list/?follow=true bulk API to check all channels.
 
         Returns None if session cookies are unavailable (triggers fallback).
@@ -180,10 +176,7 @@ class ChaturbateApiClient(BaseApiClient):
 
         try:
             while True:
-                url = (
-                    f"{BASE_URL}/api/ts/roomlist/room-list/"
-                    f"?follow=true&limit=90&offset={offset}"
-                )
+                url = f"{BASE_URL}/api/ts/roomlist/room-list/?follow=true&limit=90&offset={offset}"
                 async with self.session.get(
                     url,
                     headers=headers,
@@ -207,10 +200,7 @@ class ChaturbateApiClient(BaseApiClient):
                         break
 
                     if offset == 0:
-                        logger.debug(
-                            f"Chaturbate room-list sample keys: "
-                            f"{list(rooms[0].keys())}"
-                        )
+                        logger.debug(f"Chaturbate room-list sample keys: {list(rooms[0].keys())}")
 
                     for room in rooms:
                         username = self._extract_username(room)
@@ -241,16 +231,13 @@ class ChaturbateApiClient(BaseApiClient):
         # to detect private/hidden shows reported as online by bulk API
         if live_indices:
             live_channels = [results[i].channel for i in live_indices]
-            statuses = await asyncio.gather(
-                *[self._get_room_status(ch) for ch in live_channels]
-            )
+            statuses = await asyncio.gather(*[self._get_room_status(ch) for ch in live_channels])
             for idx, status in zip(live_indices, statuses):
                 results[idx].room_status = status
 
         live_count = sum(1 for r in results if r.live)
         private_count = sum(
-            1 for r in results
-            if r.room_status and r.room_status not in ("public", "offline")
+            1 for r in results if r.room_status and r.room_status not in ("public", "offline")
         )
         logger.info(
             f"Chaturbate bulk: {live_count} online"
@@ -276,9 +263,7 @@ class ChaturbateApiClient(BaseApiClient):
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return "offline"
 
-    async def _get_livestreams_individual(
-        self, channels: list[Channel]
-    ) -> list[Livestream]:
+    async def _get_livestreams_individual(self, channels: list[Channel]) -> list[Livestream]:
         """Fallback: check channels one at a time with delays."""
         results: list[Livestream] = []
         for i, channel in enumerate(channels):
@@ -286,11 +271,7 @@ class ChaturbateApiClient(BaseApiClient):
                 result = await self.get_livestream(channel)
                 results.append(result)
             except Exception as e:
-                results.append(
-                    Livestream(
-                        channel=channel, live=False, error_message=str(e)
-                    )
-                )
+                results.append(Livestream(channel=channel, live=False, error_message=str(e)))
             # Throttle to avoid 429 rate limiting
             if i < len(channels) - 1:
                 await asyncio.sleep(2.0)
@@ -328,9 +309,7 @@ class ChaturbateApiClient(BaseApiClient):
         start_dt = room.get("start_dt_utc")
         if start_dt:
             try:
-                start_time = datetime.fromisoformat(
-                    start_dt.replace("Z", "+00:00")
-                )
+                start_time = datetime.fromisoformat(start_dt.replace("Z", "+00:00"))
                 if start_time.tzinfo is None:
                     start_time = start_time.replace(tzinfo=timezone.utc)
             except (ValueError, AttributeError):

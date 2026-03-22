@@ -652,7 +652,7 @@ class ChaturbateWebChatWidget(QWidget):
                     game_escaped = html.escape(self.livestream.game)
                     if cat_url:
                         category_html = (
-                            f' &nbsp;\u00b7&nbsp; \U0001f3ae '
+                            f" &nbsp;\u00b7&nbsp; \U0001f3ae "
                             f'<a href="{cat_url}" style="font-size: 10px; '
                             f'color: #6db3f2; text-decoration: none;">'
                             f"{game_escaped}</a>"
