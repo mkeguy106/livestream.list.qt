@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -282,6 +283,11 @@ class TwitchChatConnection(BaseChatConnection):
         # Join channel
         await self._ws.send_str(f"JOIN #{channel}")
 
+        # Process initial server messages (GLOBALUSERSTATE, USERSTATE, ROOMSTATE,
+        # NAMES, etc.) before marking connected so that _user_badges is populated
+        # for the first local-echo message the user sends.
+        await self._drain_initial_state()
+
         self._set_connected(channel_id)
         self._reset_backoff()  # Reset backoff on successful connection
         self._last_flush = time.monotonic()
@@ -345,6 +351,40 @@ class TwitchChatConnection(BaseChatConnection):
         except Exception as e:
             self._emit_error(f"Failed to send message: {e}")
             return False
+
+    async def _drain_initial_state(self) -> None:
+        """Read WebSocket messages until USERSTATE is received (or timeout).
+
+        After JOIN, the server sends GLOBALUSERSTATE, NAMES, ROOMSTATE, and
+        USERSTATE.  We need USERSTATE to populate ``_user_badges`` so that the
+        first local-echo message the user sends includes all badges (VIP, sub,
+        bits, etc.).
+        """
+        assert self._ws is not None
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                msg = await asyncio.wait_for(self._ws.receive(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            if msg.type == aiohttp.WSMsgType.TEXT:
+                got_userstate = False
+                for line in msg.data.split("\r\n"):
+                    if line:
+                        await self._handle_message(line)
+                        if "USERSTATE" in line and "GLOBALUSERSTATE" not in line:
+                            got_userstate = True
+                if got_userstate:
+                    # Flush any messages batched during the drain
+                    self._flush_batch()
+                    return
+            elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                break
+        # Flush any messages batched during the drain even on timeout
+        self._flush_batch()
 
     async def _read_loop(self) -> None:
         """Main read loop for incoming IRC messages."""
