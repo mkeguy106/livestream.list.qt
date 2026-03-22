@@ -298,10 +298,92 @@ class YouTubeApiClient(BaseApiClient):
             return True
         return False
 
+    @staticmethod
+    def _is_portrait_stream(data: dict) -> bool:
+        """Check if a player response contains a portrait (vertical) video stream.
+
+        Returns True if width < height in the first format with dimensions.
+        """
+        streaming_data = data.get("streamingData", {})
+        for fmt_list in ("adaptiveFormats", "formats"):
+            for fmt in streaming_data.get(fmt_list, []):
+                w = fmt.get("width", 0)
+                h = fmt.get("height", 0)
+                if w and h:
+                    return w < h
+        return False
+
+    async def _fetch_concurrent_live_video_ids(self, channel_id: str) -> list[str]:
+        """Fetch all currently-live video IDs from the channel's /streams tab."""
+        if channel_id.startswith("UC"):
+            url = f"https://www.youtube.com/channel/{channel_id}/streams"
+        elif channel_id.startswith("@"):
+            url = f"https://www.youtube.com/{channel_id}/streams"
+        else:
+            url = f"https://www.youtube.com/@{channel_id}/streams"
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with self.session.get(url, headers=self.SCRAPE_HEADERS, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return []
+                html = await resp.text()
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            return []
+
+        data = self._parse_initial_data(html)
+        if not data:
+            return []
+
+        video_ids: list[str] = []
+        tabs = data.get("contents", {}).get("twoColumnBrowseResultsRenderer", {}).get("tabs", [])
+        for tab in tabs:
+            content = tab.get("tabRenderer", {}).get("content", {})
+            grid = content.get("richGridRenderer", {})
+            for item in grid.get("contents", []):
+                renderer = (
+                    item.get("richItemRenderer", {}).get("content", {}).get("videoRenderer", {})
+                )
+                if not renderer:
+                    continue
+                # Check for LIVE overlay or badge
+                overlays = renderer.get("thumbnailOverlays", [])
+                overlay_styles = [
+                    o.get("thumbnailOverlayTimeStatusRenderer", {}).get("style", "")
+                    for o in overlays
+                ]
+                badges = renderer.get("badges", [])
+                badge_styles = [
+                    b.get("metadataBadgeRenderer", {}).get("style", "") for b in badges
+                ]
+                is_live = (
+                    "BADGE_STYLE_TYPE_LIVE_NOW" in badge_styles or "LIVE" in overlay_styles
+                )
+                if is_live:
+                    vid = renderer.get("videoId", "")
+                    if vid:
+                        video_ids.append(vid)
+        return video_ids
+
+    async def _fetch_video_player_response(self, video_id: str) -> dict | None:
+        """Fetch ytInitialPlayerResponse for a specific video."""
+        url = f"https://www.youtube.com/watch?v={video_id}"
+        try:
+            timeout = aiohttp.ClientTimeout(total=15)
+            async with self.session.get(url, headers=self.SCRAPE_HEADERS, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                html = await resp.text()
+        except (asyncio.TimeoutError, aiohttp.ClientError):
+            return None
+        return self._parse_player_response(html)
+
     async def _get_livestream_scrape(self, channel: Channel) -> Livestream | None:
         """Get livestream status using HTML scraping.
 
         Returns Livestream if successful, None if scraping failed.
+        When the /live page returns a portrait stream and the channel has a concurrent
+        landscape stream, the landscape stream is preferred.
         """
         try:
             html = await self._fetch_live_page(channel.channel_id)
@@ -311,7 +393,13 @@ class YouTubeApiClient(BaseApiClient):
             # Try ytInitialPlayerResponse first (contains videoDetails with isLive)
             data = self._parse_player_response(html)
             if data:
-                return self._extract_livestream_from_data(data, channel)
+                result = self._extract_livestream_from_data(data, channel)
+                if result and result.live and self._is_portrait_stream(data):
+                    # Portrait stream detected — check for a landscape alternative
+                    landscape = await self._find_landscape_alternative(channel, result.video_id)
+                    if landscape:
+                        return landscape
+                return result
 
             # Fallback to ytInitialData
             data = self._parse_initial_data(html)
@@ -335,12 +423,45 @@ class YouTubeApiClient(BaseApiClient):
             logger.debug(f"HTML scraping error for {channel.display_name}: {e}")
             return None
 
+    async def _find_landscape_alternative(
+        self, channel: Channel, current_video_id: str | None
+    ) -> Livestream | None:
+        """Check if the channel has a concurrent landscape livestream.
+
+        Called when the /live page returned a portrait stream.
+        """
+        live_ids = await self._fetch_concurrent_live_video_ids(channel.channel_id)
+        # Remove the current portrait video
+        candidates = [vid for vid in live_ids if vid != current_video_id]
+        if not candidates:
+            return None
+
+        for vid in candidates:
+            data = await self._fetch_video_player_response(vid)
+            if not data:
+                continue
+            if not self._is_portrait_stream(data):
+                logger.info(
+                    f"Found landscape alternative {vid} for {channel.display_name} "
+                    f"(replacing portrait {current_video_id})"
+                )
+                return self._extract_livestream_from_data(data, channel)
+        return None
+
     # -------------------------------------------------------------------------
     # yt-dlp Methods (Fallback - slower but more robust)
     # -------------------------------------------------------------------------
 
-    async def _get_livestream_ytdlp(self, channel: Channel) -> Livestream:
-        """Get livestream status using yt-dlp subprocess (fallback method)."""
+    async def _get_livestream_ytdlp(
+        self, channel: Channel, video_id: str | None = None
+    ) -> Livestream:
+        """Get livestream status using yt-dlp subprocess (fallback method).
+
+        Args:
+            channel: The channel to check.
+            video_id: If provided, fetch this specific video instead of the /live page.
+                      Used to preserve landscape video selection from the scrape pass.
+        """
         if not self._ytdlp_path:
             return Livestream(
                 channel=channel,
@@ -348,7 +469,10 @@ class YouTubeApiClient(BaseApiClient):
                 error_message="yt-dlp not installed",
             )
 
-        url = self._build_channel_live_url(channel.channel_id)
+        if video_id:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+        else:
+            url = self._build_channel_live_url(channel.channel_id)
 
         try:
             data = await self._run_ytdlp_async(url)
@@ -602,7 +726,11 @@ class YouTubeApiClient(BaseApiClient):
                 async def fetch_ytdlp(idx: int) -> tuple[int, Livestream]:
                     async with ytdlp_semaphore:
                         ls = final_results[idx]
-                        full_ls = await self._get_livestream_ytdlp(ls.channel)
+                        # Pass existing video_id so yt-dlp fetches the same video
+                        # (not the /live page which may pick a different stream)
+                        full_ls = await self._get_livestream_ytdlp(
+                            ls.channel, video_id=ls.video_id
+                        )
                         # Only use yt-dlp result if it's live and has start_time
                         if full_ls.live and full_ls.start_time:
                             return (idx, full_ls)

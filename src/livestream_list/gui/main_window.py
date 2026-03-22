@@ -176,6 +176,7 @@ class MainWindow(QMainWindow):
 
     _console_requested = Signal(str, str, object)  # channel_key, channel_name, process
     _play_blocked = Signal(str)  # status message when play is blocked
+    _stream_launched = Signal(str)  # channel display name — emitted after process starts
     _room_status_checked = Signal()  # Chaturbate room status updated, repaint needed
 
     def __init__(self, app: "Application"):
@@ -193,6 +194,7 @@ class MainWindow(QMainWindow):
         self._console_windows: dict = {}  # channel_key -> StreamlinkConsoleWindow
         self._console_requested.connect(self._open_console_window)
         self._play_blocked.connect(self.set_status)
+        self._stream_launched.connect(self._on_stream_launched)
         self._room_status_checked.connect(self._on_room_status_checked)
 
         # Debounce mechanism for refresh_stream_list to prevent rapid successive calls
@@ -1093,6 +1095,8 @@ class MainWindow(QMainWindow):
                         return
 
                 process = self.app.streamlink.launch(livestream)
+                if process:
+                    self._stream_launched.emit(livestream.channel.display_name)
                 if process and process.stdout and self.app.settings.streamlink.show_console:
                     self._console_requested.emit(
                         livestream.channel.unique_key,
@@ -1123,10 +1127,10 @@ class MainWindow(QMainWindow):
         ):
             self.app.open_builtin_chat(livestream)
 
-        # Update UI after short delay
-        QTimer.singleShot(500, self.refresh_stream_list)
-        name = livestream.channel.display_name
-        QTimer.singleShot(1000, lambda: self.set_status(f"Playing {name}"))
+    def _on_stream_launched(self, display_name: str):
+        """Handle stream process started (called via signal from background thread)."""
+        self.refresh_stream_list()
+        self.set_status(f"Playing {display_name}")
 
     def _open_console_window(self, channel_key: str, channel_name: str, process):
         """Open a console window for streamlink output (called via signal on main thread)."""
@@ -1233,9 +1237,9 @@ class MainWindow(QMainWindow):
                 return ls
         return None
 
-    def _on_open_browser(self, channel_id: str, platform: str):
+    def _on_open_browser(self, channel_id: str, platform: str, video_id: str = ""):
         """Handle opening in browser."""
-        self._chat_launcher.open_channel(channel_id, platform)
+        self._chat_launcher.open_channel(channel_id, platform, video_id=video_id or None)
 
     def _show_stream_context_menu(self, pos, livestream: Livestream) -> None:
         """Show right-click context menu for a stream."""
@@ -1261,7 +1265,9 @@ class MainWindow(QMainWindow):
 
         browser_action = menu.addAction("\U0001f310 Open in Browser")
         browser_action.triggered.connect(
-            lambda: self._on_open_browser(channel.channel_id, channel.platform.value)
+            lambda: self._on_open_browser(
+                channel.channel_id, channel.platform.value, livestream.video_id or ""
+            )
         )
 
         menu.addSeparator()

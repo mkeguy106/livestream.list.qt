@@ -215,6 +215,7 @@ class ChatLauncher:
         self,
         channel: str,
         platform: StreamPlatform = StreamPlatform.TWITCH,
+        video_id: str | None = None,
     ) -> str:
         """Get the channel URL for a channel based on platform."""
         if platform == StreamPlatform.TWITCH:
@@ -222,7 +223,9 @@ class ChatLauncher:
         elif platform == StreamPlatform.KICK:
             return f"https://kick.com/{channel.lower()}"
         elif platform == StreamPlatform.YOUTUBE:
-            # Open the live stream page (redirects to channel if not live)
+            # Prefer direct video URL — the /live endpoint can serve a mobile layout
+            if video_id:
+                return f"https://www.youtube.com/watch?v={video_id}"
             if channel.startswith("@"):
                 return f"https://youtube.com/{channel}/live"
             elif channel.startswith("UC"):
@@ -234,18 +237,24 @@ class ChatLauncher:
         else:
             return f"https://twitch.tv/{channel.lower()}"
 
-    def open_channel(self, channel: str, platform: StreamPlatform = StreamPlatform.TWITCH) -> bool:
+    def open_channel(
+        self,
+        channel: str,
+        platform: StreamPlatform = StreamPlatform.TWITCH,
+        video_id: str | None = None,
+    ) -> bool:
         """
         Open channel page in the configured browser.
 
         Args:
             channel: The channel name to open.
             platform: The streaming platform.
+            video_id: YouTube video ID (uses direct URL instead of /live endpoint).
 
         Returns:
             True if page was opened successfully, False otherwise.
         """
-        url = self.get_channel_url(channel, platform)
+        url = self.get_channel_url(channel, platform, video_id=video_id)
         return self._open_url_in_browser(url, f"channel {channel}")
 
     def open_chat_app_mode(

@@ -195,6 +195,10 @@ class Livestream:
         if self.channel.platform == StreamPlatform.TWITCH:
             return f"https://twitch.tv/{self.channel.channel_id}"
         elif self.channel.platform == StreamPlatform.YOUTUBE:
+            # Prefer direct video URL when available — the /live endpoint
+            # can sometimes serve a mobile-formatted page
+            if self.video_id:
+                return f"https://www.youtube.com/watch?v={self.video_id}"
             channel_id = self.channel.channel_id
             if channel_id.startswith("UC"):
                 return f"https://youtube.com/channel/{channel_id}/live"
