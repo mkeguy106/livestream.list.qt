@@ -11,6 +11,7 @@ import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from .models import LaunchMethod, Livestream, StreamPlatform, StreamQuality
 from .platform import IS_FLATPAK, IS_WINDOWS, SUBPROCESS_NO_WINDOW, host_command
@@ -62,7 +63,7 @@ class StreamlinkLauncher:
         self.settings = settings
         self._twitch_auth_token = twitch_auth_token
         # Track active streams: {channel_key: (process, livestream)}
-        self._active_streams: dict[str, tuple[subprocess.Popen, Livestream]] = {}
+        self._active_streams: dict[str, tuple[subprocess.Popen[Any], Livestream]] = {}
         # Callbacks for when a stream stops
         self._on_stream_stopped: list[Callable[[str], None]] = []
         # Callbacks for when a turbo-authenticated launch fails
@@ -188,7 +189,7 @@ class StreamlinkLauncher:
                 # Parse version from output like "streamlink 6.5.0"
                 parts = result.stdout.strip().split()
                 if len(parts) >= 2:
-                    return parts[1]
+                    return str(parts[1])
             return None
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
@@ -228,7 +229,9 @@ class StreamlinkLauncher:
             record_dir = os.path.expanduser(self.settings.record_directory)
             if os.path.isdir(record_dir):
                 # Safe filename: ChannelName_2026-02-16_14-30-00.ts
-                safe_name = re.sub(r"[^\w\-.]", "_", livestream.channel.display_name)
+                safe_name = re.sub(
+                    r"[^\w\-.]", "_", livestream.channel.display_name or ""
+                )
                 timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H-%M-%S")
                 filename = f"{safe_name}_{timestamp}.ts"
                 record_path = os.path.join(record_dir, filename)
@@ -267,7 +270,7 @@ class StreamlinkLauncher:
                 **SUBPROCESS_NO_WINDOW,
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().splitlines()[0]
+                return str(result.stdout.strip().splitlines()[0])
         except Exception as e:
             logger.warning(f"yt-dlp URL resolve failed: {e}")
         return None
@@ -297,7 +300,7 @@ class StreamlinkLauncher:
 
         return cmd
 
-    def _monitor_turbo_launch(self, process: subprocess.Popen, livestream: Livestream) -> None:
+    def _monitor_turbo_launch(self, process: subprocess.Popen[Any], livestream: Livestream) -> None:
         """Monitor a turbo-enabled launch for early failure (runs in daemon thread)."""
         try:
             process.wait(timeout=3)
@@ -311,17 +314,21 @@ class StreamlinkLauncher:
             except Exception as e:
                 logger.error(f"Turbo auth failed callback error: {e}")
 
-    def _monitor_unrecognized_args(self, process: subprocess.Popen) -> None:
+    def _monitor_unrecognized_args(self, process: subprocess.Popen[Any]) -> None:
         """Monitor a streamlink launch for unrecognized arguments (runs in daemon thread).
 
         Only used when show_console is False (no console window to display the error).
         """
         try:
             stderr_output = ""
-            for line in process.stderr:
-                if isinstance(line, bytes):
-                    line = line.decode("utf-8", errors="replace")
-                stderr_output += line
+            assert process.stderr is not None
+            for raw_line in process.stderr:
+                text_line = (
+                    raw_line.decode("utf-8", errors="replace")
+                    if isinstance(raw_line, bytes)
+                    else raw_line
+                )
+                stderr_output += text_line
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             return  # Still running — no error
@@ -359,7 +366,7 @@ class StreamlinkLauncher:
         self,
         livestream: Livestream,
         quality: StreamQuality | None = None,
-    ) -> subprocess.Popen | None:
+    ) -> subprocess.Popen[Any] | None:
         """Launch a stream using the configured method for the platform."""
         if not self.settings.enabled:
             logger.warning("Streamlink is disabled")
@@ -395,8 +402,8 @@ class StreamlinkLauncher:
             else:
                 stdout_target = subprocess.DEVNULL
                 stderr_target = subprocess.DEVNULL
-            popen_kwargs: dict = {}
-            if IS_WINDOWS:
+            popen_kwargs: dict[str, Any] = {}
+            if sys.platform == "win32":
                 popen_kwargs["creationflags"] = (
                     subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
                 )
@@ -459,7 +466,7 @@ class StreamlinkLauncher:
         logger.info(f"Launching: {' '.join(cmd)}")
 
         try:
-            async_kwargs: dict = {}
+            async_kwargs: dict[str, Any] = {}
             if not IS_WINDOWS:
                 async_kwargs["start_new_session"] = True
             process = await asyncio.create_subprocess_exec(
