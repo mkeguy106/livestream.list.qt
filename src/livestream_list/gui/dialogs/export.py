@@ -43,7 +43,9 @@ class ExportDialog(QDialog):
         layout.addWidget(self.include_settings_cb)
 
         # Buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
         buttons.accepted.connect(self._on_export)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)

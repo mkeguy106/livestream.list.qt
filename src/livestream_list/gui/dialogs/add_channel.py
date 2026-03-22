@@ -142,7 +142,7 @@ class AddChannelDialog(QDialog):
         """Handle focus events for auto-paste."""
         from PySide6.QtCore import QEvent
 
-        if obj == self.channel_edit and event.type() == QEvent.FocusIn:
+        if obj == self.channel_edit and event.type() == QEvent.Type.FocusIn:
             if not self._has_auto_pasted and not self.channel_edit.text():
                 self._try_paste_clipboard()
         return super().eventFilter(obj, event)

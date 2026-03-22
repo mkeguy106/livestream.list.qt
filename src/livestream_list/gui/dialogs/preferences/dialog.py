@@ -69,7 +69,7 @@ class PreferencesDialog(QDialog):
             tabs.setCurrentIndex(initial_tab)
 
         # Dialog buttons
-        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.accept)
         layout.addWidget(buttons)
 

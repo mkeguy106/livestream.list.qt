@@ -59,29 +59,29 @@ class ImportFollowsDialog(QDialog):
         # Login page
         login_page = QWidget()
         login_layout = QVBoxLayout(login_page)
-        login_layout.setAlignment(Qt.AlignCenter)
+        login_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         login_label = QLabel(
             f"Log in to {platform.value.title()} to import your followed channels."
         )
-        login_label.setAlignment(Qt.AlignCenter)
+        login_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         login_layout.addWidget(login_label)
 
         login_btn = QPushButton(f"Login with {platform.value.title()}")
         login_btn.clicked.connect(self._start_login)
-        login_layout.addWidget(login_btn, 0, Qt.AlignCenter)
+        login_layout.addWidget(login_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.stack.addWidget(login_page)
 
         # Waiting page
         waiting_page = QWidget()
         waiting_layout = QVBoxLayout(waiting_page)
-        waiting_layout.setAlignment(Qt.AlignCenter)
+        waiting_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         waiting_label = QLabel(
             "Waiting for authorization...\nPlease complete login in your browser."
         )
-        waiting_label.setAlignment(Qt.AlignCenter)
+        waiting_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         waiting_layout.addWidget(waiting_label)
 
         self.stack.addWidget(waiting_page)
@@ -89,36 +89,36 @@ class ImportFollowsDialog(QDialog):
         # Ready page
         ready_page = QWidget()
         ready_layout = QVBoxLayout(ready_page)
-        ready_layout.setAlignment(Qt.AlignCenter)
+        ready_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         ready_label = QLabel(
             f"You're logged in to {platform.value.title()}!\n"
             "Ready to import your followed channels."
         )
-        ready_label.setAlignment(Qt.AlignCenter)
+        ready_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ready_layout.addWidget(ready_label)
 
         import_btn = QPushButton("Import Followed Channels")
         import_btn.clicked.connect(self._start_import_follows)
-        ready_layout.addWidget(import_btn, 0, Qt.AlignCenter)
+        ready_layout.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.stack.addWidget(ready_page)
 
         # Importing page
         importing_page = QWidget()
         importing_layout = QVBoxLayout(importing_page)
-        importing_layout.setAlignment(Qt.AlignCenter)
+        importing_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.import_label = QLabel("Fetching followed channels...")
-        self.import_label.setAlignment(Qt.AlignCenter)
+        self.import_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         importing_layout.addWidget(self.import_label)
 
         self.import_progress = QProgressBar()
         self.import_progress.setMaximumWidth(300)
-        importing_layout.addWidget(self.import_progress, 0, Qt.AlignCenter)
+        importing_layout.addWidget(self.import_progress, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.import_detail = QLabel("")
-        self.import_detail.setAlignment(Qt.AlignCenter)
+        self.import_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.import_detail.setStyleSheet("color: gray;")
         importing_layout.addWidget(self.import_detail)
 
@@ -127,7 +127,7 @@ class ImportFollowsDialog(QDialog):
         # Close button
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.accept)
-        layout.addWidget(self.close_btn, 0, Qt.AlignCenter)
+        layout.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         # Determine initial state
         if self.app.settings.twitch.access_token:

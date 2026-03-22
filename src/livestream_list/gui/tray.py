@@ -18,7 +18,7 @@ def create_app_icon(size: int = 22) -> QIcon:
     pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
 
     painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
     # Scale factor based on size (22 is the base size)
     scale = size / 22.0

@@ -252,19 +252,19 @@ class MainWindow(QMainWindow):
         # Loading page
         loading_page = QWidget()
         loading_layout = QVBoxLayout(loading_page)
-        loading_layout.setAlignment(Qt.AlignCenter)
+        loading_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.loading_label = QLabel("Loading channels...")
-        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         loading_layout.addWidget(self.loading_label)
 
         self.loading_progress = QProgressBar()
         self.loading_progress.setMaximumWidth(300)
         self.loading_progress.setRange(0, 0)  # Indeterminate
-        loading_layout.addWidget(self.loading_progress, 0, Qt.AlignCenter)
+        loading_layout.addWidget(self.loading_progress, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.loading_detail = QLabel("")
-        self.loading_detail.setAlignment(Qt.AlignCenter)
+        self.loading_detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
         loading_layout.addWidget(self.loading_detail)
 
         self.stack.addWidget(loading_page)  # Index 0
@@ -272,18 +272,18 @@ class MainWindow(QMainWindow):
         # Empty page
         empty_page = QWidget()
         empty_layout = QVBoxLayout(empty_page)
-        empty_layout.setAlignment(Qt.AlignCenter)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label = QLabel("No channels added yet.\nClick the + button to add a channel.")
-        self.empty_label.setAlignment(Qt.AlignCenter)
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(self.empty_label)
         self.stack.addWidget(empty_page)  # Index 1
 
         # All offline page
         all_offline_page = QWidget()
         all_offline_layout = QVBoxLayout(all_offline_page)
-        all_offline_layout.setAlignment(Qt.AlignCenter)
+        all_offline_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.all_offline_label = QLabel("All channels are offline")
-        self.all_offline_label.setAlignment(Qt.AlignCenter)
+        self.all_offline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         all_offline_layout.addWidget(self.all_offline_label)
         self.stack.addWidget(all_offline_page)  # Index 2
 
@@ -1347,10 +1347,10 @@ class MainWindow(QMainWindow):
             self,
             "Move to Trash",
             f"Move {len(selected_keys)} channel(s) to trash?",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self.app.monitor.trash_channels(selected_keys)
             self._exit_selection_mode()
             self.refresh_stream_list()
@@ -1379,7 +1379,7 @@ class MainWindow(QMainWindow):
     def show_add_channel_dialog(self):
         """Show the add channel dialog."""
         dialog = AddChannelDialog(self, self.app)
-        if dialog.exec() == QDialog.Accepted:
+        if dialog.exec() == QDialog.DialogCode.Accepted:
             self.refresh_stream_list()
 
     def show_preferences_dialog(self, initial_tab: int = 0):
@@ -1543,8 +1543,8 @@ class MainWindow(QMainWindow):
             dont_ask_cb.setChecked(True)
             msg.setCheckBox(dont_ask_cb)
 
-            run_bg_btn = msg.addButton("Run in Background", QMessageBox.AcceptRole)
-            msg.addButton("Quit", QMessageBox.RejectRole)
+            run_bg_btn = msg.addButton("Run in Background", QMessageBox.ButtonRole.AcceptRole)
+            msg.addButton("Quit", QMessageBox.ButtonRole.RejectRole)
             msg.setDefaultButton(run_bg_btn)
 
             msg.exec()
@@ -1867,9 +1867,9 @@ class TrashDialog(QDialog):
             self,
             "Delete Permanently",
             f"Permanently delete {len(indices)} channel(s)? This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self.monitor.permanently_delete_trash(indices)
             self._populate()
 
@@ -1882,8 +1882,8 @@ class TrashDialog(QDialog):
             self,
             "Empty Trash",
             f"Permanently delete all {len(trash)} trashed channel(s)? This cannot be undone.",
-            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             self.monitor.empty_trash()
             self._populate()
