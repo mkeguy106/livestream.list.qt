@@ -455,7 +455,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             return 1.0
 
     def _current_scale_from_option(self, option: QStyleOptionViewItem) -> float:
-        widget = option.widget  # type: ignore[attr-defined]
+        widget = option.widget
         if widget is not None:
             try:
                 return float(widget.devicePixelRatioF())
@@ -573,7 +573,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         instead of duplicating the math in every method.
         """
         padding_v = self.settings.line_spacing
-        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        opt_rect: QRect = option.rect
         rect = opt_rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
         rect_x = rect.x()
         rect_y = rect.y()
@@ -581,7 +581,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         x = rect_x
         y = rect_y
 
-        opt_font: QFont = option.font  # type: ignore[attr-defined]
+        opt_font: QFont = option.font
         fb = self._get_font_bundle(opt_font)
         fm = fb.main_fm
         scale = self._current_scale_from_option(option)
@@ -705,12 +705,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background
-        is_selected = bool(
-            option.state & QStyle.StateFlag.State_Selected  # type: ignore[attr-defined]
-        )
-        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
-        opt_palette = option.palette  # type: ignore[attr-defined]
-        opt_font: QFont = option.font  # type: ignore[attr-defined]
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        opt_rect: QRect = option.rect
+        opt_palette = option.palette
+        opt_font: QFont = option.font
         if is_selected:
             painter.fillRect(opt_rect, opt_palette.highlight())
         elif message.is_system:
@@ -1248,7 +1246,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         Cache is keyed by message ID, available width, and relevant settings.
         """
         message: ChatMessage | None = index.data(MessageRole)
-        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        opt_rect: QRect = option.rect
         if not message:
             return QSize(opt_rect.width(), 24)
 
@@ -1273,7 +1271,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Cache miss - calculate size
         padding_v = self.settings.line_spacing
-        opt_font: QFont = option.font  # type: ignore[attr-defined]
+        opt_font: QFont = option.font
         fb = self._get_font_bundle(opt_font)
         fm = fb.main_fm
         scale = self._current_scale_from_option(option)

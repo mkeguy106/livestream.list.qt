@@ -362,12 +362,8 @@ class YouTubeApiClient(BaseApiClient):
                     for o in overlays
                 ]
                 badges = renderer.get("badges", [])
-                badge_styles = [
-                    b.get("metadataBadgeRenderer", {}).get("style", "") for b in badges
-                ]
-                is_live = (
-                    "BADGE_STYLE_TYPE_LIVE_NOW" in badge_styles or "LIVE" in overlay_styles
-                )
+                badge_styles = [b.get("metadataBadgeRenderer", {}).get("style", "") for b in badges]
+                is_live = "BADGE_STYLE_TYPE_LIVE_NOW" in badge_styles or "LIVE" in overlay_styles
                 if is_live:
                     vid = renderer.get("videoId", "")
                     if vid:
@@ -737,9 +733,7 @@ class YouTubeApiClient(BaseApiClient):
                         ls = final_results[idx]
                         # Pass existing video_id so yt-dlp fetches the same video
                         # (not the /live page which may pick a different stream)
-                        full_ls = await self._get_livestream_ytdlp(
-                            ls.channel, video_id=ls.video_id
-                        )
+                        full_ls = await self._get_livestream_ytdlp(ls.channel, video_id=ls.video_id)
                         # Only use yt-dlp result if it's live and has start_time
                         if full_ls.live and full_ls.start_time:
                             return (idx, full_ls)

@@ -70,9 +70,7 @@ class PreviewUrlResolver(QThread):
         try:
             args = ["streamlink", "--stream-url"]
             if self._twitch_token:
-                args.extend(
-                    ["--twitch-api-header", f"Authorization=OAuth {self._twitch_token}"]
-                )
+                args.extend(["--twitch-api-header", f"Authorization=OAuth {self._twitch_token}"])
             args.extend([self._stream_url, "worst,360p,480p,best"])
             cmd = host_command(args)
             result = subprocess.run(

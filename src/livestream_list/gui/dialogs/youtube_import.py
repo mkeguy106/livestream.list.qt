@@ -141,9 +141,7 @@ class YouTubeImportDialog(QDialog):
 
                     if self._filter_livestreams and channels:
                         # Filter to only channels that do livestreams
-                        def progress_callback(
-                            checked: int, total: int, name: str
-                        ) -> None:
+                        def progress_callback(checked: int, total: int, name: str) -> None:
                             self.filter_progress.emit(checked, total, name)
 
                         channels = loop.run_until_complete(

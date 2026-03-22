@@ -1101,15 +1101,10 @@ class MainWindow(QMainWindow):
             try:
                 # Pre-check Chaturbate room status before launching
                 if livestream.channel.platform == StreamPlatform.CHATURBATE:
-                    status = self._check_chaturbate_room_status(
-                        livestream.channel.channel_id
-                    )
+                    status = self._check_chaturbate_room_status(livestream.channel.channel_id)
                     if status and status != "public":
                         label = status.replace("_", " ").title()
-                        name = (
-                            livestream.channel.display_name
-                            or livestream.channel.channel_id
-                        )
+                        name = livestream.channel.display_name or livestream.channel.channel_id
                         self._play_blocked.emit(f"{name} is in a {label} show")
                         return
 
@@ -1130,9 +1125,7 @@ class MainWindow(QMainWindow):
                 ):
                     ch = livestream.channel
                     video_id = getattr(livestream, "video_id", None) or ""
-                    self._chat_launcher.open_chat(
-                        ch.channel_id, ch.platform, video_id
-                    )
+                    self._chat_launcher.open_chat(ch.channel_id, ch.platform, video_id)
             except Exception as e:
                 logger.error(f"Launch error: {e}")
 
@@ -1249,9 +1242,7 @@ class MainWindow(QMainWindow):
             if livestream:
                 self.app.open_builtin_chat(livestream)
             return
-        self._chat_launcher.open_chat(
-            channel_id, StreamPlatform(platform), video_id
-        )
+        self._chat_launcher.open_chat(channel_id, StreamPlatform(platform), video_id)
 
     def _find_livestream(self, channel_id: str, platform: str) -> Livestream | None:
         """Find a livestream by channel_id and platform."""
@@ -1660,9 +1651,7 @@ class MainWindow(QMainWindow):
                 if index.isValid():
                     livestream = index.data(StreamRole)
                     if livestream:
-                        self._show_stream_context_menu(
-                            me.globalPosition().toPoint(), livestream
-                        )
+                        self._show_stream_context_menu(me.globalPosition().toPoint(), livestream)
                         return True
 
         # Selection mode: shift+click for range, track anchor on normal click
@@ -1675,13 +1664,9 @@ class MainWindow(QMainWindow):
             if me.button() == Qt.MouseButton.LeftButton:
                 index = self.stream_list.indexAt(me.pos())
                 if index.isValid():
-                    has_shift = bool(
-                        me.modifiers() & Qt.KeyboardModifier.ShiftModifier
-                    )
+                    has_shift = bool(me.modifiers() & Qt.KeyboardModifier.ShiftModifier)
                     if has_shift and self._last_clicked_index is not None:
-                        self._stream_model.select_range(
-                            self._last_clicked_index.row(), index.row()
-                        )
+                        self._stream_model.select_range(self._last_clicked_index.row(), index.row())
                         self._update_selection_count()
                         return True
                     else:

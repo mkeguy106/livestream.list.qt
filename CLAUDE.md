@@ -83,6 +83,13 @@ pytest tests/test_file.py::test_name -v
 - pytest uses `asyncio_mode = "auto"` (no `@pytest.mark.asyncio` needed)
 - Build system: hatchling (version sourced from `__version__.py`)
 
+### Mypy Configuration
+
+- **Strict mode is enabled and CI blocks on errors** — all source files must pass `mypy src/` with zero errors
+- mypy must be run from the venv (`pip install -e ".[dev]"`) to resolve PySide6/aiohttp/keyring stubs. System mypy will show false `import-not-found` errors.
+- Use `sys.platform == "win32"` (not `IS_WINDOWS`) for Windows-only code guards — mypy narrows `winreg`/`winsound` types with `sys.platform` but doesn't understand custom constants
+- Chat connection `disconnect()` methods conflict with `QObject.disconnect()` — use `# type: ignore[override]`
+
 ## Architecture
 
 ### Module Structure
