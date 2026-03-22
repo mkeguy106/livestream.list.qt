@@ -122,11 +122,11 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
             ),
         ),
         (
-            Channel("hasanabi", StreamPlatform.TWITCH, "HasanAbi"),
+            Channel("caedrel", StreamPlatform.TWITCH, "Caedrel"),
             Livestream(
                 channel=None, live=True,
-                title="NEWS & POLITICS | reacting to everything",
-                game="Just Chatting", viewers=24_870,
+                title="LEC Watch Party | T1 vs GEN",
+                game="League of Legends", viewers=24_870,
                 start_time=now - timedelta(hours=6, minutes=40),
             ),
         ),
