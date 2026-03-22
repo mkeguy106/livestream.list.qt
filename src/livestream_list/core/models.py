@@ -61,6 +61,7 @@ class Channel:
     imported_by: str | None = None
     dont_notify: bool = False
     favorite: bool = False
+    auto_launch: bool = False
     added_at: datetime = field(default_factory=datetime.now)
 
     @property

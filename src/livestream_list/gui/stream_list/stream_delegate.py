@@ -86,6 +86,7 @@ class StreamRowDelegate(QStyledItemDelegate):
     play_clicked = Signal(object)  # Livestream
     stop_clicked = Signal(str)  # channel_key
     favorite_clicked = Signal(str)  # channel_key
+    auto_launch_clicked = Signal(str)  # channel_key
     chat_clicked = Signal(str, str, str)  # channel_id, platform, video_id
     browser_clicked = Signal(str, str)  # channel_id, platform
     room_status_requested = Signal(object)  # Livestream needing room status check
@@ -313,6 +314,9 @@ class StreamRowDelegate(QStyledItemDelegate):
             btn_widths.append(icon_size + BUTTON_PADDING)
         if self._settings.channel_icons.show_favorite:
             btn_widths.append(icon_size + BUTTON_PADDING)
+        # Auto-launch button (always shown alongside favorite)
+        if self._settings.channel_icons.show_favorite:
+            btn_widths.append(icon_size + BUTTON_PADDING)
         if self._settings.channel_icons.show_play:
             # play button slightly wider
             btn_widths.append(icon_size + BUTTON_PADDING + 4)
@@ -431,6 +435,14 @@ class StreamRowDelegate(QStyledItemDelegate):
             button_rects["favorite"] = btn_rect
             fav_text = "\u2605" if channel.favorite else "\u2606"  # Filled/empty star
             self._draw_button(painter, btn_rect, fav_text, is_selected)
+            btn_x += icon_size + BUTTON_PADDING + btn_spacing
+
+        # Auto-launch button
+        if self._settings.channel_icons.show_favorite:
+            btn_rect = QRect(btn_x, btn_y, icon_size + BUTTON_PADDING, btn_height)
+            button_rects["auto_launch"] = btn_rect
+            al_color = self._accent if channel.auto_launch else None
+            self._draw_button(painter, btn_rect, "A", is_selected, text_color=al_color)
             btn_x += icon_size + BUTTON_PADDING + btn_spacing
 
         # Play/Stop button
@@ -596,6 +608,11 @@ class StreamRowDelegate(QStyledItemDelegate):
             self.favorite_clicked.emit(channel.unique_key)
             return True
 
+        # Check auto-launch button
+        if "auto_launch" in rects and rects["auto_launch"].contains(pos):
+            self.auto_launch_clicked.emit(channel.unique_key)
+            return True
+
         # Check chat button
         if "chat" in rects and rects["chat"].contains(pos):
             video_id = getattr(livestream, "video_id", None) or ""
@@ -609,6 +626,15 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         return False
 
+    # Button tooltip labels
+    _BUTTON_TOOLTIPS = {
+        "browser": "Browser",
+        "chat": "Chat",
+        "favorite": "Favorite",
+        "auto_launch": "Auto Play",
+        "play": "Play",
+    }
+
     def helpEvent(  # noqa: N802
         self,
         event: QHelpEvent,
@@ -616,13 +642,30 @@ class StreamRowDelegate(QStyledItemDelegate):
         option: QStyleOptionViewItem,
         index: QModelIndex,
     ) -> bool:
-        """Show tooltip for private/hidden Chaturbate rooms."""
+        """Show tooltip for buttons and private/hidden Chaturbate rooms."""
         if event.type() != QEvent.Type.ToolTip:
             return super().helpEvent(event, view, option, index)
 
         livestream: Livestream | None = index.data(StreamRole)
         if not livestream:
             return False
+
+        # Check if cursor is over a button — show button tooltip
+        # (button tooltips take priority over playing/chaturbate tooltips)
+        row = index.row()
+        pos = event.pos()
+        rects = self._button_rects.get(row, {})
+        for btn_name, rect in rects.items():
+            if rect.contains(pos):
+                tooltip = self._BUTTON_TOOLTIPS.get(btn_name, "")
+                if tooltip:
+                    QToolTip.showText(event.globalPos(), tooltip, view)
+                    return True
+
+        # Show "Currently playing" tooltip for playing channels
+        if index.data(PlayingRole):
+            QToolTip.showText(event.globalPos(), "Currently playing", view)
+            return True
 
         _delegate_logger.info(
             "helpEvent: %s platform=%s live=%s room_status=%s",

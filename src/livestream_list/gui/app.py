@@ -481,6 +481,13 @@ class Application(QApplication):
         if self.notification_bridge:
             self.notification_bridge.queue_notification(livestream)
 
+        # Auto-launch if enabled for this channel
+        if livestream.channel.auto_launch and self.streamlink:
+            if not self.streamlink.is_playing(livestream.channel.unique_key):
+                logger.info("Auto-launching %s", livestream.display_name)
+                self.streamlink.launch(livestream)
+                self.open_stream_requested.emit(livestream)
+
         # Emit signal for UI update
         self.stream_online.emit(livestream)
 

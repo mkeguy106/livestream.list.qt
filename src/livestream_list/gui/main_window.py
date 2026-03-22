@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         self._stream_delegate.play_clicked.connect(self._on_play_stream)
         self._stream_delegate.stop_clicked.connect(self._on_stop_stream)
         self._stream_delegate.favorite_clicked.connect(self._on_toggle_favorite)
+        self._stream_delegate.auto_launch_clicked.connect(self._on_toggle_auto_launch)
         self._stream_delegate.chat_clicked.connect(self._on_open_chat)
         self._stream_delegate.browser_clicked.connect(self._on_open_browser)
         self._stream_delegate.room_status_requested.connect(self._check_room_status_async)
@@ -467,6 +468,11 @@ class MainWindow(QMainWindow):
         self._favorites_action.setChecked(self.app.settings.favorites_only)
         self._favorites_action.triggered.connect(self._on_filter_changed)
 
+        self._auto_launch_action = view_menu.addAction("Auto &Play Only")
+        self._auto_launch_action.setCheckable(True)
+        self._auto_launch_action.setChecked(self.app.settings.auto_launch_only)
+        self._auto_launch_action.triggered.connect(self._on_filter_changed)
+
         view_menu.addSeparator()
 
         trash_action = view_menu.addAction("&Trash Bin...")
@@ -477,6 +483,13 @@ class MainWindow(QMainWindow):
 
         about_action = help_menu.addAction("&About")
         about_action.triggered.connect(self._show_about)
+
+        # Style cycle button in top-right corner of menu bar
+        self.style_btn = QToolButton()
+        self.style_btn.setStyleSheet("QToolButton { border: none; padding: 2px 6px; }")
+        self.style_btn.clicked.connect(self._cycle_ui_style)
+        self._update_style_btn()
+        menubar.setCornerWidget(self.style_btn, Qt.Corner.TopRightCorner)
 
     def _create_toolbar(self):
         """Create the toolbar."""
@@ -507,6 +520,14 @@ class MainWindow(QMainWindow):
         self.select_btn.setCheckable(True)
         self.select_btn.clicked.connect(self._toggle_selection_mode)
         toolbar.addWidget(self.select_btn)
+
+        self.preview_btn = QToolButton()
+        self.preview_btn.setText("👁")
+        self.preview_btn.setToolTip("Toggle live preview on hover")
+        self.preview_btn.setCheckable(True)
+        self.preview_btn.setChecked(self.app.settings.streamlink.preview_on_hover)
+        self.preview_btn.clicked.connect(self._toggle_preview)
+        toolbar.addWidget(self.preview_btn)
 
         # Spacer to push filters to the right
         spacer = QWidget()
@@ -561,6 +582,7 @@ class MainWindow(QMainWindow):
         """Apply current settings to the UI."""
         self._hide_offline_action.setChecked(self.app.settings.hide_offline)
         self._favorites_action.setChecked(self.app.settings.favorites_only)
+        self._auto_launch_action.setChecked(self.app.settings.auto_launch_only)
         self.sort_combo.setCurrentIndex(self.app.settings.sort_mode.value)
         # Invalidate delegate cache in case layout settings changed
         if self._stream_delegate:
@@ -648,6 +670,8 @@ class MainWindow(QMainWindow):
                     self.all_offline_label.setText("All channels are offline")
             elif self._favorites_action.isChecked():
                 self.all_offline_label.setText("No favorite channels")
+            elif self._auto_launch_action.isChecked():
+                self.all_offline_label.setText("No auto-play channels")
             elif self._name_filter:
                 self.all_offline_label.setText(f"No channels match '{self._name_filter}'")
             elif self._platform_filter:
@@ -687,6 +711,7 @@ class MainWindow(QMainWindow):
         # Apply filters
         hide_offline = self._hide_offline_action.isChecked()
         favorites_only = self._favorites_action.isChecked()
+        auto_launch_only = self._auto_launch_action.isChecked()
 
         filtered = []
         for ls in livestreams:
@@ -696,6 +721,10 @@ class MainWindow(QMainWindow):
 
             # Favorites filter
             if favorites_only and not ls.channel.favorite:
+                continue
+
+            # Auto-launch filter
+            if auto_launch_only and not ls.channel.auto_launch:
                 continue
 
             # Name filter
@@ -819,6 +848,7 @@ class MainWindow(QMainWindow):
         """Handle filter checkbox changes."""
         self.app.settings.hide_offline = self._hide_offline_action.isChecked()
         self.app.settings.favorites_only = self._favorites_action.isChecked()
+        self.app.settings.auto_launch_only = self._auto_launch_action.isChecked()
         self._platform_filter = self.platform_combo.currentData()
         self.app.save_settings()
         self.refresh_stream_list()
@@ -1168,6 +1198,19 @@ class MainWindow(QMainWindow):
             self.app.save_channels()
             self.refresh_stream_list()
 
+    def _on_toggle_auto_launch(self, channel_key: str):
+        """Handle toggling auto-launch status."""
+        monitor = self.app.monitor
+        if not monitor:
+            return
+
+        for ch in monitor.channels:
+            if ch.unique_key == channel_key:
+                monitor.set_auto_launch(ch, not ch.auto_launch)
+                self.app.save_channels()
+                self.refresh_stream_list()
+                break
+
     def _on_open_chat(self, channel_id: str, platform: str, video_id: str):
         """Handle opening chat."""
         if self.app.settings.chat.mode == "builtin" and self.app.chat_manager:
@@ -1224,6 +1267,10 @@ class MainWindow(QMainWindow):
         fav_label = "\u2605 Unfavorite" if channel.favorite else "\u2606 Favorite"
         fav_action = menu.addAction(fav_label)
         fav_action.triggered.connect(lambda: self._on_toggle_favorite(channel.unique_key))
+
+        al_label = "A Disable Auto Play" if channel.auto_launch else "A Auto Play"
+        al_action = menu.addAction(al_label)
+        al_action.triggered.connect(lambda: self._on_toggle_auto_launch(channel.unique_key))
 
         menu.exec(pos)
 
@@ -1595,14 +1642,20 @@ class MainWindow(QMainWindow):
                     # Track anchor for next shift+click (let editorEvent handle toggle)
                     self._last_clicked_index = index
 
-        # Video preview on hover over live channels
+        # Video preview on hover over live channels (suppress when over buttons)
         if event.type() == QEvent.Type.MouseMove:
             ctrl = self._ensure_preview_controller()
             if ctrl:
                 index = self.stream_list.indexAt(event.pos())
                 if index.isValid():
                     livestream = index.data(StreamRole)
-                    if livestream and livestream.live:
+                    over_button = self._is_over_button(index.row(), event.pos())
+                    is_playing = (
+                        livestream
+                        and self.app.streamlink
+                        and self.app.streamlink.is_playing(livestream.channel.unique_key)
+                    )
+                    if livestream and livestream.live and not over_button and not is_playing:
                         ctrl.on_hover_enter(livestream)
                     else:
                         ctrl.on_hover_leave()
@@ -1614,6 +1667,45 @@ class MainWindow(QMainWindow):
                 self._preview_controller.on_hover_leave()
 
         return super().eventFilter(obj, event)
+
+    def _cycle_ui_style(self) -> None:
+        """Cycle through UI styles: Default → Compact 1 → Compact 2 → Compact 3 → Default."""
+        from ..core.models import UIStyle
+
+        current = self.app.settings.ui_style
+        next_val = (current + 1) % len(self._STYLE_NAMES)
+        self.app.settings.ui_style = UIStyle(next_val)
+        self.app.save_settings()
+        self._update_style_btn()
+        if self._stream_delegate:
+            self._stream_delegate.invalidate_size_cache()
+        self.refresh_stream_list()
+
+    _STYLE_NAMES = {0: "Default", 1: "Compact 1", 2: "Compact 2", 3: "Compact 3"}
+    _STYLE_ICONS = {0: "\u2630", 1: "\u2261", 2: "\u2015", 3: "\u00b7"}  # ☰ ≡ ― ·
+
+    def _update_style_btn(self) -> None:
+        """Update the style button icon and tooltip to reflect current/next style."""
+        current = self.app.settings.ui_style
+        next_idx = (current + 1) % len(self._STYLE_NAMES)
+        current_name = self._STYLE_NAMES.get(current, "Default")
+        next_name = self._STYLE_NAMES.get(next_idx, "Default")
+        self.style_btn.setText(self._STYLE_ICONS.get(current, "\u2630"))
+        self.style_btn.setToolTip(f"View: {current_name} (click for {next_name})")
+
+    def _toggle_preview(self) -> None:
+        """Toggle the live preview on hover setting."""
+        enabled = self.preview_btn.isChecked()
+        self.app.settings.streamlink.preview_on_hover = enabled
+        self.app.save_settings()
+        # Hide any active preview when disabling
+        if not enabled and self._preview_controller:
+            self._preview_controller.on_hover_leave()
+
+    def _is_over_button(self, row: int, pos) -> bool:
+        """Check if the position is over any delegate button rect."""
+        rects = self._stream_delegate._button_rects.get(row, {})
+        return any(rect.contains(pos) for rect in rects.values())
 
     def _ensure_preview_controller(self):
         """Lazily create the video preview controller."""

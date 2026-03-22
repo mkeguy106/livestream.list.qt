@@ -401,6 +401,13 @@ class StreamMonitor:
                 self._channels[channel.unique_key].favorite = favorite
         self._schedule_debounced_save()
 
+    def set_auto_launch(self, channel: Channel, auto_launch: bool) -> None:
+        """Set the auto-launch status for a channel."""
+        with self._state_lock:
+            if channel.unique_key in self._channels:
+                self._channels[channel.unique_key].auto_launch = auto_launch
+        self._schedule_debounced_save()
+
     def _schedule_debounced_save(self) -> None:
         """Schedule a debounced save operation.
 
@@ -442,6 +449,7 @@ class StreamMonitor:
                     "imported_by": ch.imported_by,
                     "dont_notify": ch.dont_notify,
                     "favorite": ch.favorite,
+                    "auto_launch": ch.auto_launch,
                     "added_at": ch.added_at.isoformat(),
                 }
                 livestream = self._livestreams.get(ch.unique_key)
@@ -506,6 +514,7 @@ class StreamMonitor:
                     imported_by=ch_data.get("imported_by"),
                     dont_notify=ch_data.get("dont_notify", False),
                     favorite=ch_data.get("favorite", False),
+                    auto_launch=ch_data.get("auto_launch", False),
                 )
 
                 if "added_at" in ch_data:

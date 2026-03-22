@@ -331,6 +331,7 @@ class Settings:
     sort_mode: SortMode = SortMode.VIEWERS
     hide_offline: bool = False
     favorites_only: bool = False
+    auto_launch_only: bool = False
     ui_style: UIStyle = UIStyle.DEFAULT
     platform_colors: bool = True  # Color platform icons and channel names
     font_size: int = 0  # 0 = system default, otherwise point size for stream list
@@ -608,6 +609,7 @@ class Settings:
             settings.sort_mode = SortMode.VIEWERS  # Default to Viewers
         settings.hide_offline = data.get("hide_offline", settings.hide_offline)
         settings.favorites_only = data.get("favorites_only", settings.favorites_only)
+        settings.auto_launch_only = data.get("auto_launch_only", settings.auto_launch_only)
         old_ui_style = data.get("ui_style", settings.ui_style.value)
         try:
             settings.ui_style = UIStyle(old_ui_style)
