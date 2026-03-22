@@ -349,7 +349,7 @@ class YouTubeChatConnection(BaseChatConnection):
         self._video_id = video_id
 
         try:
-            import pytchat
+            import pytchat  # type: ignore[import-untyped]
         except ImportError:
             self._emit_error("pytchat library not installed. Install with: pip install pytchat")
             return

@@ -223,8 +223,8 @@ class Application(QApplication):
         self.setOrganizationName("app.livestreamlist")
         self.setOrganizationDomain("app.livestreamlist")
 
-        # Core components
-        self.settings: Settings | None = None
+        # Core components (settings loaded eagerly — Settings.load() never raises)
+        self.settings: Settings = Settings.load()
         self.monitor: StreamMonitor | None = None
         self.notifier: Notifier | None = None
         self.streamlink: StreamlinkLauncher | None = None
@@ -269,9 +269,6 @@ class Application(QApplication):
         """Initialize application components."""
         # Start watchdog to detect main thread lockups (debug tool)
         self._watchdog = MainThreadWatchdog(parent=self, threshold_ms=500)
-
-        # Load settings
-        self.settings = Settings.load()
 
         # Initialize theme manager with settings and apply app stylesheet
         ThemeManager.set_settings(self.settings)
@@ -503,7 +500,7 @@ class Application(QApplication):
             self.streamlink.launch(livestream)
 
             # Auto-open chat if enabled (browser mode only - built-in handled on main thread)
-            if self.settings and self.settings.chat.auto_open and self.settings.chat.enabled:
+            if self.settings.chat.auto_open and self.settings.chat.enabled:
                 if self.settings.chat.mode == "browser":
                     ch = livestream.channel
                     video_id = getattr(livestream, "video_id", None) or ""
@@ -524,8 +521,7 @@ class Application(QApplication):
 
         # Open built-in chat on main thread (if enabled)
         if (
-            self.settings
-            and self.settings.chat.auto_open
+            self.settings.chat.auto_open
             and self.settings.chat.enabled
             and self.settings.chat.mode == "builtin"
         ):
@@ -699,8 +695,7 @@ class Application(QApplication):
 
     def save_settings(self):
         """Save current settings."""
-        if self.settings:
-            self.settings.save()
+        self.settings.save()
 
     def save_channels(self):
         """Save channels to disk."""

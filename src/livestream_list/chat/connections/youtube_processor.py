@@ -9,7 +9,7 @@ Extends pytchat's DefaultProcessor to additionally capture:
 import logging
 import threading
 
-from pytchat.processors.default.processor import DefaultProcessor
+from pytchat.processors.default.processor import DefaultProcessor  # type: ignore[import-untyped]
 
 from ..models import ChatRoomState, ModerationEvent
 
