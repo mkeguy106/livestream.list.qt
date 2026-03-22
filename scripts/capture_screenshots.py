@@ -498,7 +498,10 @@ def main():
     window.resize(540, 700)  # 900 * 0.6 = 540 (40% narrower)
     window.show()
     window.refresh_stream_list()
+    # Force QListView to compute correct sizeHints after initial layout
+    window.stream_list.scheduleDelayedItemsLayout()
     qt_app.processEvents()
+    qt_app.processEvents()  # Second pass to finalize layout
 
     def do_captures():
         print("\nCapturing screenshots...")
@@ -530,6 +533,8 @@ def main():
         window.resize(540, 700)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
+        window.stream_list.scheduleDelayedItemsLayout()
+        qt_app.processEvents()
         window.refresh_stream_list()
         qt_app.processEvents()
 
