@@ -1,4 +1,5 @@
 name: Build Flatpak
+# Security hardening: persist-credentials: false, see 3fb08ec
 
 on:
   pull_request:
