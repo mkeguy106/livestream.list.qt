@@ -99,7 +99,8 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
         (
             Channel("exampleroom", StreamPlatform.CHATURBATE, "exampleroom"),
             Livestream(
-                channel=None, live=True, title="", viewers=3_412,
+                channel=None, live=True, title="come hang out",
+                game="Chaturbate", viewers=3_412,
                 start_time=now - timedelta(hours=1),
             ),
         ),
@@ -171,7 +172,8 @@ def create_sample_data() -> list[tuple[Channel, Livestream]]:
         (
             Channel("thirdroom", StreamPlatform.CHATURBATE, "thirdroom"),
             Livestream(
-                channel=None, live=True, title="", viewers=1_205,
+                channel=None, live=True, title="chill vibes",
+                game="Chaturbate", viewers=1_205,
                 start_time=now - timedelta(hours=2, minutes=30),
             ),
         ),
@@ -497,46 +499,52 @@ def main():
     window._initial_check_complete = True
     window.resize(700, 700)
     window.show()
-    window.refresh_stream_list()
-    # Force QListView to compute correct sizeHints after initial layout
-    window.stream_list.scheduleDelayedItemsLayout()
     qt_app.processEvents()
-    qt_app.processEvents()  # Second pass to finalize layout
+
+    def _force_relayout():
+        """Force full relayout: invalidate caches, scroll through all rows, re-layout."""
+        if window._stream_delegate:
+            window._stream_delegate.invalidate_size_cache()
+        window.refresh_stream_list()
+        qt_app.processEvents()
+        # Scroll to bottom and back to force sizeHint calculation for ALL rows
+        # (QListView only computes sizeHints for visible/scrolled-to rows)
+        sb = window.stream_list.verticalScrollBar()
+        sb.setValue(sb.maximum())
+        qt_app.processEvents()
+        sb.setValue(0)
+        qt_app.processEvents()
+        # Now invalidate and re-layout with all sizeHints properly computed
+        if window._stream_delegate:
+            window._stream_delegate.invalidate_size_cache()
+        window.stream_list.scheduleDelayedItemsLayout()
+        qt_app.processEvents()
+        window.refresh_stream_list()
+        qt_app.processEvents()
 
     def do_captures():
         print("\nCapturing screenshots...")
 
         # ── 1. Main window - dark theme ──
+        _force_relayout()
         capture_screenshot(window, "main-window-dark.png")
 
         # ── 2. Main window - light theme ──
         apply_theme(settings, ThemeMode.LIGHT, qt_app, window)
-        window.refresh_stream_list()
-        qt_app.processEvents()
+        _force_relayout()
         capture_screenshot(window, "main-window-light.png")
 
         # ── 3. Main window - compact mode (dark) ──
         apply_theme(settings, ThemeMode.DARK, qt_app, window)
         settings.ui_style = UIStyle.COMPACT_3
-        window.resize(360, 700)  # 900 * 0.4 = 360 (60% narrower)
-        if window._stream_delegate:
-            window._stream_delegate.invalidate_size_cache()
-        # Force QListView to re-query all sizeHints (clears internal layout cache)
-        window.stream_list.scheduleDelayedItemsLayout()
-        qt_app.processEvents()
-        window.refresh_stream_list()
-        qt_app.processEvents()
+        window.resize(360, 700)
+        _force_relayout()
         capture_screenshot(window, "compact-mode.png")
 
         # Reset to default style and size
         settings.ui_style = UIStyle.DEFAULT
         window.resize(700, 700)
-        if window._stream_delegate:
-            window._stream_delegate.invalidate_size_cache()
-        window.stream_list.scheduleDelayedItemsLayout()
-        qt_app.processEvents()
-        window.refresh_stream_list()
-        qt_app.processEvents()
+        _force_relayout()
 
         # ── 4–5. Chat window + animated GIF (dark theme) ──
         # Share the emote cache between static and animated captures
