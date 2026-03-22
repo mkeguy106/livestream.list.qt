@@ -518,6 +518,9 @@ def main():
         window.resize(360, 700)  # 900 * 0.4 = 360 (60% narrower)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
+        # Force QListView to re-query all sizeHints (clears internal layout cache)
+        window.stream_list.scheduleDelayedItemsLayout()
+        qt_app.processEvents()
         window.refresh_stream_list()
         qt_app.processEvents()
         capture_screenshot(window, "compact-mode.png")
