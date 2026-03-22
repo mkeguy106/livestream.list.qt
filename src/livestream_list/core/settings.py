@@ -10,6 +10,7 @@ from dataclasses import fields as dc_fields
 # but we need a local definition for settings serialization
 from enum import Enum as _Enum
 from pathlib import Path
+from typing import Any
 
 from appdirs import user_config_dir, user_data_dir  # type: ignore[import-untyped]
 
@@ -548,7 +549,9 @@ class Settings:
             secure_file_permissions(str(path))
 
     @staticmethod
-    def _validate_int(value, default: int, min_val: int = 0, max_val: int | None = None) -> int:
+    def _validate_int(
+        value: object, default: int, min_val: int = 0, max_val: int | None = None
+    ) -> int:
         """Validate and constrain an integer value."""
         if not isinstance(value, int):
             return default
@@ -559,7 +562,9 @@ class Settings:
         return value
 
     @staticmethod
-    def _color_settings_from_dict(data: dict, defaults: ChatColorSettings) -> ChatColorSettings:
+    def _color_settings_from_dict(
+        data: dict[str, Any], defaults: ChatColorSettings
+    ) -> ChatColorSettings:
         """Create ChatColorSettings from a dict, filling missing fields from defaults."""
         return ChatColorSettings(
             **{
@@ -569,7 +574,7 @@ class Settings:
         )
 
     @staticmethod
-    def _simple_dc_from_dict(dc_class: type, data: dict):
+    def _simple_dc_from_dict(dc_class: type, data: dict[str, Any]) -> Any:
         """Create a dataclass from a dict, using field defaults for missing keys.
 
         Only for dataclasses where _from_dict defaults match dataclass field
@@ -582,7 +587,7 @@ class Settings:
         return dc_class(**kwargs)
 
     @classmethod
-    def _from_dict(cls, data: dict) -> "Settings":
+    def _from_dict(cls, data: dict[str, Any]) -> "Settings":
         """Create Settings from a dictionary with validation."""
         settings = cls()
 
@@ -824,7 +829,7 @@ class Settings:
         self,
         exclude_secrets: bool = False,
         keyring_ok: dict[str, bool] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Convert Settings to a dictionary.
 
         If exclude_secrets is True, sensitive tokens/cookies are omitted
@@ -839,10 +844,10 @@ class Settings:
         if keyring_ok is None:
             keyring_ok = {"twitch": True, "youtube": True, "kick": True}
 
-        def _enum_dict_factory(items):
+        def _enum_dict_factory(items: list[tuple[str, Any]]) -> dict[str, Any]:
             return {k: v.value if isinstance(v, _Enum) else v for k, v in items}
 
-        result = asdict(self, dict_factory=_enum_dict_factory)
+        result: dict[str, Any] = asdict(self, dict_factory=_enum_dict_factory)
 
         if exclude_secrets:
             if keyring_ok.get("twitch", True):

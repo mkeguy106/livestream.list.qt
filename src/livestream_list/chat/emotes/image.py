@@ -130,9 +130,9 @@ class ImageSet:
         if images:
             sample = next(iter(images.values()))
             if isinstance(sample, ImageRef):
-                self._images = dict(images)  # type: ignore[assignment]
+                self._images = dict(images)  # type: ignore[arg-type]
             else:
-                self._specs = dict(images)  # type: ignore[assignment]
+                self._specs = dict(images)  # type: ignore[arg-type]
 
     def bind(self, store: EmoteCache) -> ImageSet:
         """Return a new ImageSet with ImageRefs bound to the given store."""

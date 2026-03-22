@@ -1,5 +1,7 @@
 """Chaturbate chat connection via WebSocket."""
 
+from __future__ import annotations
+
 import json
 import logging
 import random
@@ -7,8 +9,10 @@ import string
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
+from PySide6.QtCore import QObject
 
 from ...core.models import StreamPlatform
 from ..models import ChatBadge, ChatMessage, ChatUser, ModerationEvent
@@ -35,14 +39,14 @@ class ChaturbateChatConnection(BaseChatConnection):
     credentials from the chatvideocontext API.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._session: aiohttp.ClientSession | None = None
         self._chat_username: str = ""
         self._chat_password: str = ""
 
-    async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
+    async def connect_to_channel(self, channel_id: str, **kwargs: object) -> None:
         """Connect to a Chaturbate channel's chat."""
         self._should_stop = False
 
@@ -104,7 +108,7 @@ class ChaturbateChatConnection(BaseChatConnection):
             await self._cleanup()
             self._set_disconnected()
 
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> None:  # type: ignore[override]
         """Disconnect from the channel."""
         self._should_stop = True
         if self._ws and not self._ws.closed:
@@ -141,7 +145,7 @@ class ChaturbateChatConnection(BaseChatConnection):
             self._emit_error(f"Failed to send message: {e}")
             return False
 
-    async def _fetch_chat_context(self, channel_id: str) -> dict | None:
+    async def _fetch_chat_context(self, channel_id: str) -> dict[str, Any] | None:
         """Fetch chat context (WS host, credentials) from the chatvideocontext API.
 
         Includes session cookies from QWebEngine for authenticated access.
@@ -160,6 +164,7 @@ class ChaturbateChatConnection(BaseChatConnection):
             if cookie_str:
                 headers["Cookie"] = cookie_str
 
+            assert self._session is not None
             async with self._session.get(url, headers=headers) as resp:
                 if resp.status != 200:
                     logger.warning(f"Chaturbate chat context HTTP {resp.status} for {channel_id}")
@@ -172,7 +177,7 @@ class ChaturbateChatConnection(BaseChatConnection):
                             f"Chat context for {channel_id}: no wschat_host "
                             f"(room_status={data.get('room_status')})"
                         )
-                return data
+                return data  # type: ignore[no-any-return]
         except Exception as e:
             logger.debug(f"Failed to fetch chat context for {channel_id}: {e}")
             return None
@@ -189,6 +194,7 @@ class ChaturbateChatConnection(BaseChatConnection):
 
     async def _read_loop(self) -> None:
         """Main read loop for incoming SockJS messages."""
+        assert self._ws is not None
         async for msg in self._ws:
             if self._should_stop:
                 break
@@ -216,7 +222,7 @@ class ChaturbateChatConnection(BaseChatConnection):
 
         self._flush_batch()
 
-    def _handle_event(self, data: dict) -> None:
+    def _handle_event(self, data: dict[str, Any]) -> None:
         """Handle a parsed chat event."""
         method = data.get("method", "")
         args = data.get("args", data)
@@ -234,7 +240,7 @@ class ChaturbateChatConnection(BaseChatConnection):
         elif method == "onKick":
             self._handle_kick(args)
 
-    def _handle_room_message(self, data: dict) -> None:
+    def _handle_room_message(self, data: dict[str, Any]) -> None:
         """Handle a chat room message."""
         username = data.get("from_user", {}).get("username", "")
         if not username:
@@ -284,7 +290,7 @@ class ChaturbateChatConnection(BaseChatConnection):
         )
         self._message_batch.append(message)
 
-    def _handle_notify(self, data: dict) -> None:
+    def _handle_notify(self, data: dict[str, Any]) -> None:
         """Handle notification events (tips, room subjects, etc.)."""
         msg = data.get("msg", "")
         if not msg:
@@ -309,7 +315,7 @@ class ChaturbateChatConnection(BaseChatConnection):
         )
         self._message_batch.append(message)
 
-    def _handle_kick(self, data: dict) -> None:
+    def _handle_kick(self, data: dict[str, Any]) -> None:
         """Handle a user kick event."""
         username = data.get("user", "")
         if username:

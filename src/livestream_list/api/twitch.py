@@ -118,7 +118,8 @@ class TwitchApiClient(BaseApiClient):
                     data = await resp.json()
                     users = data.get("data", [])
                     if users:
-                        return users[0].get("display_name")
+                        name: str | None = users[0].get("display_name")
+                        return name
         except aiohttp.ClientError:
             pass
         return None
@@ -237,7 +238,7 @@ class TwitchApiClient(BaseApiClient):
                 data = await resp.json()
                 users = data.get("data", [])
                 if users:
-                    user = users[0]
+                    user: dict[str, Any] = users[0]
                     self._current_user_id = user["id"]
                     return user
         except aiohttp.ClientError:
@@ -272,9 +273,9 @@ class TwitchApiClient(BaseApiClient):
                 if not users:
                     return None
 
-                user = users[0]
-                self._user_cache[login.lower()] = user
-                return user
+                helix_user: dict[str, Any] = users[0]
+                self._user_cache[login.lower()] = helix_user
+                return helix_user
         except aiohttp.ClientError:
             return None
 
@@ -356,7 +357,8 @@ class TwitchApiClient(BaseApiClient):
                     return None
 
                 data = await resp.json()
-                return data.get("data", {}).get("user")
+                user_data: dict[str, Any] | None = data.get("data", {}).get("user")
+                return user_data
         except aiohttp.ClientError:
             return None
 
@@ -541,7 +543,7 @@ class TwitchApiClient(BaseApiClient):
             batch_results = batch_results_list[batch_idx]
 
             # Handle exceptions from gather
-            if isinstance(batch_results, Exception):
+            if isinstance(batch_results, BaseException):
                 logger.error(f"Twitch batch {batch_idx} failed: {batch_results}")
                 # Mark all channels in this batch as offline with error
                 for login in batch_logins:

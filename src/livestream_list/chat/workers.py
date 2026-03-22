@@ -8,7 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from ..core.models import StreamPlatform
 from .connections.base import BaseChatConnection
@@ -50,14 +50,14 @@ class AsyncTaskWorker(QThread):
         self,
         task: Callable[[], Any],
         *,
-        parent=None,
+        parent: QObject | None = None,
         error_log_level: int = logging.ERROR,
-    ):
+    ) -> None:
         super().__init__(parent)
         self._task = task
         self._error_log_level = error_log_level
 
-    def run(self):
+    def run(self) -> None:
         try:
             if inspect.iscoroutinefunction(self._task):
                 loop = asyncio.new_event_loop()
@@ -74,7 +74,9 @@ class AsyncTaskWorker(QThread):
             self.error_occurred.emit(str(e))
 
 
-async def _fetch_global_emotes(providers: list[str], oauth_token: str, client_id: str) -> dict:
+async def _fetch_global_emotes(
+    providers: list[str], oauth_token: str, client_id: str
+) -> dict[str, list[ChatEmote]]:
     """Fetch Twitch + third-party global emotes."""
     import aiohttp
 
@@ -92,7 +94,7 @@ async def _fetch_global_emotes(providers: list[str], oauth_token: str, client_id
         except Exception as e:
             logger.debug(f"Failed to fetch Twitch global emotes: {e}")
 
-        provider_map = {
+        provider_map: dict[str, type[SevenTVProvider] | type[BTTVProvider] | type[FFZProvider]] = {
             "7tv": SevenTVProvider,
             "bttv": BTTVProvider,
             "ffz": FFZProvider,
@@ -168,16 +170,22 @@ class ChatConnectionWorker(QThread):
     reconnecting = Signal(float)  # delay in seconds before next attempt
     reconnect_failed = Signal()  # exhausted all attempts
 
-    def __init__(self, connection: BaseChatConnection, channel_id: str, parent=None, **kwargs):
+    def __init__(
+        self,
+        connection: BaseChatConnection,
+        channel_id: str,
+        parent: QObject | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(parent)
         self.connection = connection
         self.channel_id = channel_id
-        self.kwargs = dict(kwargs)
+        self.kwargs: dict[str, Any] = dict(kwargs)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._should_stop = False
         self._wake_event: asyncio.Event | None = None
 
-    def run(self):
+    def run(self) -> None:
         """Run the connection in a new event loop with reconnect support."""
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
@@ -192,7 +200,7 @@ class ChatConnectionWorker(QThread):
             self._loop.close()
             self._loop = None
 
-    async def _run_with_reconnect(self):
+    async def _run_with_reconnect(self) -> None:
         """Connect, and reconnect on unintentional disconnects."""
         self._wake_event = asyncio.Event()
         attempts = 0
@@ -230,16 +238,16 @@ class ChatConnectionWorker(QThread):
             except asyncio.TimeoutError:
                 pass  # normal backoff elapsed
 
-    def request_immediate_reconnect(self):
+    def request_immediate_reconnect(self) -> None:
         """Wake the backoff sleep so the worker reconnects now (thread-safe)."""
         if self._loop and self._wake_event is not None:
             self._loop.call_soon_threadsafe(self._wake_event.set)
 
-    def update_kwargs(self, **new_kwargs):
+    def update_kwargs(self, **new_kwargs: Any) -> None:
         """Update connection kwargs (e.g. YouTube video_id on stream restart)."""
         self.kwargs.update(new_kwargs)
 
-    def stop(self):
+    def stop(self) -> None:
         """Request the worker to stop (no reconnect)."""
         self._should_stop = True
         self.connection._should_reconnect = False
@@ -265,8 +273,8 @@ class EmoteFetchWorker(QThread):
         client_id: str = "",
         fetch_emotes: bool = True,
         fetch_badges: bool = True,
-        parent=None,
-    ):
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         self.channel_key = channel_key
         self.platform = platform
@@ -277,7 +285,7 @@ class EmoteFetchWorker(QThread):
         self.fetch_emotes = fetch_emotes
         self.fetch_badges = fetch_badges
 
-    def run(self):
+    def run(self) -> None:
         """Fetch channel emotes and badges."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -330,7 +338,7 @@ class EmoteFetchWorker(QThread):
                             data = await resp.json()
                             users = data.get("data", [])
                             if users:
-                                user_id = users[0].get("id", "")
+                                user_id: str = users[0].get("id", "")
                                 if user_id:
                                     logger.debug(
                                         f"Resolved Twitch login '{self.channel_id}' "
@@ -350,7 +358,7 @@ class EmoteFetchWorker(QThread):
                     if resp.status == 200:
                         data = await resp.json()
                         if isinstance(data, list) and data:
-                            user_id = data[0].get("id", "")
+                            user_id = str(data[0].get("id", ""))
                             if user_id:
                                 logger.debug(
                                     f"Resolved Twitch login '{self.channel_id}' "
@@ -385,7 +393,9 @@ class EmoteFetchWorker(QThread):
                     logger.debug(f"Failed to fetch channel emotes from twitch: {e}")
 
             # Fetch third-party emotes
-            provider_map = {
+            provider_map: dict[
+                str, type[SevenTVProvider] | type[BTTVProvider] | type[FFZProvider]
+            ] = {
                 "7tv": SevenTVProvider,
                 "bttv": BTTVProvider,
                 "ffz": FFZProvider,
@@ -526,20 +536,20 @@ class WhisperEventSubWorker(QThread):
     whisper_received = Signal(object)  # ChatMessage
     authenticated_as = Signal(str)  # login name of the authenticated user
 
-    def __init__(self, oauth_token: str, client_id: str, parent=None):
+    def __init__(self, oauth_token: str, client_id: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.oauth_token = oauth_token
         self.client_id = client_id
         self._should_stop = False
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def stop(self):
+    def stop(self) -> None:
         self._should_stop = True
         loop = self._loop
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
 
-    def run(self):
+    def run(self) -> None:
         loop = asyncio.new_event_loop()
         self._loop = loop
         asyncio.set_event_loop(loop)
@@ -553,7 +563,7 @@ class WhisperEventSubWorker(QThread):
             self._loop = None
             loop.close()
 
-    async def _run_eventsub(self):
+    async def _run_eventsub(self) -> None:
         import aiohttp
 
         # Resolve our own user ID first
@@ -572,7 +582,7 @@ class WhisperEventSubWorker(QThread):
                     logger.warning(f"WhisperEventSub connection error: {e}, reconnecting in 5s")
                     await asyncio.sleep(5)
 
-    async def _connect_and_listen(self, session, user_id: str):
+    async def _connect_and_listen(self, session: Any, user_id: str) -> None:
         import aiohttp
 
         async with session.ws_connect(
@@ -628,7 +638,7 @@ class WhisperEventSubWorker(QThread):
                 ):
                     return
 
-    async def _subscribe(self, session, session_id: str, user_id: str) -> bool:
+    async def _subscribe(self, session: Any, session_id: str, user_id: str) -> bool:
         """Subscribe to user.whisper.message via Helix API."""
         import aiohttp
 
@@ -656,7 +666,7 @@ class WhisperEventSubWorker(QThread):
             logger.error(f"WhisperEventSub: subscribe failed (HTTP {resp.status}): {body}")
             return False
 
-    def _handle_notification(self, data: dict) -> None:
+    def _handle_notification(self, data: dict[str, Any]) -> None:
         """Parse an EventSub whisper notification into a ChatMessage."""
         logger.info(f"WhisperEventSub: received notification: {data.get('metadata', {})}")
         event = data.get("payload", {}).get("event", {})
@@ -701,8 +711,8 @@ class WhisperEventSubWorker(QThread):
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        user_id = data.get("user_id")
-                        login = data.get("login", "?")
+                        user_id: str | None = data.get("user_id")
+                        login: str = data.get("login", "?")
                         logger.info(
                             f"WhisperEventSub: authenticated as {login} (user_id={user_id})"
                         )
@@ -717,7 +727,7 @@ class WhisperEventSubWorker(QThread):
             logger.warning(f"WhisperEventSub: failed to get user ID: {e}")
         return None
 
-    async def _fetch_display_name(self, session, user_id: str) -> str | None:
+    async def _fetch_display_name(self, session: Any, user_id: str) -> str | None:
         """Fetch properly-cased display_name from /helix/users."""
         import aiohttp
 
@@ -734,7 +744,8 @@ class WhisperEventSubWorker(QThread):
                     data = await resp.json()
                     users = data.get("data", [])
                     if users:
-                        return users[0].get("display_name")
+                        result: str | None = users[0].get("display_name")
+                        return result
         except aiohttp.ClientError:
             pass
         return None
@@ -749,7 +760,7 @@ class HypeTrainEventSubWorker(QThread):
 
     hype_train_event = Signal(str, object)  # channel_key, HypeTrainEvent
 
-    def __init__(self, oauth_token: str, client_id: str, parent=None):
+    def __init__(self, oauth_token: str, client_id: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._scope_warning_logged = False
         self.oauth_token = oauth_token
@@ -774,13 +785,13 @@ class HypeTrainEventSubWorker(QThread):
         with self._lock:
             self._pending_unsubscribe.append(channel_key)
 
-    def stop(self):
+    def stop(self) -> None:
         self._should_stop = True
         loop = self._loop
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
 
-    def run(self):
+    def run(self) -> None:
         loop = asyncio.new_event_loop()
         self._loop = loop
         asyncio.set_event_loop(loop)
@@ -794,7 +805,7 @@ class HypeTrainEventSubWorker(QThread):
             self._loop = None
             loop.close()
 
-    async def _run_eventsub(self):
+    async def _run_eventsub(self) -> None:
         import aiohttp
 
         backoff = 5
@@ -822,7 +833,7 @@ class HypeTrainEventSubWorker(QThread):
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, 300)
 
-    async def _connect_and_listen(self, session) -> bool:
+    async def _connect_and_listen(self, session: Any) -> bool:
         import aiohttp
 
         async with session.ws_connect(
@@ -895,7 +906,9 @@ class HypeTrainEventSubWorker(QThread):
                 ):
                     return has_any_sub
 
-    async def _subscribe_channel(self, session, session_id: str, broadcaster_id: str) -> bool:
+        return has_any_sub
+
+    async def _subscribe_channel(self, session: Any, session_id: str, broadcaster_id: str) -> bool:
         """Subscribe to all 3 hype train event types for a broadcaster.
 
         Returns True if at least one subscription succeeded.
@@ -948,7 +961,7 @@ class HypeTrainEventSubWorker(QThread):
                 logger.warning(f"HypeTrainEventSub: subscribe error for {event_type}: {e}")
         return any_success
 
-    def _handle_notification(self, data: dict) -> None:
+    def _handle_notification(self, data: dict[str, Any]) -> None:
         """Parse an EventSub hype train notification into a HypeTrainEvent."""
         sub_type = data.get("payload", {}).get("subscription", {}).get("type", "")
         event = data.get("payload", {}).get("event", {})

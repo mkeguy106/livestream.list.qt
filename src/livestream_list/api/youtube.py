@@ -8,7 +8,9 @@ import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
 
@@ -82,7 +84,7 @@ class YouTubeApiClient(BaseApiClient):
         """No authorization needed - yt-dlp works without API key."""
         return self._ytdlp_path is not None
 
-    def _run_ytdlp(self, url: str, extra_args: list[str] = None) -> dict | None:
+    def _run_ytdlp(self, url: str, extra_args: list[str] | None = None) -> dict[str, Any] | None:
         """Run yt-dlp and return JSON output."""
         if not self._ytdlp_path:
             return None
@@ -110,7 +112,8 @@ class YouTubeApiClient(BaseApiClient):
                 # yt-dlp may output multiple JSON objects for playlists
                 # Take the first one
                 first_line = result.stdout.strip().split("\n")[0]
-                return json.loads(first_line)
+                data: dict[str, Any] = json.loads(first_line)
+                return data
         except subprocess.TimeoutExpired:
             logger.warning(f"yt-dlp timed out for {url}")
         except json.JSONDecodeError as e:
@@ -120,7 +123,9 @@ class YouTubeApiClient(BaseApiClient):
 
         return None
 
-    async def _run_ytdlp_async(self, url: str, extra_args: list[str] = None) -> dict | None:
+    async def _run_ytdlp_async(
+        self, url: str, extra_args: list[str] | None = None
+    ) -> dict[str, Any] | None:
         """Run yt-dlp asynchronously."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._run_ytdlp, url, extra_args)
@@ -154,7 +159,7 @@ class YouTubeApiClient(BaseApiClient):
             logger.debug(f"Error fetching YouTube /live page for {channel_id}: {e}")
         return None
 
-    def _parse_player_response(self, html: str) -> dict | None:
+    def _parse_player_response(self, html: str) -> dict[str, Any] | None:
         """Extract ytInitialPlayerResponse JSON from page HTML.
 
         This contains videoDetails with isLive status.
@@ -202,22 +207,26 @@ class YouTubeApiClient(BaseApiClient):
 
         try:
             json_str = html[start_idx:end_idx]
-            return json.loads(json_str)
+            result: dict[str, Any] = json.loads(json_str)
+            return result
         except json.JSONDecodeError as e:
             logger.debug(f"Failed to parse ytInitialPlayerResponse: {e}")
             return None
 
-    def _parse_initial_data(self, html: str) -> dict | None:
+    def _parse_initial_data(self, html: str) -> dict[str, Any] | None:
         """Extract ytInitialData JSON from page HTML (fallback)."""
         match = INITIAL_DATA_RE.search(html)
         if match:
             try:
-                return json.loads(match.group(1))
+                data: dict[str, Any] = json.loads(match.group(1))
+                return data
             except json.JSONDecodeError:
                 pass
         return None
 
-    def _extract_livestream_from_data(self, data: dict, channel: Channel) -> Livestream | None:
+    def _extract_livestream_from_data(
+        self, data: dict[str, Any], channel: Channel
+    ) -> Livestream | None:
         """Parse ytInitialData into a Livestream object.
 
         Returns None if the data doesn't contain valid livestream info.
@@ -299,7 +308,7 @@ class YouTubeApiClient(BaseApiClient):
         return False
 
     @staticmethod
-    def _is_portrait_stream(data: dict) -> bool:
+    def _is_portrait_stream(data: dict[str, Any]) -> bool:
         """Check if a player response contains a portrait (vertical) video stream.
 
         Returns True if width < height in the first format with dimensions.
@@ -307,8 +316,8 @@ class YouTubeApiClient(BaseApiClient):
         streaming_data = data.get("streamingData", {})
         for fmt_list in ("adaptiveFormats", "formats"):
             for fmt in streaming_data.get(fmt_list, []):
-                w = fmt.get("width", 0)
-                h = fmt.get("height", 0)
+                w = int(fmt.get("width", 0))
+                h = int(fmt.get("height", 0))
                 if w and h:
                     return w < h
         return False
@@ -365,7 +374,7 @@ class YouTubeApiClient(BaseApiClient):
                         video_ids.append(vid)
         return video_ids
 
-    async def _fetch_video_player_response(self, video_id: str) -> dict | None:
+    async def _fetch_video_player_response(self, video_id: str) -> dict[str, Any] | None:
         """Fetch ytInitialPlayerResponse for a specific video."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         try:
@@ -588,7 +597,7 @@ class YouTubeApiClient(BaseApiClient):
     async def filter_channels_by_livestream(
         self,
         channels: list[Channel],
-        progress_callback: callable = None,
+        progress_callback: Callable[[int, int, str], None] | None = None,
     ) -> list[Channel]:
         """Filter a list of channels to only those that do livestreams.
 
@@ -611,7 +620,7 @@ class YouTubeApiClient(BaseApiClient):
             async with semaphore:
                 has_live = await self.has_livestream_capability(channel)
                 if progress_callback:
-                    progress_callback(idx + 1, len(channels), channel.display_name)
+                    progress_callback(idx + 1, len(channels), channel.display_name or "")
                 return (idx, channel, has_live)
 
         tasks = [check_channel(i, ch) for i, ch in enumerate(channels)]
@@ -704,7 +713,7 @@ class YouTubeApiClient(BaseApiClient):
         # Convert exceptions to offline Livestream objects
         final_results: list[Livestream] = []
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 final_results.append(
                     Livestream(
                         channel=channels[i],
@@ -739,9 +748,9 @@ class YouTubeApiClient(BaseApiClient):
                 ytdlp_tasks = [fetch_ytdlp(idx) for idx in live_indices]
                 ytdlp_results = await asyncio.gather(*ytdlp_tasks, return_exceptions=True)
 
-                for result in ytdlp_results:
-                    if isinstance(result, tuple):
-                        idx, ls = result
+                for ytdlp_result in ytdlp_results:
+                    if isinstance(ytdlp_result, tuple):
+                        idx, ls = ytdlp_result
                         final_results[idx] = ls
 
         return final_results
@@ -823,9 +832,10 @@ class YouTubeApiClient(BaseApiClient):
                     if resp.status != 200:
                         text = await resp.text()
                         raise ValueError(f"YouTube API returned {resp.status}: {text[:200]}")
-                    data = await safe_json(resp)
-                    if data is None:
+                    raw_data = await safe_json(resp)
+                    if raw_data is None or not isinstance(raw_data, dict):
                         raise ValueError("YouTube API returned invalid JSON")
+                    data: dict[str, Any] = raw_data
 
                 # Check if authentication succeeded
                 if not channels:  # Only check on first page
@@ -859,7 +869,7 @@ class YouTubeApiClient(BaseApiClient):
         logger.info(f"Found {len(channels)} YouTube subscriptions")
         return channels
 
-    def _parse_subscriptions_response(self, data: dict) -> list[Channel]:
+    def _parse_subscriptions_response(self, data: dict[str, Any]) -> list[Channel]:
         """Parse channel data from InnerTube browse response."""
         channels: list[Channel] = []
 
@@ -940,7 +950,7 @@ class YouTubeApiClient(BaseApiClient):
         return channels
 
     @staticmethod
-    def _get_continuation_token(data: dict) -> str | None:
+    def _get_continuation_token(data: dict[str, Any]) -> str | None:
         """Extract continuation token from response for pagination."""
         # Check in main content
         try:
@@ -957,12 +967,12 @@ class YouTubeApiClient(BaseApiClient):
                         .get("token")
                     )
                     if token:
-                        return token
+                        return str(token)
                 # Also check continuations at section list level
                 for cont in section_list.get("continuations", []):
                     token = cont.get("nextContinuationData", {}).get("continuation")
                     if token:
-                        return token
+                        return str(token)
         except (AttributeError, TypeError):
             pass
 
@@ -980,21 +990,21 @@ class YouTubeApiClient(BaseApiClient):
                         .get("token")
                     )
                     if token:
-                        return token
+                        return str(token)
         except (AttributeError, TypeError):
             pass
 
         return None
 
     @staticmethod
-    def _is_logged_in(data: dict) -> bool:
+    def _is_logged_in(data: dict[str, Any]) -> bool:
         """Check if the InnerTube response indicates authenticated access."""
         try:
             for stp in data.get("responseContext", {}).get("serviceTrackingParams", []):
                 if stp.get("service") == "GUIDED_HELP":
                     for p in stp.get("params", []):
                         if p.get("key") == "logged_in":
-                            return p.get("value") == "1"
+                            return bool(p.get("value") == "1")
         except (AttributeError, TypeError):
             pass
         # If we can't determine, check for content presence

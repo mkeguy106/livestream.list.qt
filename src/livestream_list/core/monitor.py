@@ -6,6 +6,7 @@ import logging
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from ..api.base import BaseApiClient
 from ..api.chaturbate import ChaturbateApiClient
@@ -33,7 +34,7 @@ class StreamMonitor:
         self._livestreams: dict[str, Livestream] = {}
         self._clients: dict[StreamPlatform, BaseApiClient] = {}
         self._running = False
-        self._refresh_task: asyncio.Task | None = None
+        self._refresh_task: asyncio.Task[None] | None = None
 
         # Event callbacks
         self._on_stream_online: list[Callable[[Livestream], None]] = []
@@ -41,7 +42,7 @@ class StreamMonitor:
         self._on_refresh_complete: list[Callable[[list[Livestream]], None]] = []
 
         # Trash bin for deleted channels
-        self._trash: list[dict] = []
+        self._trash: list[dict[str, Any]] = []
 
         # Track initial load to suppress startup notifications
         self._initial_load_complete = False
@@ -184,7 +185,7 @@ class StreamMonitor:
         # Process results
         all_livestreams: list[Livestream] = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.error(f"Platform query error: {result}")
                 continue
             all_livestreams.extend(result)
@@ -437,7 +438,7 @@ class StreamMonitor:
         # Save synchronously (this runs in timer thread)
         self._save_channels_sync()
 
-    def _serialize_channels(self) -> list[dict]:
+    def _serialize_channels(self) -> list[dict[str, Any]]:
         """Serialize channels to a list of dicts for JSON persistence."""
         data = []
         with self._state_lock:
@@ -594,7 +595,7 @@ class StreamMonitor:
 
     def restore_from_trash(self, indices: list[int]) -> None:
         """Restore channels from trash by their indices (sorted descending for safe removal)."""
-        restored: list[dict] = []
+        restored: list[dict[str, Any]] = []
         for idx in sorted(indices, reverse=True):
             if 0 <= idx < len(self._trash):
                 restored.append(self._trash.pop(idx))
@@ -627,6 +628,6 @@ class StreamMonitor:
         self._trash.clear()
         self._save_trash()
 
-    def get_trash(self) -> list[dict]:
+    def get_trash(self) -> list[dict[str, Any]]:
         """Return a copy of the trash list."""
         return list(self._trash)

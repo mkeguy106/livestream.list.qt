@@ -8,6 +8,10 @@ import time
 import unicodedata
 import uuid
 from datetime import datetime, timezone
+from typing import Any
+
+import aiohttp
+from PySide6.QtCore import QObject
 
 from ...core.models import StreamPlatform
 from ...core.settings import YouTubeSettings
@@ -196,7 +200,7 @@ def _shortcode_to_unicode(name: str) -> str | None:
 def _replace_emoji_shortcodes(text: str) -> str:
     """Replace :emoji_name: patterns in text with Unicode characters."""
 
-    def _replace(m: re.Match) -> str:
+    def _replace(m: re.Match[str]) -> str:
         char = _shortcode_to_unicode(m.group(1))
         return char if char else m.group(0)
 
@@ -311,7 +315,9 @@ class YouTubeChatConnection(BaseChatConnection):
     Supports InnerTube API for sending messages when cookies are configured.
     """
 
-    def __init__(self, youtube_settings: YouTubeSettings | None = None, parent=None):
+    def __init__(
+        self, youtube_settings: YouTubeSettings | None = None, parent: QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self._pytchat = None  # pytchat.LiveChat instance
         self._processor: LivestreamListProcessor | None = None
@@ -330,9 +336,9 @@ class YouTubeChatConnection(BaseChatConnection):
         self._slow_mode_seconds: int = 0  # Known slow mode interval from room state
         self._last_send_time: float = 0.0  # monotonic timestamp of last successful send
         self._nick_variants: list[str] = []  # All name forms for mention matching
-        self._http_session: object | None = None  # Persistent aiohttp.ClientSession
+        self._http_session: aiohttp.ClientSession | None = None
 
-    async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
+    async def connect_to_channel(self, channel_id: str, **kwargs: object) -> None:
         """Connect to a YouTube channel's live chat.
 
         Args:
@@ -340,7 +346,7 @@ class YouTubeChatConnection(BaseChatConnection):
             video_id: The video ID for the live stream (required).
         """
         self._should_stop = False
-        video_id = kwargs.get("video_id")
+        video_id = str(kwargs.get("video_id", ""))
 
         if not video_id:
             self._emit_error("YouTube chat requires a video_id")
@@ -386,7 +392,7 @@ class YouTubeChatConnection(BaseChatConnection):
             self._cleanup_pytchat()
             self._set_disconnected()
 
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> None:  # type: ignore[override]
         """Disconnect from YouTube chat."""
         self._should_stop = True
         self._cleanup_pytchat()
@@ -482,7 +488,7 @@ class YouTubeChatConnection(BaseChatConnection):
         return max(remaining, 0)
 
     @staticmethod
-    def _extract_error_text(error_msg: dict) -> str:
+    def _extract_error_text(error_msg: dict[str, Any]) -> str:
         """Extract human-readable text from YouTube's errorMessage object.
 
         YouTube uses {"simpleText": "..."} or {"runs": [{"text": "..."}, ...]}.
@@ -516,7 +522,7 @@ class YouTubeChatConnection(BaseChatConnection):
         )
 
     @staticmethod
-    def _parse_slow_mode_from_response(data: dict) -> int:
+    def _parse_slow_mode_from_response(data: dict[str, Any]) -> int:
         """Extract slow mode seconds from a YouTube send_message response.
 
         Searches all string values in the response for a number followed by
@@ -541,16 +547,14 @@ class YouTubeChatConnection(BaseChatConnection):
                 pass
         return 0
 
-    async def _get_http_session(self):
+    async def _get_http_session(self) -> aiohttp.ClientSession:
         """Get or create a persistent aiohttp session for YouTube API calls.
 
         Reusing a single session keeps TCP connections pooled and ensures
         YouTube sees consistent visitor/session state across requests,
         preventing anti-spam filters from dropping messages.
         """
-        import aiohttp
-
-        if self._http_session is None or getattr(self._http_session, "closed", True):
+        if self._http_session is None or self._http_session.closed:
             self._http_session = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=15),
                 cookie_jar=aiohttp.DummyCookieJar(),
@@ -559,7 +563,7 @@ class YouTubeChatConnection(BaseChatConnection):
 
     async def _close_http_session(self) -> None:
         """Close the persistent HTTP session."""
-        if self._http_session and not getattr(self._http_session, "closed", True):
+        if self._http_session and not self._http_session.closed:
             await self._http_session.close()
             self._http_session = None
 
@@ -586,22 +590,23 @@ class YouTubeChatConnection(BaseChatConnection):
                 "X-Youtube-Client-Version": self._client_version,
             }
 
-            body = {
-                "context": {
-                    "client": {
-                        "clientName": "WEB",
-                        "clientVersion": self._client_version,
-                    },
+            context: dict[str, Any] = {
+                "client": {
+                    "clientName": "WEB",
+                    "clientVersion": self._client_version,
                 },
+            }
+            if self._datasync_id:
+                context["user"] = {"datasyncId": self._datasync_id}
+
+            body: dict[str, Any] = {
+                "context": context,
                 "params": self._send_params,
                 "richMessage": {
                     "textSegments": [{"text": text}],
                 },
                 "clientMessageId": f"msg-{uuid.uuid4().hex[:16]}",
             }
-
-            if self._datasync_id:
-                body["context"]["user"] = {"datasyncId": self._datasync_id}
 
             url = (
                 f"https://www.youtube.com/youtubei/v1/live_chat/send_message"
@@ -982,7 +987,7 @@ class YouTubeChatConnection(BaseChatConnection):
             )
             self._message_batch.append(sys_msg)
 
-    def _parse_badges(self, item) -> list[ChatBadge]:
+    def _parse_badges(self, item: object) -> list[ChatBadge]:
         """Parse badge information from a pytchat item's author."""
         badges: list[ChatBadge] = []
         author = item.author if hasattr(item, "author") else None
@@ -1015,7 +1020,7 @@ class YouTubeChatConnection(BaseChatConnection):
 
         return badges
 
-    def _parse_message_ex(self, item) -> tuple[str, list[tuple[int, int, ChatEmote]]]:
+    def _parse_message_ex(self, item: object) -> tuple[str, list[tuple[int, int, ChatEmote]]]:
         """Parse messageEx for text with inline emote/emoji positions.
 
         pytchat's messageEx is a list where each element is either:
@@ -1076,7 +1081,7 @@ class YouTubeChatConnection(BaseChatConnection):
 
         return full_text, emote_positions
 
-    def _parse_pytchat_item(self, item) -> ChatMessage | None:
+    def _parse_pytchat_item(self, item: object) -> ChatMessage | None:
         """Parse a pytchat chat item into a ChatMessage."""
         try:
             # Parse badges
