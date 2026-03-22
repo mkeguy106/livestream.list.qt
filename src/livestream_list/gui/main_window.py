@@ -380,6 +380,7 @@ class MainWindow(QMainWindow):
     def _create_menu_bar(self):
         """Create the menu bar."""
         menubar = self.menuBar()
+        menubar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
 
         # File menu
         file_menu = menubar.addMenu("&File")
@@ -495,6 +496,7 @@ class MainWindow(QMainWindow):
         """Create the toolbar."""
         toolbar = QToolBar()
         toolbar.setMovable(False)
+        toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
         self.addToolBar(toolbar)
 
         # Add channel button
