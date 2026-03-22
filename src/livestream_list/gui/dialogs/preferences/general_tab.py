@@ -80,7 +80,7 @@ class GeneralTab(QScrollArea):
 
     def _setup_ui(self) -> None:
         self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         widget = QWidget()
         layout = QVBoxLayout(widget)

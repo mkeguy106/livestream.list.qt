@@ -49,13 +49,13 @@ class YouTubeImportDialog(QDialog):
         # Ready page (0)
         ready_page = QWidget()
         ready_layout = QVBoxLayout(ready_page)
-        ready_layout.setAlignment(Qt.AlignCenter)
+        ready_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         ready_label = QLabel(
             "Import your YouTube subscriptions as channels.\n"
             "This uses your YouTube login to fetch your subscription list."
         )
-        ready_label.setAlignment(Qt.AlignCenter)
+        ready_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ready_label.setWordWrap(True)
         ready_layout.addWidget(ready_label)
 
@@ -66,37 +66,37 @@ class YouTubeImportDialog(QDialog):
             "Check each channel's /live tab to see if they stream.\n"
             "This takes longer but avoids importing channels that never go live."
         )
-        ready_layout.addWidget(self.filter_checkbox, 0, Qt.AlignCenter)
+        ready_layout.addWidget(self.filter_checkbox, 0, Qt.AlignmentFlag.AlignCenter)
 
         import_btn = QPushButton("Import Subscriptions")
         import_btn.clicked.connect(self._start_import)
-        ready_layout.addWidget(import_btn, 0, Qt.AlignCenter)
+        ready_layout.addWidget(import_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.stack.addWidget(ready_page)
 
         # Importing page (1)
         importing_page = QWidget()
         importing_layout = QVBoxLayout(importing_page)
-        importing_layout.setAlignment(Qt.AlignCenter)
+        importing_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.import_label = QLabel("Fetching subscriptions...")
-        self.import_label.setAlignment(Qt.AlignCenter)
+        self.import_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         importing_layout.addWidget(self.import_label)
 
         self.import_progress = QProgressBar()
         self.import_progress.setMaximumWidth(300)
         self.import_progress.setRange(0, 0)  # Indeterminate
-        importing_layout.addWidget(self.import_progress, 0, Qt.AlignCenter)
+        importing_layout.addWidget(self.import_progress, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.stack.addWidget(importing_page)
 
         # Done page (2)
         done_page = QWidget()
         done_layout = QVBoxLayout(done_page)
-        done_layout.setAlignment(Qt.AlignCenter)
+        done_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.done_label = QLabel("")
-        self.done_label.setAlignment(Qt.AlignCenter)
+        self.done_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.done_label.setWordWrap(True)
         done_layout.addWidget(self.done_label)
 
@@ -105,7 +105,7 @@ class YouTubeImportDialog(QDialog):
         # Close button
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.accept)
-        layout.addWidget(self.close_btn, 0, Qt.AlignCenter)
+        layout.addWidget(self.close_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.import_complete.connect(self._on_import_complete)
         self.filter_progress.connect(self._on_filter_progress)

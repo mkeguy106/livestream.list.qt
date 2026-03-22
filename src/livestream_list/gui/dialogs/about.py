@@ -29,31 +29,31 @@ class AboutDialog(QDialog):
 
         # App icon and name
         title_label = QLabel("<h2>Livestream List (Qt)</h2>")
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
         # Version
         version_label = QLabel(f"<p>Version {__version__}</p>")
-        version_label.setAlignment(Qt.AlignCenter)
+        version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(version_label)
 
         # Description
         desc_label = QLabel(
             "<p>Monitor your favorite livestreams on<br>Twitch, YouTube, and Kick.</p>"
         )
-        desc_label.setAlignment(Qt.AlignCenter)
+        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(desc_label)
 
         # License
         license_label = QLabel("<p>Licensed under GPL-2.0</p>")
-        license_label.setAlignment(Qt.AlignCenter)
+        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(license_label)
 
         # GitHub link
         github_label = QLabel(
             f'<p><a href="https://github.com/{self.GITHUB_REPO}">GitHub Repository</a></p>'
         )
-        github_label.setAlignment(Qt.AlignCenter)
+        github_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         github_label.setOpenExternalLinks(True)
         layout.addWidget(github_label)
 
@@ -61,7 +61,7 @@ class AboutDialog(QDialog):
 
         # Update status label (hidden initially)
         self.update_status = QLabel()
-        self.update_status.setAlignment(Qt.AlignCenter)
+        self.update_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.update_status.setWordWrap(True)
         self.update_status.hide()
         layout.addWidget(self.update_status)
