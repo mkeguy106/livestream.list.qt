@@ -1,5 +1,7 @@
 """Kick chat connection via Pusher WebSocket."""
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -7,8 +9,10 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
+from PySide6.QtCore import QObject
 
 from ...core.models import StreamPlatform
 from ...core.settings import KickSettings
@@ -50,7 +54,9 @@ class KickChatConnection(BaseChatConnection):
     channel's chatroom, and receives/sends messages.
     """
 
-    def __init__(self, kick_settings: KickSettings | None = None, parent=None):
+    def __init__(
+        self, kick_settings: KickSettings | None = None, parent: QObject | None = None
+    ) -> None:
         super().__init__(parent)
         self._kick_settings = kick_settings
         self._auth_token = kick_settings.access_token if kick_settings else ""
@@ -62,7 +68,7 @@ class KickChatConnection(BaseChatConnection):
         self._badge_url_map: dict[str, str] = {}  # badge_type -> image_url
         self._refresh_lock = asyncio.Lock()
 
-    async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
+    async def connect_to_channel(self, channel_id: str, **kwargs: object) -> None:
         """Connect to a Kick channel's chat.
 
         Args:
@@ -70,7 +76,8 @@ class KickChatConnection(BaseChatConnection):
             chatroom_id: Optional chatroom ID. If not provided, will be fetched.
         """
         self._should_stop = False
-        self._chatroom_id = kwargs.get("chatroom_id")
+        chatroom_id_raw = kwargs.get("chatroom_id")
+        self._chatroom_id = int(str(chatroom_id_raw)) if chatroom_id_raw is not None else None
 
         try:
             self._session = aiohttp.ClientSession()
@@ -120,7 +127,7 @@ class KickChatConnection(BaseChatConnection):
             await self._cleanup()
             self._set_disconnected()
 
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> None:  # type: ignore[override]
         """Disconnect from the channel."""
         self._should_stop = True
         if self._ws and not self._ws.closed:
@@ -196,7 +203,7 @@ class KickChatConnection(BaseChatConnection):
                 "Accept": "application/json",
             }
             payload = {
-                "broadcaster_user_id": int(self._broadcaster_user_id),
+                "broadcaster_user_id": self._broadcaster_user_id,
                 "content": text,
                 "type": "user",
             }
@@ -204,13 +211,14 @@ class KickChatConnection(BaseChatConnection):
                 payload["reply_to_original_message_id"] = int(reply_to_msg_id)
             logger.debug(f"Kick send_message payload: {payload}")
 
+            assert self._session is not None
             async with self._session.post(url, json=payload, headers=headers) as resp:
                 if resp.status in (200, 201):
                     data = await resp.json()
                     is_sent = data.get("data", {}).get("is_sent", False)
                     if not is_sent:
                         logger.warning(f"Kick chat send returned is_sent=False: {data}")
-                    return is_sent
+                    return is_sent  # type: ignore[no-any-return]
                 if resp.status == 401:
                     body = await resp.text()
                     logger.warning(f"Kick chat send got 401: {body}")
@@ -249,6 +257,7 @@ class KickChatConnection(BaseChatConnection):
         }
 
         try:
+            assert self._session is not None
             async with self._session.post(
                 f"{KICK_OAUTH_BASE}/oauth/token",
                 data=data,
@@ -284,6 +293,7 @@ class KickChatConnection(BaseChatConnection):
                 "Accept": "application/json",
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
             }
+            assert self._session is not None
             async with self._session.get(url, headers=headers) as resp:
                 if resp.status != 200:
                     return None
@@ -307,7 +317,7 @@ class KickChatConnection(BaseChatConnection):
                             self._badge_url_map["subscriber"] = src
 
                 chatroom = data.get("chatroom", {})
-                return chatroom.get("id")
+                return chatroom.get("id")  # type: ignore[no-any-return]
         except Exception as e:
             logger.debug(f"Failed to fetch chatroom_id for {channel_id}: {e}")
             return None
@@ -342,6 +352,7 @@ class KickChatConnection(BaseChatConnection):
 
     async def _read_loop(self) -> None:
         """Main read loop for incoming Pusher messages."""
+        assert self._ws is not None
         async for msg in self._ws:
             if self._should_stop:
                 break
@@ -362,7 +373,7 @@ class KickChatConnection(BaseChatConnection):
 
         self._flush_batch()
 
-    async def _handle_pusher_event(self, data: dict) -> None:
+    async def _handle_pusher_event(self, data: dict[str, Any]) -> None:
         """Handle a Pusher WebSocket event."""
         event = data.get("event", "")
         event_data_str = data.get("data", "")
@@ -387,7 +398,7 @@ class KickChatConnection(BaseChatConnection):
             if self._ws and not self._ws.closed:
                 await self._ws.send_str(json.dumps({"event": "pusher:pong", "data": ""}))
 
-    def _handle_chat_message(self, data: dict) -> None:
+    def _handle_chat_message(self, data: dict[str, Any]) -> None:
         """Handle a chat message event."""
         sender = data.get("sender", {})
         user_id = str(sender.get("id", ""))
@@ -499,7 +510,7 @@ class KickChatConnection(BaseChatConnection):
 
         self._message_batch.append(message)
 
-    def _handle_message_deleted(self, data: dict) -> None:
+    def _handle_message_deleted(self, data: dict[str, Any]) -> None:
         """Handle a message deletion event."""
         event = ModerationEvent(
             type="delete",
@@ -507,7 +518,7 @@ class KickChatConnection(BaseChatConnection):
         )
         self._emit_moderation(event)
 
-    def _handle_user_banned(self, data: dict) -> None:
+    def _handle_user_banned(self, data: dict[str, Any]) -> None:
         """Handle a user ban event."""
         user = data.get("user", {})
         banned_user = data.get("banned_user", user)

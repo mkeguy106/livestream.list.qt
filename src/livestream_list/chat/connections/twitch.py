@@ -1,11 +1,15 @@
 """Twitch IRC chat connection over WebSocket."""
 
+from __future__ import annotations
+
 import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
+from PySide6.QtCore import QObject
 
 from ...core.models import StreamPlatform
 from ..emotes.image import ImageSet, ImageSpec
@@ -55,12 +59,12 @@ def parse_irc_tags(tag_string: str) -> dict[str, str]:
     return tags
 
 
-def parse_irc_message(raw: str) -> dict:
+def parse_irc_message(raw: str) -> dict[str, Any]:
     """Parse a raw IRC message into components.
 
     Returns dict with keys: tags, prefix, command, params, trailing
     """
-    result: dict = {"tags": {}, "prefix": "", "command": "", "params": [], "trailing": ""}
+    result: dict[str, Any] = {"tags": {}, "prefix": "", "command": "", "params": [], "trailing": ""}
 
     pos = 0
 
@@ -179,7 +183,7 @@ class TwitchChatConnection(BaseChatConnection):
     and receives/sends chat messages.
     """
 
-    def __init__(self, oauth_token: str = "", parent=None):
+    def __init__(self, oauth_token: str = "", parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._oauth_token = oauth_token
         self._nick = ""  # Set during auth (lowercase for IRC)
@@ -191,7 +195,7 @@ class TwitchChatConnection(BaseChatConnection):
         self._user_badges: list[ChatBadge] = []  # Our badges from USERSTATE
         self._user_color: str | None = None  # Our color from USERSTATE/GLOBALUSERSTATE
 
-    async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
+    async def connect_to_channel(self, channel_id: str, **kwargs: object) -> None:
         """Connect to a Twitch channel's chat via IRC WebSocket."""
         self._should_stop = False
         self._auth_failed = False
@@ -235,8 +239,8 @@ class TwitchChatConnection(BaseChatConnection):
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        login = data.get("login", "")
-                        scopes = data.get("scopes", [])
+                        login: str = data.get("login", "")
+                        scopes: list[str] = data.get("scopes", [])
                         if login:
                             self._can_send = "chat:edit" in scopes
                             self._validated_login = login
@@ -314,7 +318,7 @@ class TwitchChatConnection(BaseChatConnection):
         except Exception as e:
             logger.debug(f"Failed to load recent messages for #{channel}: {e}")
 
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> None:  # type: ignore[override]
         """Disconnect from the channel."""
         self._should_stop = True
         await self._cleanup()
@@ -345,6 +349,7 @@ class TwitchChatConnection(BaseChatConnection):
     async def _read_loop(self) -> None:
         """Main read loop for incoming IRC messages."""
         msg_count = 0
+        assert self._ws is not None
         async for msg in self._ws:
             if self._should_stop:
                 break
@@ -420,7 +425,7 @@ class TwitchChatConnection(BaseChatConnection):
         elif command == "USERNOTICE":
             self._handle_usernotice(parsed)
 
-    def _handle_privmsg(self, parsed: dict) -> None:
+    def _handle_privmsg(self, parsed: dict[str, Any]) -> None:
         """Handle a PRIVMSG (chat message)."""
         tags = parsed["tags"]
         text = parsed["trailing"]
@@ -526,7 +531,7 @@ class TwitchChatConnection(BaseChatConnection):
 
         self._message_batch.append(message)
 
-    def _handle_clearchat(self, parsed: dict) -> None:
+    def _handle_clearchat(self, parsed: dict[str, Any]) -> None:
         """Handle CLEARCHAT (ban/timeout or chat clear)."""
         tags = parsed["tags"]
         target_user = parsed["trailing"]  # Username being banned/timed out
@@ -545,7 +550,7 @@ class TwitchChatConnection(BaseChatConnection):
 
         self._emit_moderation(event)
 
-    def _handle_clearmsg(self, parsed: dict) -> None:
+    def _handle_clearmsg(self, parsed: dict[str, Any]) -> None:
         """Handle CLEARMSG (single message deletion)."""
         tags = parsed["tags"]
         event = ModerationEvent(
@@ -555,7 +560,7 @@ class TwitchChatConnection(BaseChatConnection):
         )
         self._emit_moderation(event)
 
-    def _handle_roomstate(self, parsed: dict) -> None:
+    def _handle_roomstate(self, parsed: dict[str, Any]) -> None:
         """Handle ROOMSTATE (chat mode changes)."""
         tags = parsed["tags"]
         # Emit broadcaster ID from room-id tag (present on initial join)
@@ -571,7 +576,7 @@ class TwitchChatConnection(BaseChatConnection):
         )
         self._emit_room_state(state)
 
-    def _handle_usernotice(self, parsed: dict) -> None:
+    def _handle_usernotice(self, parsed: dict[str, Any]) -> None:
         """Handle USERNOTICE (subs, resubs, gift subs, raids, announcements)."""
         tags = parsed["tags"]
         user_text = parsed.get("trailing", "")  # Optional custom message from user
@@ -699,7 +704,7 @@ class TwitchChatConnection(BaseChatConnection):
                 ) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return data.get("user_id")
+                        return data.get("user_id")  # type: ignore[no-any-return]
         except Exception as e:
             logger.warning(f"Failed to get own user ID: {e}")
         return None

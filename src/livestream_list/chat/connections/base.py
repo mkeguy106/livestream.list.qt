@@ -65,7 +65,7 @@ class BaseChatConnection(QObject):
         return self._is_connected
 
     @abstractmethod
-    async def connect_to_channel(self, channel_id: str, **kwargs) -> None:
+    async def connect_to_channel(self, channel_id: str, **kwargs: object) -> None:
         """Connect to a channel's chat.
 
         Args:
@@ -74,7 +74,7 @@ class BaseChatConnection(QObject):
         """
 
     @abstractmethod
-    async def disconnect(self) -> None:
+    async def disconnect(self) -> None:  # type: ignore[override]
         """Disconnect from the current channel."""
 
     @abstractmethod
