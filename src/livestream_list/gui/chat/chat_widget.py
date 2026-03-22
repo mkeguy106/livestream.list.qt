@@ -1,13 +1,16 @@
 """Single-channel chat widget with message list and input."""
 
+from __future__ import annotations
+
 import html
 import logging
 import re
 import time
 import unicodedata
 import webbrowser
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QHelpEvent,
@@ -16,8 +19,11 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPainterPath,
+    QPaintEvent,
     QPen,
+    QResizeEvent,
     QShortcut,
+    QShowEvent,
     QTextDocument,
     QWheelEvent,
 )
@@ -39,7 +45,14 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.emotes.cache import EmoteCache
-from ...chat.models import ChatEmote, ChatMessage, ChatRoomState, HypeTrainEvent, ModerationEvent
+from ...chat.models import (
+    ChatEmote,
+    ChatMessage,
+    ChatRoomState,
+    ChatUser,
+    HypeTrainEvent,
+    ModerationEvent,
+)
 from ...chat.workers import AsyncTaskWorker
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
@@ -54,6 +67,9 @@ from .search_mixin import ChatSearchMixin
 from .spell_completer import SpellCompleter
 from .user_card import UserCardFetchWorker, UserCardPopup
 from .user_popup import UserContextMenu
+
+if TYPE_CHECKING:
+    from ...chat.spellcheck import SpellChecker
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +150,7 @@ class DismissibleBanner(QWidget):
         self._close_btn.clicked.connect(self._on_dismiss)
         self._close_btn.raise_()  # Ensure button is on top
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Reposition close button when banner resizes."""
         super().resizeEvent(event)
         # Position button in top-right corner with small margin
@@ -203,9 +219,9 @@ class ChatInput(QLineEdit):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self._completers: list = []
-        self._spell_checker = None
-        self._spell_completer = None
+        self._completers: list[Any] = []
+        self._spell_checker: SpellChecker | None = None
+        self._spell_completer: SpellCompleter | None = None
         self._misspelled_ranges: list[tuple[int, int]] = []
         self._check_timer = QTimer(self)
         self._check_timer.setSingleShot(True)
@@ -240,11 +256,13 @@ class ChatInput(QLineEdit):
         self._history_index = -1
         self._draft = ""
 
-    def add_completer(self, completer) -> None:
+    def add_completer(self, completer: object) -> None:
         """Add a completer to the chain."""
         self._completers.append(completer)
 
-    def set_spell_checker(self, checker, completer=None) -> None:
+    def set_spell_checker(
+        self, checker: SpellChecker, completer: SpellCompleter | None = None
+    ) -> None:
         """Set the spell checker and connect the debounced recheck."""
         self._spell_checker = checker
         self._spell_completer = completer
@@ -360,7 +378,7 @@ class ChatInput(QLineEdit):
 
     def event(self, event: QEvent) -> bool:  # noqa: N802
         """Intercept Tab key before Qt's focus navigation handles it."""
-        if event.type() == QEvent.Type.KeyPress:
+        if event.type() == QEvent.Type.KeyPress and isinstance(event, QKeyEvent):
             key_event = event
             if key_event.key() == Qt.Key.Key_Tab:
                 for completer in self._completers:
@@ -372,10 +390,10 @@ class ChatInput(QLineEdit):
         """Route navigation keys to completers first."""
         # Escape cancels reply mode on the parent ChatWidget
         if event.key() == Qt.Key.Key_Escape:
-            parent = self.parent()
+            parent: QObject | None = self.parent()
             while parent and not isinstance(parent, ChatWidget):
                 parent = parent.parent()
-            if parent and parent._reply_to_msg is not None:
+            if isinstance(parent, ChatWidget) and parent._reply_to_msg is not None:
                 parent._cancel_reply()
                 return
         # Up/Down arrow: cycle through message history
@@ -403,13 +421,13 @@ class ChatInput(QLineEdit):
                 return
         super().keyPressEvent(event)
 
-    def _text_content_rect(self):
+    def _text_content_rect(self) -> QRect:
         """Return the rect where text is actually rendered inside the QLineEdit."""
         opt = QStyleOptionFrame()
         self.initStyleOption(opt)
         return self.style().subElementRect(QStyle.SubElement.SE_LineEditContents, opt, self)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         """Draw the default text, then overlay wavy red and straight green underlines."""
         super().paintEvent(event)
 
@@ -551,8 +569,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._countdown_timer.setInterval(1000)
         self._countdown_timer.timeout.connect(self._countdown_tick)
         self._resize_timer: QTimer | None = None
-        self._history_dialogs: set = set()
-        self._gif_timer = None
+        self._history_dialogs: set[Any] = set()
+        self._gif_timer: Any = None
         self._animation_time_ms = 0
         self._image_store: EmoteCache | None = None
         self._last_rehydrate_ts: float = 0.0
@@ -561,7 +579,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._title_dismissed = False  # Track if user dismissed the title banner
         self._socials_dismissed = False  # Track if user dismissed the socials banner
         self._sub_anniversary_dismissed = False
-        self._sub_anniversary_info: dict | None = None
+        self._sub_anniversary_info: dict[str, object] | None = None
         self._reply_to_msg: ChatMessage | None = None  # Message being replied to
         self._slow_mode_remaining: int = 0
         self._slow_mode_timer = QTimer(self)
@@ -570,7 +588,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._title_refresh_timer = QTimer(self)
         self._title_refresh_timer.setInterval(30_000)
         self._title_refresh_timer.timeout.connect(self._update_stream_title)
-        self._emotes_by_provider: dict[str, list] = {}
+        self._emotes_by_provider: dict[str, list[ChatEmote]] = {}
         self._channel_emote_names: set[str] = set()
         self._locked_emote_names: set[str] = set()
         self._link_preview_cache = LinkPreviewCache()
@@ -1034,8 +1052,8 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._input.add_completer(self._mention_completer)
 
         # Spellcheck completer (lowest priority in chain)
-        self._spell_checker = None
-        self._spell_completer = None
+        self._spell_checker: SpellChecker | None = None
+        self._spell_completer: SpellCompleter | None = None
         if self.settings.spellcheck_enabled:
             self._init_spellcheck()
         # Autocorrect state (depends on spellcheck being enabled)
@@ -1153,12 +1171,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
             for dialog in list(self._history_dialogs):
                 dialog.apply_moderation(event)
 
-    def load_disk_history(self, chat_log_writer) -> None:
+    def load_disk_history(self, chat_log_writer: object) -> None:
         """Load recent messages from disk chat logs into the message list."""
-        settings = chat_log_writer.settings
+        settings = chat_log_writer.settings  # type: ignore[attr-defined]
         if not settings.enabled or not settings.load_history_on_open:
             return
-        messages = chat_log_writer.load_recent_history(self._channel_key, settings.history_lines)
+        messages = chat_log_writer.load_recent_history(  # type: ignore[attr-defined]
+            self.channel_key, settings.history_lines
+        )
         if messages:
             self._model.add_messages(messages)
 
@@ -1221,8 +1241,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         else:
             if self._is_dm:
                 platform_name = "Twitch"
-            else:
+            elif self.livestream:
                 platform_name = self.livestream.channel.platform.value.title()
+            else:
+                platform_name = "chat"
             self._input.setPlaceholderText(f"Log in to {platform_name} to chat")
             self._auth_banner.setText(f"Not logged in \u2014 {platform_name} chat is read-only")
             self._auth_banner.setStyleSheet(self._auth_banner_style)
@@ -1309,7 +1331,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._channel_emote_names = channel_emote_names or set()
         user_names = user_emote_names or set()
         # Determine locked emotes: platform channel emotes user can't use
-        self._locked_emote_names: set[str] = set()
+        self._locked_emote_names = set[str]()
         for name in self._channel_emote_names:
             emote = emote_map.get(name)
             if emote and emote.provider in ("twitch", "kick") and name not in user_names:
@@ -1334,7 +1356,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         except Exception:
             return 1.0
 
-    def _get_emote_image_ref(self, emote: ChatEmote):
+    def _get_emote_image_ref(self, emote: ChatEmote) -> Any:
         """Get a bound ImageRef for the given emote."""
         if not self._image_store or not emote.image_set:
             return None
@@ -1342,7 +1364,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         emote.image_set = image_set
         return image_set.get_image_or_loaded(scale=self._current_scale())
 
-    def set_gif_timer(self, timer) -> None:
+    def set_gif_timer(self, timer: Any) -> None:
         """Attach a shared GIF timer for animation frames."""
         if self._gif_timer is not None:
             try:
@@ -1436,11 +1458,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
     def get_recent_messages(self, limit: int = 300) -> list[ChatMessage]:
         """Get recent messages for backfill operations."""
-        return self._model.get_recent_messages(limit)
+        return list(self._model.get_recent_messages(limit))
 
     def get_all_messages(self) -> list[ChatMessage]:
         """Get all messages for full backfill operations."""
-        return self._model.get_all_messages()
+        return list(self._model.get_all_messages())
 
     def clear(self) -> None:
         """Clear all messages."""
@@ -1565,7 +1587,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             clipboard = QApplication.clipboard()
             clipboard.setText("\n".join(lines))
 
-    def _on_context_menu(self, pos) -> None:
+    def _on_context_menu(self, pos: QPoint) -> None:
         """Show context menu on right-click."""
         from PySide6.QtWidgets import QMenu
 
@@ -1637,7 +1659,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
             app = Application.instance()
             if app:
-                app.save_settings()
+                app.save_settings()  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -1673,7 +1695,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             logger.error(f"Failed to export chat log: {e}")
             self._show_export_error(str(e))
 
-    def _export_as_text(self, path: str, messages: list) -> None:
+    def _export_as_text(self, path: str, messages: list[ChatMessage]) -> None:
         """Export chat messages as plain text."""
         with open(path, "w", encoding="utf-8") as f:
             for msg in messages:
@@ -1687,7 +1709,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 else:
                     f.write(f"[{ts}] {msg.user.display_name}: {msg.text}\n")
 
-    def _export_as_html(self, path: str, messages: list) -> None:
+    def _export_as_html(self, path: str, messages: list[ChatMessage]) -> None:
         """Export chat messages as a dark-themed HTML file."""
         import html
 
@@ -1766,7 +1788,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
-    def _export_as_json(self, path: str, messages: list) -> None:
+    def _export_as_json(self, path: str, messages: list[ChatMessage]) -> None:
         """Export chat messages as a JSON array."""
         import json
 
@@ -1814,15 +1836,15 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         QMessageBox.warning(self, "Export Failed", f"Could not export chat log:\n{error}")
 
-    def hideEvent(self, event) -> None:  # noqa: N802
+    def hideEvent(self, event: QEvent) -> None:  # noqa: N802
         """Handle widget hidden."""
-        super().hideEvent(event)
+        super().hideEvent(event)  # type: ignore[arg-type]
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
         """Handle widget shown."""
         super().showEvent(event)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Invalidate item layout cache on resize to prevent text overlap."""
         super().resizeEvent(event)
         self._list_view.scheduleDelayedItemsLayout()
@@ -2041,10 +2063,10 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Persist keyed by channel + renewsAt so it resets on next billing cycle
         info = self._sub_anniversary_info
         if info and info.get("renews_at"):
-            self.settings.dismissed_sub_anniversaries[self.channel_key] = info["renews_at"]
+            self.settings.dismissed_sub_anniversaries[self.channel_key] = str(info["renews_at"])
             self.settings_changed.emit()
 
-    def set_sub_anniversary(self, sub_info: dict) -> None:
+    def set_sub_anniversary(self, sub_info: dict[str, object]) -> None:
         """Set Twitch subscription anniversary info and show banner."""
         # Redeemed signal — permanently dismiss
         if sub_info.get("redeemed"):
@@ -2617,7 +2639,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self.always_on_top_changed.emit(checked)
         self.settings_changed.emit()
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle tooltip, click, and wheel events on the list view viewport."""
         if obj is not self._list_view.viewport():
             return super().eventFilter(obj, event)
@@ -2648,7 +2670,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)
+                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                         name_rect = self._delegate._get_username_rect(option, message)
                         if name_rect.isValid() and name_rect.contains(event.pos()):
                             self._show_user_card(message.user, event.globalPos())
@@ -2689,7 +2711,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)
+                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                     name_rect = self._delegate._get_username_rect(option, message)
                     if name_rect.isValid() and name_rect.contains(event.pos()):
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2728,7 +2750,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)
+                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                     viewport = self._list_view.viewport()
                     tip_pos = event.globalPos()
 
@@ -2775,7 +2797,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             return True
         return super().eventFilter(obj, event)
 
-    def _show_user_history(self, user) -> None:
+    def _show_user_history(self, user: ChatUser) -> None:
         """Show a popup with all messages from this user in the current chat."""
         from ...chat.models import ChatUser
 
@@ -2879,7 +2901,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._active_user_card = None
         self._show_user_card(self._card_hover_user, self._card_hover_pos)
 
-    def _show_user_card(self, user, pos) -> None:
+    def _show_user_card(self, user: ChatUser, pos: QPoint) -> None:
         """Show a user card popup at the given global position."""
         from ...chat.models import ChatUser
 
@@ -2915,7 +2937,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         # Async fetch user card data (all platforms)
         self._fetch_user_card_data(card, user)
 
-    def _fetch_user_card_data(self, card: UserCardPopup, user) -> None:
+    def _fetch_user_card_data(self, card: UserCardPopup, user: ChatUser) -> None:
         """Fetch user card info and avatar asynchronously for any platform."""
         import asyncio
         import logging as _logging
@@ -2931,7 +2953,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             login = user.name
             channel_login = self.channel_key.split(":", 1)[-1] if ":" in self.channel_key else ""
 
-            async def fetch():
+            async def fetch() -> tuple[object, ...]:
                 results = await asyncio.gather(
                     UserCardFetchWorker.fetch_twitch_user_info(login, channel_login),
                     UserCardFetchWorker.fetch_pronouns(login),
@@ -2940,28 +2962,30 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 avatar_data = b""
                 if result and result.get("profile_image_url"):
                     avatar_data = await UserCardFetchWorker.fetch_avatar(
-                        result["profile_image_url"]
+                        str(result["profile_image_url"])
                     )
                 return (result, pronouns, avatar_data)
 
         elif platform == StreamPlatform.YOUTUBE:
             channel_id = user.id
 
-            async def fetch():
+            async def fetch() -> tuple[object, ...]:
                 result = await UserCardFetchWorker.fetch_youtube_user_info(channel_id)
                 avatar_data = b""
                 if result and result.get("avatar_url"):
-                    avatar_data = await UserCardFetchWorker.fetch_avatar(result["avatar_url"])
+                    avatar_data = await UserCardFetchWorker.fetch_avatar(str(result["avatar_url"]))
                 return (result, "", avatar_data)
 
         elif platform == StreamPlatform.KICK:
             slug = user.name
 
-            async def fetch():
+            async def fetch() -> tuple[object, ...]:
                 result = await UserCardFetchWorker.fetch_kick_user_info(slug)
                 avatar_data = b""
                 if result and result.get("profile_pic_url"):
-                    avatar_data = await UserCardFetchWorker.fetch_avatar(result["profile_pic_url"])
+                    avatar_data = await UserCardFetchWorker.fetch_avatar(
+                        str(result["profile_pic_url"])
+                    )
                 return (result, "", avatar_data)
 
         else:
@@ -2969,7 +2993,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
 
         worker = AsyncTaskWorker(fetch, parent=self, error_log_level=_logging.DEBUG)
 
-        def on_result(payload):
+        def on_result(payload: Any) -> None:
             result, pronouns, avatar_data = payload
             if platform == StreamPlatform.TWITCH:
                 if result:
@@ -3049,7 +3073,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
 
     def __init__(
         self,
-        user,
+        user: ChatUser,
         messages: list[ChatMessage],
         settings: BuiltinChatSettings,
         image_store: EmoteCache | None,
@@ -3241,7 +3265,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
         if was_at_bottom:
             self._list_view.scrollToBottom()
 
-    def apply_moderation(self, event) -> None:
+    def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to messages in this dialog."""
         self._model.apply_moderation(event)
 
@@ -3276,7 +3300,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
             clipboard = QApplication.clipboard()
             clipboard.setText("\n".join(lines))
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Invalidate item layout cache on resize to prevent text overlap."""
         super().resizeEvent(event)
         self._list_view.scheduleDelayedItemsLayout()
@@ -3301,7 +3325,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
             return
         super().keyPressEvent(event)
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle Ctrl+Wheel, URL clicks, and cursor changes."""
         if obj is not self._list_view.viewport():
             return super().eventFilter(obj, event)
@@ -3329,7 +3353,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)
+                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3347,7 +3371,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)
+                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3563,7 +3587,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
         if was_at_bottom:
             self._list_view.scrollToBottom()
 
-    def apply_moderation(self, event) -> None:
+    def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to messages in this dialog."""
         self._model.apply_moderation(event)
 
@@ -3598,7 +3622,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
             clipboard = QApplication.clipboard()
             clipboard.setText("\n".join(lines))
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Invalidate item layout cache on resize to prevent text overlap."""
         super().resizeEvent(event)
         self._list_view.scheduleDelayedItemsLayout()
@@ -3619,7 +3643,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
             return
         super().keyPressEvent(event)
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle Ctrl+Wheel, URL clicks, and cursor changes."""
         if obj is not self._list_view.viewport():
             return super().eventFilter(obj, event)
@@ -3647,7 +3671,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)
+                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3665,7 +3689,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)
+                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3813,7 +3837,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
         if was_at_bottom:
             self._list_view.scrollToBottom()
 
-    def apply_moderation(self, event) -> None:
+    def apply_moderation(self, event: ModerationEvent) -> None:
         """Apply a moderation event to messages in this dialog."""
         self._model.apply_moderation(event)
 
@@ -3904,7 +3928,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
         self._delegate.apply_theme()
         self._list_view.viewport().update()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Invalidate item layout cache on resize."""
         super().resizeEvent(event)
         self._list_view.scheduleDelayedItemsLayout()
@@ -3924,7 +3948,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
             return
         super().keyPressEvent(event)
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle Ctrl+Wheel, URL clicks, and cursor changes in reply thread."""
         if obj is not self._list_view.viewport():
             return super().eventFilter(obj, event)
@@ -3951,7 +3975,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)
+                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3968,7 +3992,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)
+                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)

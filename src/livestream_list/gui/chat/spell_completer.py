@@ -179,8 +179,9 @@ class SpellCompleter(QWidget):
         height = min(self._list.count() * 28 + 8, 200)
         self.setFixedHeight(height)
 
-        if self.parent():
-            input_pos = self._input.mapTo(self.parent(), self._input.rect().topLeft())
+        parent_widget = self.parentWidget()
+        if parent_widget:
+            input_pos = self._input.mapTo(parent_widget, self._input.rect().topLeft())
             self.move(input_pos.x(), input_pos.y() - height - 4)
             self.raise_()
 

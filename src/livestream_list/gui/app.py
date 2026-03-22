@@ -1,5 +1,7 @@
 """Main Qt application."""
 
+from __future__ import annotations
+
 import asyncio
 import gc
 import logging
@@ -8,12 +10,15 @@ import threading
 import time
 import traceback
 import weakref
+from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
 from ..__version__ import __version__
 from ..chat.manager import ChatManager
+from ..core.models import Livestream
 from ..core.monitor import StreamMonitor
 from ..core.settings import Settings
 from ..core.streamlink import StreamlinkLauncher
@@ -109,19 +114,24 @@ class AsyncWorker(QThread):
     error = Signal(str)
     progress = Signal(str, str)  # message, detail
 
-    def __init__(self, coro_func, monitor=None, parent=None):
+    def __init__(
+        self,
+        coro_func: Callable[[], Any],
+        monitor: StreamMonitor | None = None,
+        parent: QObject | None = None,
+    ) -> None:
         super().__init__(parent)
         self.coro_func = coro_func
         self.monitor = monitor
         self._loop: asyncio.AbstractEventLoop | None = None
 
-    def stop(self):
+    def stop(self) -> None:
         """Request the worker to stop by interrupting its event loop."""
         loop = self._loop
         if loop is not None and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
 
-    def run(self):
+    def run(self) -> None:
         """Run the async operation in a new event loop."""
         # Disable GC on this thread to prevent it from finalizing PySide6
         # objects while the main thread is inside Qt C++ code (no GIL held).
@@ -166,18 +176,18 @@ class NotificationBridge(QObject):
     def __init__(self, notifier: Notifier):
         super().__init__()
         self.notifier = notifier
-        self._pending = []
+        self._pending: list[Livestream] = []
         self._lock = threading.Lock()  # Protect _pending from concurrent access
         self._timer = QTimer(self)  # Parent ensures cleanup on destruction
         self._timer.timeout.connect(self._process_pending)
         self._timer.start(100)
 
-    def queue_notification(self, livestream):
+    def queue_notification(self, livestream: Livestream) -> None:
         """Queue a notification to be sent (thread-safe)."""
         with self._lock:
             self._pending.append(livestream)
 
-    def _process_pending(self):
+    def _process_pending(self) -> None:
         """Process pending notifications on main thread."""
         # Atomically swap pending list to avoid holding lock during processing
         with self._lock:
@@ -193,11 +203,11 @@ class NotificationBridge(QObject):
             except Exception as e:
                 logger.error(f"Notification error: {e}")
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Stop the timer - call on application shutdown."""
         self._timer.stop()
 
-    def send_test_notification(self, livestream):
+    def send_test_notification(self, livestream: Livestream) -> None:
         """Send a test notification (bypasses enabled check)."""
         self.notifier.send_notification_sync(livestream, is_test=True)
 
@@ -214,7 +224,7 @@ class Application(QApplication):
     turbo_auth_failed = Signal(object)  # Livestream - streamlink turbo auth rejected
     streamlink_bad_args = Signal(str)  # Unrecognized streamlink arguments
 
-    def __init__(self, argv=None):
+    def __init__(self, argv: list[str] | None = None) -> None:
         super().__init__(argv or sys.argv)
 
         self.setApplicationName("Livestream List (Qt)")
@@ -230,19 +240,19 @@ class Application(QApplication):
         self.streamlink: StreamlinkLauncher | None = None
         self.notification_bridge: NotificationBridge | None = None
         self.chat_manager: ChatManager | None = None
-        self._chat_window = None  # Lazy-initialized ChatWindow
+        self._chat_window: Any = None  # Lazy-initialized ChatWindow
 
         # UI components (set after window creation)
         # Use weakref for main_window to avoid reference cycles
-        self._main_window_ref: weakref.ref | None = None
-        self.tray_icon = None
+        self._main_window_ref: weakref.ref[Any] | None = None
+        self.tray_icon: Any = None
 
         # Timers
         self._refresh_timer: QTimer | None = None
         self._process_check_timer: QTimer | None = None
 
         # Track active workers to prevent garbage collection
-        self._active_workers = []
+        self._active_workers: list[AsyncWorker] = []
 
         # Prevent concurrent refreshes (causes aiohttp timeout errors)
         self._refresh_in_progress = False
@@ -251,21 +261,21 @@ class Application(QApplication):
         self._watchdog: MainThreadWatchdog | None = None
 
     @property
-    def main_window(self):
+    def main_window(self) -> Any:
         """Get the main window (may be None if window was destroyed)."""
         if self._main_window_ref is not None:
             return self._main_window_ref()
         return None
 
     @main_window.setter
-    def main_window(self, window):
+    def main_window(self, window: Any) -> None:
         """Set the main window using a weak reference."""
         if window is not None:
             self._main_window_ref = weakref.ref(window)
         else:
             self._main_window_ref = None
 
-    def initialize(self):
+    def initialize(self) -> None:
         """Initialize application components."""
         # Start watchdog to detect main thread lockups (debug tool)
         self._watchdog = MainThreadWatchdog(parent=self, threshold_ms=500)
@@ -371,31 +381,41 @@ class Application(QApplication):
             logger.warning(f"Custom theme '{slug}' not found, falling back to dark")
             self.settings.theme_mode = ThemeMode.DARK
 
-    def start_async_init(self, on_channels_loaded=None, on_init_complete=None):
+    def start_async_init(
+        self,
+        on_channels_loaded: Callable[[int], None] | None = None,
+        on_init_complete: Callable[[], None] | None = None,
+    ) -> None:
         """Start asynchronous initialization (loading channels, refreshing)."""
+        monitor = self.monitor
+        assert monitor is not None
 
-        async def init():
+        async def init() -> int:
             # Load saved channels
-            await self.monitor.load_channels()
-            channel_count = len(self.monitor.channels)
+            await monitor.load_channels()
+            channel_count = len(monitor.channels)
             return channel_count
 
-        def on_loaded(channel_count):
-            if on_channels_loaded:
+        def on_loaded(channel_count: object) -> None:
+            if on_channels_loaded and isinstance(channel_count, int):
                 on_channels_loaded(channel_count)
 
-            if channel_count > 0:
+            if isinstance(channel_count, int) and channel_count > 0:
                 self._start_refresh(on_complete=on_init_complete)
             elif on_init_complete:
                 on_init_complete()
 
-        worker = AsyncWorker(init, self.monitor, parent=self)
+        worker = AsyncWorker(init, monitor, parent=self)
         worker.finished.connect(on_loaded)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._active_workers.append(worker)
         worker.start()
 
-    def _start_refresh(self, on_complete=None, on_progress=None):
+    def _start_refresh(
+        self,
+        on_complete: Callable[[], None] | None = None,
+        on_progress: Callable[[str, str], None] | None = None,
+    ) -> None:
         """Start a refresh operation."""
         # Prevent concurrent refreshes (causes aiohttp timeout errors)
         if self._refresh_in_progress:
@@ -405,22 +425,24 @@ class Application(QApplication):
             return
 
         self._refresh_in_progress = True
+        monitor = self.monitor
+        assert monitor is not None
 
-        async def refresh():
-            await self.monitor.refresh()
+        async def refresh() -> dict[str, Any]:
+            await monitor.refresh()
             # Collect any error messages from livestreams
-            errors = []
-            for ls in self.monitor.livestreams:
+            errors: list[str] = []
+            for ls in monitor.livestreams:
                 if ls.error_message:
                     errors.append(f"{ls.channel.platform.value}: {ls.error_message}")
-            return {"livestreams": self.monitor.livestreams, "errors": errors}
+            return {"livestreams": monitor.livestreams, "errors": errors}
 
-        def on_finished(result):
+        def on_finished(result: object) -> None:
             self._refresh_in_progress = False
             self.refresh_complete.emit()
             # Push updated livestream data to chat window (viewer count, uptime, etc.)
-            if self._chat_window and self.monitor:
-                self._chat_window.update_livestreams(self.monitor.livestreams)
+            if self._chat_window and monitor:
+                self._chat_window.update_livestreams(monitor.livestreams)
             # Emit error signal if there were any errors
             if result and isinstance(result, dict):
                 errors = result.get("errors", [])
@@ -432,13 +454,13 @@ class Application(QApplication):
             if on_complete:
                 on_complete()
 
-        def on_error(error_msg):
+        def on_error(error_msg: str) -> None:
             self._refresh_in_progress = False
             self.refresh_error.emit(f"Refresh failed: {error_msg}")
             if on_complete:
                 on_complete()
 
-        worker = AsyncWorker(refresh, self.monitor, parent=self)
+        worker = AsyncWorker(refresh, monitor, parent=self)
         worker.finished.connect(on_finished)
         worker.error.connect(on_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
@@ -447,11 +469,11 @@ class Application(QApplication):
         self._active_workers.append(worker)
         worker.start()
 
-    def refresh(self, on_complete=None):
+    def refresh(self, on_complete: Callable[[], None] | None = None) -> None:
         """Trigger a manual refresh."""
         self._start_refresh(on_complete=on_complete)
 
-    def start_refresh_timer(self):
+    def start_refresh_timer(self) -> None:
         """Start the automatic refresh timer."""
         if self._refresh_timer:
             self._refresh_timer.stop()
@@ -461,18 +483,18 @@ class Application(QApplication):
         interval_ms = self.settings.refresh_interval * 1000
         self._refresh_timer.start(interval_ms)
 
-    def update_refresh_interval(self, interval_seconds: int):
+    def update_refresh_interval(self, interval_seconds: int) -> None:
         """Update the refresh interval."""
         self.settings.refresh_interval = interval_seconds
         self.settings.save()
         self.start_refresh_timer()
 
-    def _on_timed_refresh(self):
+    def _on_timed_refresh(self) -> None:
         """Handle timed refresh."""
         logger.info("Timed refresh triggered")
         self._start_refresh()
 
-    def _on_stream_online(self, livestream):
+    def _on_stream_online(self, livestream: Livestream) -> None:
         """Handle stream going online."""
         # Queue notification
         if self.notification_bridge:
@@ -488,7 +510,7 @@ class Application(QApplication):
         # Emit signal for UI update
         self.stream_online.emit(livestream)
 
-    def _on_notification_watch_clicked(self, livestream):
+    def _on_notification_watch_clicked(self, livestream: Livestream) -> None:
         """Handle Watch button click from notification.
 
         Called from desktop-notifier's thread, so we launch streamlink
@@ -512,7 +534,7 @@ class Application(QApplication):
         # Schedule UI updates via signal (can be delayed, that's fine)
         self.open_stream_requested.emit(livestream)
 
-    def _on_notification_open_stream_ui(self, livestream):
+    def _on_notification_open_stream_ui(self, livestream: Livestream) -> None:
         """Handle UI updates after stream launched from notification."""
         if self.main_window:
             # Refresh will pick up playing state from streamlink.is_playing()
@@ -527,7 +549,7 @@ class Application(QApplication):
         ):
             self.open_builtin_chat(livestream)
 
-    def _on_turbo_auth_failed(self, livestream):
+    def _on_turbo_auth_failed(self, livestream: Livestream) -> None:
         """Handle turbo-authenticated streamlink launch failure (main thread)."""
         from PySide6.QtWidgets import QMessageBox
 
@@ -546,11 +568,12 @@ class Application(QApplication):
         if msg.clickedButton() == disable_btn:
             self.settings.streamlink.twitch_turbo = False
             self.save_settings()
-            self.streamlink.launch(livestream)
+            if self.streamlink:
+                self.streamlink.launch(livestream)
             if self.main_window:
                 self.main_window.refresh_stream_list()
 
-    def _on_streamlink_bad_args(self, bad_args: str):
+    def _on_streamlink_bad_args(self, bad_args: str) -> None:
         """Handle streamlink failing due to unrecognized arguments (main thread)."""
         from PySide6.QtWidgets import QMessageBox
 
@@ -566,7 +589,7 @@ class Application(QApplication):
         msg.addButton("OK", QMessageBox.ButtonRole.AcceptRole)
         msg.exec()
 
-    def _check_processes(self):
+    def _check_processes(self) -> None:
         """Check for dead stream processes and update UI."""
         if self.streamlink:
             stopped = self.streamlink.cleanup_dead_processes()
@@ -584,16 +607,17 @@ class Application(QApplication):
                 else:
                     self.main_window.set_status("Playing Streams")
 
-    def _cleanup_worker(self, worker):
+    def _cleanup_worker(self, worker: AsyncWorker) -> None:
         """Remove worker from active list."""
         if worker in self._active_workers:
             self._active_workers.remove(worker)
 
-    def _ensure_chat_window(self):
+    def _ensure_chat_window(self) -> Any:
         """Ensure the ChatWindow exists (lazy-init)."""
         if not self._chat_window:
             from .chat.chat_window import ChatWindow
 
+            assert self.chat_manager is not None
             self._chat_window = ChatWindow(self.chat_manager, self.settings)
             if self.main_window:
                 self._chat_window.chat_settings_requested.connect(
@@ -623,14 +647,14 @@ class Application(QApplication):
 
         return self._chat_window
 
-    def open_builtin_chat(self, livestream):
+    def open_builtin_chat(self, livestream: Livestream) -> None:
         """Open the built-in chat window for a livestream."""
         if not self.chat_manager:
             return
-        self._ensure_chat_window()
-        self._chat_window.open_chat(livestream)
+        chat_window = self._ensure_chat_window()
+        chat_window.open_chat(livestream)
 
-    def _on_whisper_received(self, platform: str, message) -> None:
+    def _on_whisper_received(self, platform: str, message: object) -> None:
         """Handle whisper at app level — show banner in main window."""
         if not self.chat_manager:
             return
@@ -638,15 +662,15 @@ class Application(QApplication):
         from ..chat.models import ChatMessage as ChatMsg
 
         # Only show banner for incoming whispers (not our own sent messages)
-        is_incoming = (
-            isinstance(message, ChatMsg) and message.is_whisper and not message.whisper_target
-        )
+        if not isinstance(message, ChatMsg):
+            return
+        is_incoming = message.is_whisper and not message.whisper_target
         if is_incoming and self.main_window:
             sender = message.user.display_name
             sender_id = message.user.id
             self.main_window.show_whisper_banner(sender, sender_id)
 
-    def _on_raid_received(self, channel_key: str, message) -> None:
+    def _on_raid_received(self, channel_key: str, message: object) -> None:
         """Handle raid event — send desktop notification."""
         if not self.notifier:
             return
@@ -664,7 +688,7 @@ class Application(QApplication):
                 channel_name, raider_name, message.raid_viewer_count
             )
 
-    def _on_mention_received(self, channel_key: str, message) -> None:
+    def _on_mention_received(self, channel_key: str, message: object) -> None:
         """Handle @mention event — send desktop notification."""
         if not self.notifier:
             return
@@ -687,30 +711,31 @@ class Application(QApplication):
         """Open the New Whisper dialog, ensuring chat window exists."""
         if not self.chat_manager:
             return
-        self._ensure_chat_window()
-        self._chat_window._show_new_whisper_dialog()
-        self._chat_window.show()
-        self._chat_window.raise_()
-        self._chat_window.activateWindow()
+        chat_window = self._ensure_chat_window()
+        chat_window._show_new_whisper_dialog()
+        chat_window.show()
+        chat_window.raise_()
+        chat_window.activateWindow()
 
-    def save_settings(self):
+    def save_settings(self) -> None:
         """Save current settings."""
         self.settings.save()
 
-    def save_channels(self):
+    def save_channels(self) -> None:
         """Save channels to disk."""
-        if not self.monitor:
+        monitor = self.monitor
+        if not monitor:
             return
 
-        async def do_save():
-            await self.monitor.save_channels()
+        async def do_save() -> None:
+            await monitor.save_channels()
 
-        worker = AsyncWorker(do_save, self.monitor, parent=self)
+        worker = AsyncWorker(do_save, monitor, parent=self)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self._active_workers.append(worker)
         worker.start()
 
-    def show_notification_log(self):
+    def show_notification_log(self) -> None:
         """Show recent notification history in a dialog."""
         from PySide6.QtWidgets import QDialog, QLabel, QListWidget, QVBoxLayout
 
@@ -744,7 +769,7 @@ class Application(QApplication):
 
         dlg.exec()
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up resources."""
         # Stop watchdog
         if self._watchdog:
@@ -817,7 +842,7 @@ def run() -> int:
     # Create tray icon if available
     if is_tray_available():
 
-        def restore_window():
+        def restore_window() -> None:
             """Restore and focus the main window.
 
             Uses showNormal() to restore from minimized state. This preserves
@@ -828,14 +853,16 @@ def run() -> int:
             main_window.raise_()
             main_window.activateWindow()
 
+        def _set_notif_enabled(enabled: bool) -> None:
+            app.settings.notifications.enabled = enabled
+            app.save_settings()
+
         tray = TrayIcon(
             main_window,
             on_open=restore_window,
             on_quit=main_window._quit_app,
             get_notifications_enabled=lambda: app.settings.notifications.enabled,
-            set_notifications_enabled=lambda enabled: (
-                setattr(app.settings.notifications, "enabled", enabled) or app.save_settings()
-            ),
+            set_notifications_enabled=_set_notif_enabled,
             on_show_notification_log=app.show_notification_log,
         )
         tray.show()
@@ -848,17 +875,18 @@ def run() -> int:
     app.aboutToQuit.connect(app.cleanup)
 
     # Start async initialization
-    def on_channels_loaded(count):
+    def on_channels_loaded(count: int) -> None:
         main_window.set_loading_complete()
         if count > 0:
             main_window.set_status("Updating stream status...")
 
-    def on_init_complete():
+    def on_init_complete() -> None:
         main_window._initial_check_complete = True
         main_window.refresh_stream_list()
         main_window.set_status("Ready")
         app.start_refresh_timer()
         # Mark initial load complete for notifications
+        assert app.monitor is not None
         app.monitor.set_initial_load_complete()
 
     app.start_async_init(

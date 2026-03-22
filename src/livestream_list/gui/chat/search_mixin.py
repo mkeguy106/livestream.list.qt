@@ -14,10 +14,10 @@ and needs search capability. The host widget must provide:
 import re
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QAbstractItemView
+from PySide6.QtWidgets import QAbstractItemView, QLabel, QLineEdit, QWidget
 
 from ...chat.models import ChatMessage
-from .message_model import MessageRole
+from .message_model import ChatMessageModel, MessageRole
 
 # Regex to extract key:value predicates from a search query
 _PREDICATE_RE = re.compile(r"(from|has|is):(\S+)")
@@ -40,12 +40,12 @@ class ChatSearchMixin:
     """
 
     # These attributes must be provided by the host widget
-    _search_widget: "QWidget"  # noqa: F821
-    _search_input: "QLineEdit"  # noqa: F821
-    _search_count_label: "QLabel"  # noqa: F821
+    _search_widget: QWidget  # noqa: F821
+    _search_input: QLineEdit  # noqa: F821
+    _search_count_label: QLabel  # noqa: F821
     _search_matches: list[int]
     _search_current: int
-    _model: "QAbstractItemModel"  # noqa: F821
+    _model: ChatMessageModel
     _list_view: QAbstractItemView
 
     def _toggle_search(self) -> None:

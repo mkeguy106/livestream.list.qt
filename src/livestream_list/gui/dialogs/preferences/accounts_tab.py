@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
@@ -108,7 +109,7 @@ class _YouTubeLoginWindow(QWidget):
         self.hide()
         self.login_finished.emit(success)
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Hide instead of closing — never destroy the QWebEngineView."""
         event.ignore()
         self._finish(False)
@@ -196,7 +197,7 @@ class _ChaturbateLoginWindow(QWidget):
         self.hide()
         self.login_finished.emit(success)
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         event.ignore()
         self._finish(False)
 
@@ -365,7 +366,7 @@ class AccountsTab(QScrollArea):
 
     # --- Status helpers ---
 
-    def _update_twitch_status(self):
+    def _update_twitch_status(self) -> None:
         """Update Twitch login status display."""
         if self.app.settings.twitch.access_token:
             login = self.app.settings.twitch.login_name
@@ -378,7 +379,7 @@ class AccountsTab(QScrollArea):
             self.twitch_status.setText("Status: Not logged in")
             self.twitch_status.setStyleSheet("color: gray;")
 
-    def _update_account_buttons(self):
+    def _update_account_buttons(self) -> None:
         """Update account button visibility based on login state."""
         is_logged_in = bool(self.app.settings.twitch.access_token)
         self.twitch_login_btn.setVisible(not is_logged_in)
@@ -406,7 +407,7 @@ class AccountsTab(QScrollArea):
         # Chaturbate
         self._update_cb_status()
 
-    def _update_cb_status(self):
+    def _update_cb_status(self) -> None:
         """Update Chaturbate login status display."""
         from ...chat.chaturbate_web_chat import has_chaturbate_login
 
@@ -427,7 +428,7 @@ class AccountsTab(QScrollArea):
         self.cb_import_btn.setVisible(is_logged_in)
         self.cb_logout_btn.setVisible(is_logged_in)
 
-    def _update_yt_status(self):
+    def _update_yt_status(self) -> None:
         """Update YouTube login status display."""
         from ...chat.youtube_web_chat import has_youtube_login
 
@@ -446,7 +447,7 @@ class AccountsTab(QScrollArea):
 
     # --- Twitch callbacks ---
 
-    def _on_twitch_login(self):
+    def _on_twitch_login(self) -> None:
         """Handle Twitch login."""
         dialog = ImportFollowsDialog(self, self.app, StreamPlatform.TWITCH)
         dialog.exec()
@@ -469,11 +470,12 @@ class AccountsTab(QScrollArea):
 
         # Suppress notifications for any channels imported during login
         added = getattr(dialog, "_added_count", 0)
-        if added > 0:
-            self.app.monitor.suppress_notifications()
+        monitor = self.app.monitor
+        if added > 0 and monitor:
+            monitor.suppress_notifications()
 
-            def on_refresh_complete():
-                self.app.monitor.resume_notifications()
+            def on_refresh_complete() -> None:
+                monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -482,30 +484,31 @@ class AccountsTab(QScrollArea):
 
             self.app.refresh(on_complete=on_refresh_complete)
 
-    def _on_twitch_logout(self):
+    def _on_twitch_logout(self) -> None:
         """Handle Twitch logout."""
-        self.app.settings.twitch.access_token = None
-        self.app.settings.twitch.user_id = None
+        self.app.settings.twitch.access_token = ""
+        self.app.settings.twitch.login_name = ""
         self.app.settings.twitch.browser_auth_token = ""
         self.app.settings.twitch.login_name = ""
         self.app.save_settings()
         self._update_twitch_status()
         self._update_account_buttons()
 
-    def _on_import_follows(self):
+    def _on_import_follows(self) -> None:
         """Handle import follows."""
         dialog = ImportFollowsDialog(self, self.app, StreamPlatform.TWITCH, start_import=True)
         dialog.exec()
 
         # After dialog closes, refresh stream status with notifications suppressed
         added = getattr(dialog, "_added_count", 0)
-        if added > 0:
-            self.app.monitor.suppress_notifications()
+        monitor = self.app.monitor
+        if added > 0 and monitor:
+            monitor.suppress_notifications()
 
             main_window = self.app.main_window
 
-            def on_refresh_complete():
-                self.app.monitor.resume_notifications()
+            def on_refresh_complete() -> None:
+                monitor.resume_notifications()
                 if main_window:
                     main_window.refresh_stream_list()
 
@@ -516,13 +519,13 @@ class AccountsTab(QScrollArea):
 
     # --- Kick callbacks ---
 
-    def _on_kick_login(self):
+    def _on_kick_login(self) -> None:
         """Handle Kick OAuth login."""
         self.kick_status.setText("Status: Waiting for authorization...")
         self.kick_status.setStyleSheet("color: orange;")
         self.kick_login_btn.setEnabled(False)
 
-        async def do_login():
+        async def do_login() -> bool:
             from ....chat.auth.kick_auth import KickAuthFlow
 
             auth = KickAuthFlow(self.app.settings.kick)
@@ -538,31 +541,32 @@ class AccountsTab(QScrollArea):
         worker.error.connect(self._on_kick_login_error)
         worker.start()
 
-    def _on_kick_login_done(self, success):
+    def _on_kick_login_done(self, success: object) -> None:
         """Handle Kick login result."""
         self.kick_login_btn.setEnabled(True)
         self._update_account_buttons()
-        if success:
+        if success and self.app.chat_manager:
             self.app.chat_manager.reconnect_kick()
 
-    def _on_kick_login_error(self, error_msg):
+    def _on_kick_login_error(self, error_msg: str) -> None:
         """Handle Kick login error."""
         self.kick_login_btn.setEnabled(True)
         self.kick_status.setText(f"Error: {error_msg}")
         self.kick_status.setStyleSheet("color: red;")
 
-    def _on_kick_logout(self):
+    def _on_kick_logout(self) -> None:
         """Handle Kick logout."""
         self.app.settings.kick.access_token = ""
         self.app.settings.kick.refresh_token = ""
         self.app.settings.kick.login_name = ""
         self.app.save_settings()
         self._update_account_buttons()
-        self.app.chat_manager.reconnect_kick()
+        if self.app.chat_manager:
+            self.app.chat_manager.reconnect_kick()
 
     # --- YouTube callbacks ---
 
-    def _on_yt_login(self):
+    def _on_yt_login(self) -> None:
         """Open persistent YouTube sign-in window (never destroyed)."""
         self.yt_login_btn.setEnabled(False)
         win = _get_login_window()
@@ -588,23 +592,24 @@ class AccountsTab(QScrollArea):
                 "Successfully signed in to YouTube.\nYouTube chat tabs will now use your account.",
             )
 
-    def _on_yt_clear_cookies(self):
+    def _on_yt_clear_cookies(self) -> None:
         """Clear YouTube cookies from the shared web profile."""
         from ...chat.youtube_web_chat import clear_youtube_cookies
 
         clear_youtube_cookies()
         self._update_yt_status()
 
-    def _on_yt_import_subs(self):
+    def _on_yt_import_subs(self) -> None:
         """Open YouTube subscription import dialog."""
         dialog = YouTubeImportDialog(self, self.app)
         dialog.exec()
-        if dialog._added_count > 0 and self.dialog.parent():
-            self.dialog.parent().refresh_stream_list()
+        parent = self.dialog.parent()
+        if dialog._added_count > 0 and parent and hasattr(parent, "refresh_stream_list"):
+            parent.refresh_stream_list()
 
     # --- Chaturbate callbacks ---
 
-    def _on_cb_login(self):
+    def _on_cb_login(self) -> None:
         """Open persistent Chaturbate sign-in window."""
         self.cb_login_btn.setEnabled(False)
         win = _get_chaturbate_login_window()
@@ -647,17 +652,18 @@ class AccountsTab(QScrollArea):
             self.app.settings.chaturbate.login_name = "(logged in)"
             self.app.save_settings()
 
-    def _on_cb_import_follows(self):
+    def _on_cb_import_follows(self) -> None:
         """Open Chaturbate followed channels import dialog."""
         from ..chaturbate_import import ChaturbateImportDialog
 
         dialog = ChaturbateImportDialog(self, self.app)
         dialog.exec()
-        if dialog._added_count > 0:
-            self.app.monitor.suppress_notifications()
+        monitor = self.app.monitor
+        if dialog._added_count > 0 and monitor:
+            monitor.suppress_notifications()
 
-            def on_refresh_complete():
-                self.app.monitor.resume_notifications()
+            def on_refresh_complete() -> None:
+                monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -666,7 +672,7 @@ class AccountsTab(QScrollArea):
 
             self.app.refresh(on_complete=on_refresh_complete)
 
-    def _on_cb_logout(self):
+    def _on_cb_logout(self) -> None:
         """Clear Chaturbate cookies and reset login state."""
         from ...chat.chaturbate_web_chat import clear_chaturbate_cookies
 

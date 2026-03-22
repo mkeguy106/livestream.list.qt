@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QMainWindow
@@ -13,7 +14,7 @@ from ..core.platform import IS_FLATPAK
 logger = logging.getLogger(__name__)
 
 
-def _qdbus6(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+def _qdbus6(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
     """Run qdbus6, wrapping with flatpak-spawn --host if in Flatpak."""
     cmd = ["qdbus6", *args]
     if IS_FLATPAK:

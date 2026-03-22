@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtWidgets import (
@@ -138,10 +138,10 @@ class ChaturbateImportDialog(QDialog):
 
     import_complete = Signal(object)  # list[Channel] or Exception
 
-    def __init__(self, parent, app: Application):
+    def __init__(self, parent: QWidget | None, app: Application) -> None:
         super().__init__(parent)
         self.app = app
-        self._page = None
+        self._page: Any = None
         self._added_count = 0
         self._age_gate_handled = False
 
@@ -209,7 +209,7 @@ class ChaturbateImportDialog(QDialog):
 
         self.import_complete.connect(self._on_import_complete)
 
-    def _start_import(self):
+    def _start_import(self) -> None:
         """Load Chaturbate page to establish session, then call APIs."""
         self.stack.setCurrentIndex(1)
         self.close_btn.setEnabled(False)
@@ -250,7 +250,7 @@ class ChaturbateImportDialog(QDialog):
             self.import_label.setText("Fetching followed rooms...")
             QTimer.singleShot(1000, self._fetch_follows)
 
-    def _on_age_gate(self, result) -> None:
+    def _on_age_gate(self, result: object) -> None:
         """Handle age gate dismissal."""
         logger.info(f"Chaturbate age gate: {result}")
         if result in ("clicked", "force_hidden"):
@@ -276,7 +276,7 @@ class ChaturbateImportDialog(QDialog):
         self.import_label.setText("Querying Chaturbate API...")
         self._page.runJavaScript(_FETCH_ALL_FOLLOWS_JS, 0, self._on_api_data)
 
-    def _on_api_data(self, raw) -> None:
+    def _on_api_data(self, raw: object) -> None:
         """Process API response and create Channel objects."""
         if not isinstance(raw, str) or not raw:
             logger.warning("Chaturbate API: empty result from JS")
@@ -322,7 +322,7 @@ class ChaturbateImportDialog(QDialog):
 
         self.import_complete.emit(channels)
 
-    def _on_import_complete(self, result):
+    def _on_import_complete(self, result: object) -> None:
         """Handle import completion on the main thread."""
         if isinstance(result, Exception):
             self.done_label.setText(f"Import failed: {result}")
@@ -331,7 +331,7 @@ class ChaturbateImportDialog(QDialog):
             return
 
         channels = result
-        if not channels:
+        if not channels or not isinstance(channels, list):
             self.done_label.setText("No followed channels found.")
             self.stack.setCurrentIndex(2)
             self.close_btn.setEnabled(True)
@@ -339,9 +339,10 @@ class ChaturbateImportDialog(QDialog):
 
         # Add channels
         self.import_progress.setRange(0, len(channels))
+        monitor = self.app.monitor
         added = 0
         for i, ch in enumerate(channels):
-            if self.app.monitor.add_channel_direct(ch):
+            if monitor and monitor.add_channel_direct(ch):
                 added += 1
             self.import_progress.setValue(i + 1)
             QApplication.processEvents()

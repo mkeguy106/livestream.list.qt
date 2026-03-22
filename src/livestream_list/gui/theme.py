@@ -317,12 +317,12 @@ class ThemeManager:
         if app is None:
             return True  # Default to dark if no app
 
-        palette = app.palette()
+        palette = app.palette()  # type: ignore[attr-defined]
         # Compare window background luminance - dark themes have low luminance
         bg_color = palette.color(QPalette.ColorRole.Window)
         # Calculate relative luminance
         luminance = 0.299 * bg_color.red() + 0.587 * bg_color.green() + 0.114 * bg_color.blue()
-        return luminance < 128
+        return bool(luminance < 128)
 
     @classmethod
     def is_dark_mode(cls) -> bool:

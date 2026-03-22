@@ -7,8 +7,16 @@ import subprocess
 import time
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QRect, Qt, QThread, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QScreen
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import (
+    QColor,
+    QCursor,
+    QEnterEvent,
+    QFont,
+    QPainter,
+    QPaintEvent,
+    QScreen,
+)
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QApplication, QLabel, QStackedWidget, QVBoxLayout, QWidget
@@ -62,14 +70,16 @@ class PreviewUrlResolver(QThread):
         try:
             args = ["streamlink", "--stream-url"]
             if self._twitch_token:
-                args.extend(["--twitch-api-header", f"Authorization=OAuth {self._twitch_token}"])
+                args.extend(
+                    ["--twitch-api-header", f"Authorization=OAuth {self._twitch_token}"]
+                )
             args.extend([self._stream_url, "worst,360p,480p,best"])
             cmd = host_command(args)
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=10, **SUBPROCESS_NO_WINDOW
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().splitlines()[0]
+                return str(result.stdout.strip().splitlines()[0])
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.debug("streamlink --stream-url failed: %s", e)
         return None
@@ -83,7 +93,7 @@ class PreviewUrlResolver(QThread):
                 cmd, capture_output=True, text=True, timeout=10, **SUBPROCESS_NO_WINDOW
             )
             if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().splitlines()[0]
+                return str(result.stdout.strip().splitlines()[0])
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.debug("yt-dlp -g failed: %s", e)
         return None
@@ -206,7 +216,7 @@ class VideoPreviewPopup(QWidget):
         if self.isVisible():
             self._position_at_cursor()
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         """Draw channel name overlay at the bottom."""
         super().paintEvent(event)
         if not self._channel_name or self._stack.currentIndex() == 0:
@@ -229,24 +239,24 @@ class VideoPreviewPopup(QWidget):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, self._channel_name)
         painter.end()
 
-    def enterEvent(self, event) -> None:  # noqa: N802
+    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802
         """Notify controller that mouse entered the popup."""
         super().enterEvent(event)
         self.popup_entered.emit()
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
+    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
         """Notify controller that mouse left the popup."""
         super().leaveEvent(event)
         self.popup_left.emit()
 
     @staticmethod
-    def _get_screen_at(point) -> QScreen | None:
+    def _get_screen_at(point: QPoint) -> QScreen | None:
         """Get the screen containing the given point."""
         app = QApplication.instance()
         if app:
-            for screen in app.screens():
+            for screen in app.screens():  # type: ignore[attr-defined]
                 if screen.availableGeometry().contains(point):
-                    return screen
+                    return screen  # type: ignore[no-any-return]
         return None
 
 

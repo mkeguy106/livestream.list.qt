@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -27,7 +28,9 @@ logger = logging.getLogger(__name__)
 class PreferencesDialog(QDialog):
     """Preferences dialog with multiple tabs."""
 
-    def __init__(self, parent, app: Application, initial_tab: int = 0):
+    def __init__(
+        self, parent: QWidget | None, app: Application, initial_tab: int = 0
+    ) -> None:
         super().__init__(parent)
         self.app = app
         self._loading = True  # Prevent cascading updates during init
@@ -88,8 +91,8 @@ class PreferencesDialog(QDialog):
 
         return widget
 
-    def closeEvent(self, event):  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Save dialog size on close."""
-        self.app.settings._prefs_width = self.width()
-        self.app.settings._prefs_height = self.height()
+        self.app.settings._prefs_width = self.width()  # type: ignore[attr-defined]
+        self.app.settings._prefs_height = self.height()  # type: ignore[attr-defined]
         super().closeEvent(event)

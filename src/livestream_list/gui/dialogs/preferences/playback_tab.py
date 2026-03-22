@@ -220,7 +220,7 @@ class PlaybackTab(QScrollArea):
 
     # --- Callbacks ---
 
-    def _on_streamlink_changed(self):
+    def _on_streamlink_changed(self) -> None:
         self.app.settings.streamlink.path = self.sl_path_edit.text()
         self.app.settings.streamlink.additional_args = self.sl_args_edit.text()
         self.app.settings.streamlink.player = self.player_path_edit.text()
@@ -234,14 +234,14 @@ class PlaybackTab(QScrollArea):
         self.app.settings.streamlink.preview_audio = self.preview_audio_cb.isChecked()
         self.app.save_settings()
 
-    def _on_browse_record_directory(self):
+    def _on_browse_record_directory(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self, "Select Recording Directory", self.record_dir_edit.text()
         )
         if directory:
             self.record_dir_edit.setText(directory)
 
-    def _on_launch_method_changed(self):
+    def _on_launch_method_changed(self) -> None:
         from ....core.models import LaunchMethod
 
         self.app.settings.streamlink.twitch_launch_method = LaunchMethod(

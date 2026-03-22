@@ -274,8 +274,9 @@ class EmoteCompleter(QWidget):
         self.setFixedHeight(height)
 
         # Position above the input, within the parent widget
-        if self.parent():
-            input_pos = self._input.mapTo(self.parent(), self._input.rect().topLeft())
+        parent_widget = self.parentWidget()
+        if parent_widget:
+            input_pos = self._input.mapTo(parent_widget, self._input.rect().topLeft())
             self.move(input_pos.x(), input_pos.y() - height - 4)
             self.raise_()  # Bring to front
 

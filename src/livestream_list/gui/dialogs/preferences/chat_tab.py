@@ -467,7 +467,7 @@ class ChatTab(QScrollArea):
 
     # --- Callbacks ---
 
-    def _on_chat_client_changed(self, index):
+    def _on_chat_client_changed(self, index: int) -> None:
         """Handle chat client type change."""
         client_type = self.chat_client_combo.currentData()
         show_browser = client_type == "browser"
@@ -482,7 +482,7 @@ class ChatTab(QScrollArea):
         self.logging_group.setVisible(not show_browser)
         self._on_chat_changed()
 
-    def _on_chat_changed(self):
+    def _on_chat_changed(self) -> None:
         if self._loading:
             return
         self.app.settings.chat.mode = self.chat_client_combo.currentData()
@@ -531,7 +531,7 @@ class ChatTab(QScrollArea):
             self.app._chat_window.update_metrics_bar()
             self.app._chat_window.update_spellcheck()
 
-    def _on_chat_logging_changed(self):
+    def _on_chat_logging_changed(self) -> None:
         """Handle chat logging settings change."""
         log = self.app.settings.chat.logging
         log.enabled = self.log_enabled_cb.isChecked()
@@ -544,7 +544,7 @@ class ChatTab(QScrollArea):
             self.app.chat_manager.update_chat_logging_settings(log)
         self._update_log_disk_usage_label()
 
-    def _update_log_disk_usage_label(self):
+    def _update_log_disk_usage_label(self) -> None:
         """Update the disk usage display for chat logs."""
         if self.app.chat_manager:
             usage = self.app.chat_manager.chat_log_writer.get_total_disk_usage()
@@ -561,7 +561,7 @@ class ChatTab(QScrollArea):
 
     # --- Highlight Keywords helpers ---
 
-    def _refresh_keywords_list(self):
+    def _refresh_keywords_list(self) -> None:
         self.keywords_list.clear()
         search = self.kw_search.text().strip().lower()
         for kw in self.app.settings.chat.builtin.highlight_keywords:
@@ -569,7 +569,7 @@ class ChatTab(QScrollArea):
                 continue
             self.keywords_list.addItem(kw)
 
-    def _add_keyword(self):
+    def _add_keyword(self) -> None:
         text, ok = QInputDialog.getText(self, "Add Highlight Keyword", "Keyword:")
         if ok and text.strip():
             kw = text.strip()
@@ -578,7 +578,7 @@ class ChatTab(QScrollArea):
                 self.app.save_settings()
                 self._refresh_keywords_list()
 
-    def _remove_keywords(self):
+    def _remove_keywords(self) -> None:
         for item in self.keywords_list.selectedItems():
             kw = item.text()
             if kw in self.app.settings.chat.builtin.highlight_keywords:
@@ -588,7 +588,7 @@ class ChatTab(QScrollArea):
 
     # --- Blocked Users helpers ---
 
-    def _refresh_blocked_list(self):
+    def _refresh_blocked_list(self) -> None:
         self.blocked_list.clear()
         search = self.bl_search.text().strip().lower()
         platform_filter = self.bl_platform_filter.currentData()
@@ -605,7 +605,7 @@ class ChatTab(QScrollArea):
             item.setData(Qt.ItemDataRole.UserRole, user_key)
             self.blocked_list.addItem(item)
 
-    def _remove_blocked_users(self):
+    def _remove_blocked_users(self) -> None:
         builtin = self.app.settings.chat.builtin
         for item in self.blocked_list.selectedItems():
             user_key = item.data(Qt.ItemDataRole.UserRole)
@@ -615,7 +615,7 @@ class ChatTab(QScrollArea):
         self.app.save_settings()
         self._refresh_blocked_list()
 
-    def _clear_all_blocked(self):
+    def _clear_all_blocked(self) -> None:
         if not self.app.settings.chat.builtin.blocked_users:
             return
         result = QMessageBox.question(
@@ -633,7 +633,7 @@ class ChatTab(QScrollArea):
 
     # --- User Nicknames helpers ---
 
-    def _refresh_nicknames_list(self):
+    def _refresh_nicknames_list(self) -> None:
         self.nicknames_list.clear()
         search = self.nn_search.text().strip().lower()
         platform_filter = self.nn_platform_filter.currentData()
@@ -650,7 +650,7 @@ class ChatTab(QScrollArea):
             item.setData(Qt.ItemDataRole.UserRole, user_key)
             self.nicknames_list.addItem(item)
 
-    def _add_nickname(self):
+    def _add_nickname(self) -> None:
         """Add a nickname for a user via dialog."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Add Nickname")
@@ -688,7 +688,7 @@ class ChatTab(QScrollArea):
                 self.app.save_settings()
                 self._refresh_nicknames_list()
 
-    def _edit_nickname(self):
+    def _edit_nickname(self) -> None:
         """Edit the selected nickname."""
         items = self.nicknames_list.selectedItems()
         if not items:
@@ -707,7 +707,7 @@ class ChatTab(QScrollArea):
             self.app.save_settings()
             self._refresh_nicknames_list()
 
-    def _remove_nicknames(self):
+    def _remove_nicknames(self) -> None:
         builtin = self.app.settings.chat.builtin
         for item in self.nicknames_list.selectedItems():
             user_key = item.data(Qt.ItemDataRole.UserRole)
@@ -719,7 +719,7 @@ class ChatTab(QScrollArea):
 
     # --- User Notes helpers ---
 
-    def _refresh_notes_list(self):
+    def _refresh_notes_list(self) -> None:
         self.notes_list.clear()
         search = self.nt_search.text().strip().lower()
         platform_filter = self.nt_platform_filter.currentData()
@@ -737,7 +737,7 @@ class ChatTab(QScrollArea):
             item.setData(Qt.ItemDataRole.UserRole, user_key)
             self.notes_list.addItem(item)
 
-    def _add_note(self):
+    def _add_note(self) -> None:
         """Add a note for a user via dialog."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Add User Note")
@@ -775,7 +775,7 @@ class ChatTab(QScrollArea):
                 self.app.save_settings()
                 self._refresh_notes_list()
 
-    def _edit_note(self):
+    def _edit_note(self) -> None:
         """Edit the selected note."""
         items = self.notes_list.selectedItems()
         if not items:
@@ -792,7 +792,7 @@ class ChatTab(QScrollArea):
             self.app.save_settings()
             self._refresh_notes_list()
 
-    def _remove_notes(self):
+    def _remove_notes(self) -> None:
         builtin = self.app.settings.chat.builtin
         for item in self.notes_list.selectedItems():
             user_key = item.data(Qt.ItemDataRole.UserRole)

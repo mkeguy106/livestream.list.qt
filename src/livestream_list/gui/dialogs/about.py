@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ...__version__ import __version__
 
@@ -18,7 +18,7 @@ class AboutDialog(QDialog):
 
     GITHUB_REPO = "mkeguy106/livestream.list.qt"
 
-    def __init__(self, parent, app: Application):
+    def __init__(self, parent: QWidget | None, app: Application) -> None:
         super().__init__(parent)
         self.app = app
 
@@ -79,7 +79,7 @@ class AboutDialog(QDialog):
 
         layout.addLayout(button_layout)
 
-    def _check_for_updates(self):
+    def _check_for_updates(self) -> None:
         """Check GitHub for the latest release."""
         self.check_updates_btn.setEnabled(False)
         self.check_updates_btn.setText("Checking...")
@@ -128,8 +128,8 @@ class AboutDialog(QDialog):
     def _compare_versions(self, v1: str, v2: str) -> int:
         """Compare two version strings. Returns >0 if v1 > v2, <0 if v1 < v2, 0 if equal."""
 
-        def parse_version(v):
-            parts = []
+        def parse_version(v: str) -> list[int]:
+            parts: list[int] = []
             for part in v.split("."):
                 try:
                     parts.append(int(part))

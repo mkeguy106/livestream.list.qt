@@ -2,7 +2,8 @@
 
 import collections
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QPersistentModelIndex, Qt
+from PySide6.QtWidgets import QWidget
 
 from ...chat.models import ChatMessage, ModerationEvent
 
@@ -17,7 +18,7 @@ class ChatMessageModel(QAbstractListModel):
     when the buffer is full.
     """
 
-    def __init__(self, max_messages: int = 5000, parent=None):
+    def __init__(self, max_messages: int = 5000, parent: QWidget | None = None):
         super().__init__(parent)
         # No maxlen on deque — we manage trimming ourselves so we can defer it
         # when the user has scrolled up (to prevent visible scroll jumping)
@@ -25,12 +26,18 @@ class ChatMessageModel(QAbstractListModel):
         self._max_messages = max_messages
         self._trim_paused = False
 
-    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
+    def rowCount(  # noqa: N802
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         if parent.isValid():
             return 0
         return len(self._messages)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+    def data(  # noqa: N802
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object:
         if not index.isValid() or index.row() >= len(self._messages):
             return None
 

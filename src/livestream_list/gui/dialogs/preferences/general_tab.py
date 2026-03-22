@@ -133,9 +133,9 @@ class GeneralTab(QScrollArea):
         style_layout = QFormLayout(style_group)
 
         self.style_combo = QComboBox()
-        for i, style in UI_STYLES.items():
-            self.style_combo.addItem(style["name"], i)
-        self.style_combo.setCurrentIndex(self.app.settings.ui_style)
+        for style_enum, style in UI_STYLES.items():
+            self.style_combo.addItem(str(style["name"]), style_enum)
+        self.style_combo.setCurrentIndex(self.app.settings.ui_style.value)
         self.style_combo.currentIndexChanged.connect(self._on_style_changed)
         style_layout.addRow("UI Style:", self.style_combo)
 
@@ -356,27 +356,27 @@ class GeneralTab(QScrollArea):
 
     # --- Callbacks ---
 
-    def _on_autostart_changed(self, state):
+    def _on_autostart_changed(self, state: int) -> None:
         enabled = state == Qt.CheckState.Checked.value
         set_autostart(enabled)
         self.app.settings.autostart = enabled
         self.app.save_settings()
 
-    def _on_background_changed(self, state):
+    def _on_background_changed(self, state: int) -> None:
         enabled = state == Qt.CheckState.Checked.value
         self.app.settings.close_to_tray = enabled
         self.app.save_settings()
 
-    def _on_refresh_changed(self, value):
+    def _on_refresh_changed(self, value: int) -> None:
         self.app.update_refresh_interval(value)
 
-    def _on_emote_cache_changed(self, value):
+    def _on_emote_cache_changed(self, value: int) -> None:
         self.app.settings.emote_cache_mb = value
         if self.app.chat_manager:
             self.app.chat_manager.set_emote_cache_limit(value)
         self.app.save_settings()
 
-    def _on_notif_changed(self):
+    def _on_notif_changed(self) -> None:
         if self._loading:
             return
         notif = self.app.settings.notifications
@@ -405,13 +405,14 @@ class GeneralTab(QScrollArea):
         notif.mention_custom_sound_path = self.notif_mention_sound_path.text().strip()
         self.app.save_settings()
 
-    def _on_style_changed(self, index):
+    def _on_style_changed(self, index: int) -> None:
         self.app.settings.ui_style = self.style_combo.currentData()
         self.app.save_settings()
-        if self.dialog.parent():
-            self.dialog.parent().refresh_stream_list()
+        parent = self.dialog.parent()
+        if parent and hasattr(parent, "refresh_stream_list"):
+            parent.refresh_stream_list()
 
-    def _on_browse_notification_sound(self):
+    def _on_browse_notification_sound(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Notification Sound",
@@ -421,7 +422,7 @@ class GeneralTab(QScrollArea):
         if path:
             self.notif_sound_path.setText(path)
 
-    def _on_browse_mention_sound(self):
+    def _on_browse_mention_sound(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Mention Sound",
@@ -431,11 +432,11 @@ class GeneralTab(QScrollArea):
         if path:
             self.notif_mention_sound_path.setText(path)
 
-    def _on_notif_backend_changed(self, index):
+    def _on_notif_backend_changed(self, index: int) -> None:
         self.app.settings.notifications.backend = self.notif_backend_combo.currentData()
         self.app.save_settings()
 
-    def _on_test_notification(self):
+    def _on_test_notification(self) -> None:
         """Send a test notification."""
         test_channel = Channel(
             channel_id="test_channel",
@@ -452,25 +453,26 @@ class GeneralTab(QScrollArea):
         if self.app.notification_bridge:
             self.app.notification_bridge.send_test_notification(test_livestream)
 
-    def _on_test_mention_notification(self):
+    def _on_test_mention_notification(self) -> None:
         """Send a test @mention notification."""
         if self.app.notifier:
             self.app.notifier.test_mention_notification_sync()
 
-    def _on_platform_colors_changed(self, state):
+    def _on_platform_colors_changed(self, state: int) -> None:
         self.app.settings.platform_colors = self.platform_colors_cb.isChecked()
         self.app.save_settings()
-        if self.dialog.parent():
-            self.dialog.parent().refresh_stream_list()
+        parent = self.dialog.parent()
+        if parent and hasattr(parent, "refresh_stream_list"):
+            parent.refresh_stream_list()
 
-    def _on_channel_info_changed(self, state):
+    def _on_channel_info_changed(self, state: int) -> None:
         self.app.settings.channel_info.show_live_duration = self.show_duration_cb.isChecked()
         self.app.settings.channel_info.show_viewers = self.show_viewers_cb.isChecked()
         self.app.save_settings()
         if self.app.main_window:
             self.app.main_window.refresh_stream_list()
 
-    def _on_channel_icons_changed(self, state):
+    def _on_channel_icons_changed(self, state: int) -> None:
         self.app.settings.channel_icons.show_platform = self.show_platform_cb.isChecked()
         self.app.settings.channel_icons.show_play = self.show_play_cb.isChecked()
         self.app.settings.channel_icons.show_favorite = self.show_favorite_cb.isChecked()
