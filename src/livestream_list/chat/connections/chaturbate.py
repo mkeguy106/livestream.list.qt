@@ -162,10 +162,7 @@ class ChaturbateChatConnection(BaseChatConnection):
 
             async with self._session.get(url, headers=headers) as resp:
                 if resp.status != 200:
-                    logger.warning(
-                        f"Chaturbate chat context HTTP {resp.status} "
-                        f"for {channel_id}"
-                    )
+                    logger.warning(f"Chaturbate chat context HTTP {resp.status} for {channel_id}")
                     return None
                 data = await resp.json()
                 if data and isinstance(data, dict):

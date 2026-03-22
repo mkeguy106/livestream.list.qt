@@ -835,9 +835,7 @@ class ChatWindow(QMainWindow):
         widget.settings_clicked.connect(self.chat_settings_requested.emit)
         return widget
 
-    def _create_chaturbate_web_widget(
-        self, channel_key: str, livestream: Livestream
-    ) -> QWidget:
+    def _create_chaturbate_web_widget(self, channel_key: str, livestream: Livestream) -> QWidget:
         """Create a ChaturbateWebChatWidget for embedded Chaturbate chat."""
         from .chaturbate_web_chat import ChaturbateWebChatWidget
 

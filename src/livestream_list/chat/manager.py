@@ -1153,9 +1153,7 @@ class ChatManager(QObject):
             renews_at_str = sub_benefit.get("renewsAt")
             if not renews_at_str:
                 return (channel_key, None)
-            renews_at = datetime.fromisoformat(
-                renews_at_str.replace("Z", "+00:00")
-            )
+            renews_at = datetime.fromisoformat(renews_at_str.replace("Z", "+00:00"))
             now = datetime.now(timezone.utc)
             days_until_renewal = (renews_at - now).total_seconds() / 86400
             if days_until_renewal < 22:
@@ -1176,9 +1174,7 @@ class ChatManager(QObject):
                     "tier": tier,
                     "is_prime": is_prime,
                     "is_gift": is_gift,
-                    "channel_display_name": user.get(
-                        "displayName", channel_login
-                    ),
+                    "channel_display_name": user.get("displayName", channel_login),
                     "channel_login": channel_login,
                     "renews_at": renews_at_str,
                 },
@@ -1197,14 +1193,11 @@ class ChatManager(QObject):
         months = sub_info.get("months", 0)
         days_left = sub_info.get("days_remaining")
         logger.info(
-            f"Sub anniversary active for {channel_key}: "
-            f"{months} months, {days_left} days remaining"
+            f"Sub anniversary active for {channel_key}: {months} months, {days_left} days remaining"
         )
         self.sub_anniversary_fetched.emit(channel_key, sub_info)
 
-    def _check_resub_shared(
-        self, channel_key: str, messages: list[ChatMessage]
-    ) -> None:
+    def _check_resub_shared(self, channel_key: str, messages: list[ChatMessage]) -> None:
         """Detect own resub USERNOTICE and dismiss the anniversary banner.
 
         When the user clicks "Share" on Twitch, a USERNOTICE with msg-id=resub
@@ -1222,10 +1215,7 @@ class ChatManager(QObject):
                 and msg.user.name.lower() == login_lower
                 and "subscribed" in (msg.system_text or "").lower()
             ):
-                logger.info(
-                    f"Own resub detected for {channel_key}, "
-                    f"dismissing anniversary banner"
-                )
+                logger.info(f"Own resub detected for {channel_key}, dismissing anniversary banner")
                 self.sub_anniversary_fetched.emit(channel_key, {"redeemed": True})
                 return
 

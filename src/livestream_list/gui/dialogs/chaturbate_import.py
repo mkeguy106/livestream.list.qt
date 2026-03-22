@@ -244,9 +244,7 @@ class ChaturbateImportDialog(QDialog):
 
         if not self._age_gate_handled:
             self._age_gate_handled = True
-            self._page.runJavaScript(
-                _DISMISS_AGE_GATE_JS, 0, self._on_age_gate
-            )
+            self._page.runJavaScript(_DISMISS_AGE_GATE_JS, 0, self._on_age_gate)
         else:
             # Second load after age gate — fetch API data
             self.import_label.setText("Fetching followed rooms...")
@@ -260,9 +258,7 @@ class ChaturbateImportDialog(QDialog):
             QTimer.singleShot(
                 2000,
                 lambda: (
-                    self._page.setUrl(
-                        QUrl("https://chaturbate.com/followed-cams/")
-                    )
+                    self._page.setUrl(QUrl("https://chaturbate.com/followed-cams/"))
                     if self._page
                     else None
                 ),
@@ -278,9 +274,7 @@ class ChaturbateImportDialog(QDialog):
             return
 
         self.import_label.setText("Querying Chaturbate API...")
-        self._page.runJavaScript(
-            _FETCH_ALL_FOLLOWS_JS, 0, self._on_api_data
-        )
+        self._page.runJavaScript(_FETCH_ALL_FOLLOWS_JS, 0, self._on_api_data)
 
     def _on_api_data(self, raw) -> None:
         """Process API response and create Channel objects."""
@@ -354,8 +348,6 @@ class ChaturbateImportDialog(QDialog):
 
         self.app.save_channels()
         self._added_count = added
-        self.done_label.setText(
-            f"Import complete!\nAdded {added} of {len(channels)} channels."
-        )
+        self.done_label.setText(f"Import complete!\nAdded {added} of {len(channels)} channels.")
         self.stack.setCurrentIndex(2)
         self.close_btn.setEnabled(True)
