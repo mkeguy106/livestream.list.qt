@@ -1,12 +1,16 @@
 """Local OAuth callback server for authentication."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import secrets
 import socket
 import threading
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
@@ -150,15 +154,22 @@ class ReuseAddrHTTPServer(HTTPServer):
 
     allow_reuse_address = True
 
+    # Attributes set by OAuthServer.start() and accessed by OAuthCallbackHandler
+    expected_state: str | None
+    code_callback: Callable[[str], None] | None
+    token_callback: Callable[[str], None] | None
+
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
     """HTTP request handler for OAuth callbacks."""
 
-    def log_message(self, format, *args):
+    server: ReuseAddrHTTPServer
+
+    def log_message(self, format: str, *args: Any) -> None:
         """Suppress default logging."""
         pass
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         """Handle GET requests."""
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
@@ -364,9 +375,14 @@ class OAuthServer:
         finally:
             self.stop()
 
-    def __enter__(self):
+    def __enter__(self) -> OAuthServer:
         self.start()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
         self.stop()

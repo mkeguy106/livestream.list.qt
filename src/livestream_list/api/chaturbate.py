@@ -8,6 +8,7 @@ session cookies are unavailable.
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import aiohttp
 
@@ -166,7 +167,7 @@ class ChaturbateApiClient(BaseApiClient):
             return None
 
         # Fetch all online followed rooms (paginated, typically 1-2 requests)
-        online_rooms: dict[str, dict] = {}
+        online_rooms: dict[str, dict[str, Any]] = {}
         offset = 0
         headers = {**self._get_headers(), "Cookie": cookie_str}
 
@@ -259,7 +260,7 @@ class ChaturbateApiClient(BaseApiClient):
                 data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return "offline"
-                return data.get("room_status", "offline")
+                return str(data.get("room_status", "offline"))
         except (aiohttp.ClientError, asyncio.TimeoutError):
             return "offline"
 
@@ -287,13 +288,13 @@ class ChaturbateApiClient(BaseApiClient):
             return ""
 
     @staticmethod
-    def _extract_username(room: dict) -> str:
+    def _extract_username(room: dict[str, Any]) -> str:
         """Extract username from a room-list API response item."""
         val = room.get("username", "")
         return str(val).lower() if val else ""
 
     @staticmethod
-    def _room_to_livestream(channel: Channel, room: dict) -> Livestream:
+    def _room_to_livestream(channel: Channel, room: dict[str, Any]) -> Livestream:
         """Convert a room-list API item to a Livestream object."""
         viewers = room.get("num_users", 0)
         if isinstance(viewers, str):

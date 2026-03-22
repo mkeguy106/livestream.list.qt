@@ -8,7 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
-from .platform import IS_FLATPAK, IS_WINDOWS
+from .platform import IS_FLATPAK
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _get_windows_exe_path() -> str:
 
 def is_autostart_enabled() -> bool:
     """Check if autostart is currently enabled."""
-    if IS_WINDOWS:
+    if sys.platform == "win32":
         try:
             import winreg
 
@@ -77,7 +77,7 @@ def is_autostart_enabled() -> bool:
 
 def enable_autostart() -> bool:
     """Enable autostart. Returns True if successful."""
-    if IS_WINDOWS:
+    if sys.platform == "win32":
         try:
             import winreg
 
@@ -100,7 +100,7 @@ def enable_autostart() -> bool:
 
 def disable_autostart() -> bool:
     """Disable autostart. Returns True if successful (or already disabled)."""
-    if IS_WINDOWS:
+    if sys.platform == "win32":
         try:
             import winreg
 

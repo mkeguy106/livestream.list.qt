@@ -225,7 +225,7 @@ class KickApiClient(BaseApiClient):
         # Convert exceptions to offline Livestream objects
         final_results: list[Livestream] = []
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 final_results.append(
                     Livestream(
                         channel=channels[i],
@@ -266,7 +266,11 @@ class KickApiClient(BaseApiClient):
                 if not data:
                     return []
 
-                for stream_data in data.get("data", data if isinstance(data, list) else []):
+                if isinstance(data, list):
+                    items = data
+                else:
+                    items = data.get("data", [])
+                for stream_data in items:
                     channel_data = stream_data.get("channel", {})
 
                     start_time = None
@@ -370,7 +374,11 @@ class KickApiClient(BaseApiClient):
                 if not data:
                     return []
 
-                for cat in data.get("data", data if isinstance(data, list) else []):
+                if isinstance(data, list):
+                    cat_items = data
+                else:
+                    cat_items = data.get("data", [])
+                for cat in cat_items:
                     categories.append(
                         {
                             "id": str(cat.get("id", "")),

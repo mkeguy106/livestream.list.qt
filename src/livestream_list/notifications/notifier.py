@@ -4,11 +4,13 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any
 
 from ..core.models import Livestream
-from ..core.platform import IS_FLATPAK, IS_WINDOWS
+from ..core.platform import IS_FLATPAK
 from ..core.settings import NotificationSettings
 
 logger = logging.getLogger(__name__)
@@ -24,9 +26,9 @@ class Notifier:
     ) -> None:
         self.settings = settings
         self.on_open_stream = on_open_stream
-        self._notifier = None
+        self._notifier: Any = None
         self._pending_streams: dict[str, Livestream] = {}
-        self._notification_log: list[dict] = []
+        self._notification_log: list[dict[str, Any]] = []
         self._init_backend()
 
     def _init_backend(self) -> None:
@@ -108,7 +110,7 @@ class Notifier:
             sound_path: Path to a sound file, or None to play the system default.
         """
         try:
-            if IS_WINDOWS:
+            if sys.platform == "win32":
                 import winsound
 
                 if sound_path and os.path.isfile(sound_path):
@@ -214,10 +216,15 @@ class Notifier:
 
                 buttons = []
                 if self.on_open_stream and channel_key:
+                    _key = channel_key
+
+                    def _on_watch() -> None:
+                        self._handle_watch(_key)
+
                     buttons.append(
                         Button(
                             title="Watch",
-                            on_pressed=lambda key=channel_key: self._handle_watch(key),
+                            on_pressed=_on_watch,
                         )
                     )
 
@@ -410,7 +417,7 @@ class Notifier:
         if custom and os.path.isfile(custom):
             self._play_sound(custom)
             return
-        if IS_WINDOWS:
+        if sys.platform == "win32":
             import winsound
 
             winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
@@ -521,7 +528,7 @@ class Notifier:
             self._notification_log = self._notification_log[-50:]
 
     @property
-    def notification_log(self) -> list[dict]:
+    def notification_log(self) -> list[dict[str, Any]]:
         """Read-only access to the notification log (most recent last)."""
         return list(self._notification_log)
 

@@ -5,6 +5,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .settings import get_config_dir
 
@@ -140,7 +141,7 @@ class ThemeData:
     builtin: bool = False
     colors: dict[str, str] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dict."""
         return {
             "name": self.name,
@@ -151,7 +152,7 @@ class ThemeData:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "ThemeData":
+    def from_dict(cls, data: dict[str, Any]) -> "ThemeData":
         """Deserialize from dict."""
         return cls(
             name=data.get("name", "Untitled"),
@@ -475,7 +476,7 @@ BUILTIN_THEME_ORDER: list[str] = [
 ]
 
 
-def theme_data_to_theme_colors(data: "ThemeData"):
+def theme_data_to_theme_colors(data: "ThemeData") -> object:
     """Convert a ThemeData to a ThemeColors instance.
 
     Missing fields are filled from the base theme (dark or light).
@@ -488,7 +489,7 @@ def theme_data_to_theme_colors(data: "ThemeData"):
     return ThemeColors(**{k: merged[k] for k in THEME_COLOR_FIELDS})
 
 
-def theme_colors_to_dict(tc) -> dict[str, str]:
+def theme_colors_to_dict(tc: object) -> dict[str, str]:
     """Extract all 32 color fields from a ThemeColors instance."""
     return {f: getattr(tc, f) for f in THEME_COLOR_FIELDS}
 

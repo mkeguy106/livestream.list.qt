@@ -4,8 +4,8 @@ import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TypeVar
+from collections.abc import Awaitable, Callable
+from typing import Any, TypeVar
 
 import aiohttp
 
@@ -14,7 +14,7 @@ from ..core.models import Channel, Livestream, StreamPlatform
 logger = logging.getLogger(__name__)
 
 
-async def safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
+async def safe_json(resp: aiohttp.ClientResponse) -> dict[str, Any] | list[Any] | None:
     """Safely parse JSON from response, returning None on error.
 
     This handles common error cases:
@@ -29,7 +29,8 @@ async def safe_json(resp: aiohttp.ClientResponse) -> dict | list | None:
         Parsed JSON data or None if parsing failed
     """
     try:
-        return await resp.json()
+        result: dict[str, Any] | list[Any] = await resp.json()
+        return result
     except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
         logger.warning(f"Failed to parse JSON response: {e}")
         return None
@@ -104,7 +105,7 @@ class BaseApiClient(ABC):
 
     async def _retry_with_backoff(
         self,
-        operation: Callable[[], T],  # type: ignore[type-arg]
+        operation: Callable[[], Awaitable[T]],
         max_retries: int = DEFAULT_MAX_RETRIES,
         base_delay: float = DEFAULT_BASE_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
@@ -164,7 +165,7 @@ class BaseApiClient(ABC):
         # Retry on server errors (5xx) and rate limiting (429)
         return status >= 500 or status == 429
 
-    def _parse_retry_after(self, headers: dict, default: float = 1.0) -> float:
+    def _parse_retry_after(self, headers: dict[str, str], default: float = 1.0) -> float:
         """Parse Retry-After header value.
 
         Args:
