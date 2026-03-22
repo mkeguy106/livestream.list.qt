@@ -193,6 +193,12 @@ def test_stream_url_twitch():
     assert ls.stream_url == "https://twitch.tv/streamer"
 
 
+def test_stream_url_youtube_with_video_id():
+    ch = Channel(channel_id="UC1234567890", platform=StreamPlatform.YOUTUBE)
+    ls = Livestream(channel=ch, video_id="dQw4w9WgXcQ")
+    assert ls.stream_url == "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+
 def test_stream_url_youtube_uc():
     ch = Channel(channel_id="UC1234567890", platform=StreamPlatform.YOUTUBE)
     ls = Livestream(channel=ch)

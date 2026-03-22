@@ -88,7 +88,7 @@ class StreamRowDelegate(QStyledItemDelegate):
     favorite_clicked = Signal(str)  # channel_key
     auto_launch_clicked = Signal(str)  # channel_key
     chat_clicked = Signal(str, str, str)  # channel_id, platform, video_id
-    browser_clicked = Signal(str, str)  # channel_id, platform
+    browser_clicked = Signal(str, str, str)  # channel_id, platform, video_id
     room_status_requested = Signal(object)  # Livestream needing room status check
 
     def __init__(self, settings, parent=None):
@@ -621,7 +621,8 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         # Check browser button
         if "browser" in rects and rects["browser"].contains(pos):
-            self.browser_clicked.emit(channel.channel_id, channel.platform.value)
+            video_id = getattr(livestream, "video_id", None) or ""
+            self.browser_clicked.emit(channel.channel_id, channel.platform.value, video_id)
             return True
 
         return False
