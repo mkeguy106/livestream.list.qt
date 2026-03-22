@@ -5,7 +5,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QPoint
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
-from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 
 from .theme import ThemeManager
 
@@ -83,7 +83,7 @@ class TrayIcon(QSystemTrayIcon):
 
     def __init__(
         self,
-        parent,
+        parent: QWidget | None,
         on_open: Callable[[], None],
         on_quit: Callable[[], None],
         get_notifications_enabled: Callable[[], bool],
@@ -110,11 +110,11 @@ class TrayIcon(QSystemTrayIcon):
         # Connect signals
         self.activated.connect(self._on_activated)
 
-    def _create_icon(self):
+    def _create_icon(self) -> None:
         """Create the tray icon."""
         self.setIcon(create_app_icon(22))
 
-    def _create_menu(self):
+    def _create_menu(self) -> None:
         """Create the context menu."""
         menu = QMenu()
 
@@ -143,7 +143,7 @@ class TrayIcon(QSystemTrayIcon):
 
         self.setContextMenu(menu)
 
-    def _on_activated(self, reason: QSystemTrayIcon.ActivationReason):
+    def _on_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         """Handle tray icon activation."""
         if reason in (
             QSystemTrayIcon.ActivationReason.Trigger,
@@ -156,14 +156,14 @@ class TrayIcon(QSystemTrayIcon):
             self._set_notifications_enabled(not current)
             self._notifications_action.setChecked(not current)
 
-    def _on_notifications_toggled(self, checked: bool):
+    def _on_notifications_toggled(self, checked: bool) -> None:
         """Handle notifications toggle."""
         self._set_notifications_enabled(checked)
 
-    def update_notifications_state(self):
+    def update_notifications_state(self) -> None:
         """Update the notifications checkbox state."""
         self._notifications_action.setChecked(self._get_notifications_enabled())
 
-    def destroy(self):
+    def destroy(self) -> None:
         """Clean up the tray icon."""
         self.hide()

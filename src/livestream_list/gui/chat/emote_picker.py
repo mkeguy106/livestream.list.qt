@@ -1,9 +1,10 @@
 """Emote picker popup with searchable grid."""
 
 import logging
+from typing import Any
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QHideEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -216,7 +217,7 @@ class EmotePickerWidget(QWidget):
         """Set the shared image store."""
         self._image_store = store
 
-    def set_gif_timer(self, timer) -> None:
+    def set_gif_timer(self, timer: Any) -> None:
         """Set the shared GIF timer for animating emotes."""
         self._gif_timer = timer
 
@@ -226,7 +227,7 @@ class EmotePickerWidget(QWidget):
         except Exception:
             return 1.0
 
-    def show_picker(self, pos) -> None:
+    def show_picker(self, pos: QPoint) -> None:
         """Show the picker at the given position."""
         if self._needs_rebuild:
             self._needs_rebuild = False
@@ -239,7 +240,7 @@ class EmotePickerWidget(QWidget):
         # Kick off deferred scan (animation detection + missing emote requests)
         self._start_deferred_scan()
 
-    def hideEvent(self, event) -> None:  # noqa: N802
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
         """Disconnect animation timer when picker closes."""
         self._scan_timer.stop()
         if self._gif_timer and self._gif_connected:

@@ -2,12 +2,22 @@
 
 import fnmatch
 import logging
+import subprocess
 import threading
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QKeySequence, QPainter, QShortcut
+from PySide6.QtCore import QEvent, QModelIndex, QObject, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QCloseEvent,
+    QKeySequence,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QResizeEvent,
+    QShortcut,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -49,6 +59,7 @@ from .theme import ThemeManager, get_app_stylesheet, get_theme
 from .window_utils import apply_always_on_top
 
 if TYPE_CHECKING:
+    from ..core.monitor import StreamMonitor
     from .app import Application
 
 logger = logging.getLogger(__name__)
@@ -65,7 +76,7 @@ class _WhisperBanner(QWidget):
     _COLOR_A = "#5b21b6"  # Muted purple
     _COLOR_B = "#7c3aed"  # Lighter purple
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._sender_name = ""
         self._sender_id = ""
@@ -124,7 +135,7 @@ class _WhisperBanner(QWidget):
 
         self._set_bg(self._COLOR_A)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         """Enable stylesheet backgrounds on custom QWidget subclass."""
         from PySide6.QtWidgets import QStyle, QStyleOption
 
@@ -156,16 +167,16 @@ class _WhisperBanner(QWidget):
         self._flash_timer.stop()
         self._set_bg(self._COLOR_A)
 
-    def _on_open(self):
+    def _on_open(self) -> None:
         self._flash_timer.stop()
         self.open_clicked.emit(self._sender_name, self._sender_id)
         self.hide()
 
-    def _dismiss(self):
+    def _dismiss(self) -> None:
         self._flash_timer.stop()
         self.hide()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         cs = self._close_btn.width()
         self._close_btn.move(self.width() - cs - 6, (self.height() - cs) // 2)
@@ -190,8 +201,8 @@ class MainWindow(QMainWindow):
         self._platform_filter: StreamPlatform | None = None
         self._chat_launcher = ChatLauncher(app.settings.chat)
         self._force_quit = False  # When True, closeEvent quits instead of minimizing
-        self._last_clicked_index = None  # Anchor for shift+click range selection
-        self._console_windows: dict = {}  # channel_key -> StreamlinkConsoleWindow
+        self._last_clicked_index: QModelIndex | None = None  # Anchor for shift+click
+        self._console_windows: dict[str, Any] = {}  # channel_key -> ConsoleWindow
         self._console_requested.connect(self._open_console_window)
         self._play_blocked.connect(self.set_status)
         self._stream_launched.connect(self._on_stream_launched)
@@ -210,7 +221,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._apply_settings()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Set up the main window UI."""
         self.setWindowTitle("Livestream List (Qt)")
         self.setMinimumWidth(460)
@@ -329,7 +340,7 @@ class MainWindow(QMainWindow):
         )
 
         # Video preview on hover (lazy init — QtMultimedia may not be available in CI)
-        self._preview_controller = None
+        self._preview_controller: Any = None
         self._preview_controller_checked = False
 
         list_layout.addWidget(self.stream_list)
@@ -379,7 +390,7 @@ class MainWindow(QMainWindow):
         self.live_count_label.setContentsMargins(0, 0, 6, 0)
         self.status_bar.addPermanentWidget(self.live_count_label)
 
-    def _create_menu_bar(self):
+    def _create_menu_bar(self) -> None:
         """Create the menu bar."""
         menubar = self.menuBar()
         menubar.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
@@ -494,7 +505,7 @@ class MainWindow(QMainWindow):
         self._update_style_btn()
         menubar.setCornerWidget(self.style_btn, Qt.Corner.TopRightCorner)
 
-    def _create_toolbar(self):
+    def _create_toolbar(self) -> None:
         """Create the toolbar."""
         toolbar = QToolBar()
         toolbar.setMovable(False)
@@ -569,20 +580,20 @@ class MainWindow(QMainWindow):
         self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
         toolbar.addWidget(self.sort_combo)
 
-    def _setup_shortcuts(self):
+    def _setup_shortcuts(self) -> None:
         """Set up keyboard shortcuts."""
         QShortcut(QKeySequence("F5"), self, self._on_refresh)
         QShortcut(QKeySequence("Escape"), self, self._on_escape)
         QShortcut(QKeySequence("Delete"), self, self._on_delete_key)
         QShortcut(QKeySequence("Ctrl+A"), self, self._on_ctrl_a)
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         """Connect application signals."""
         self.app.stream_online.connect(self._on_stream_online)
         self.app.refresh_complete.connect(self._on_refresh_complete)
         self.app.refresh_error.connect(self._on_refresh_error)
 
-    def _apply_settings(self):
+    def _apply_settings(self) -> None:
         """Apply current settings to the UI."""
         self._hide_offline_action.setChecked(self.app.settings.hide_offline)
         self._favorites_action.setChecked(self.app.settings.favorites_only)
@@ -597,20 +608,20 @@ class MainWindow(QMainWindow):
         if self.app.settings.window.always_on_top:
             QTimer.singleShot(100, lambda: apply_always_on_top([self], True))
 
-    def set_loading_complete(self):
+    def set_loading_complete(self) -> None:
         """Switch from loading view to appropriate content view."""
         self._update_view()
 
-    def set_status(self, message: str):
+    def set_status(self, message: str) -> None:
         """Set the status bar message."""
         self.status_label.setText(message)
 
-    def set_loading_status(self, message: str, detail: str = ""):
+    def set_loading_status(self, message: str, detail: str = "") -> None:
         """Set loading status message."""
         self.loading_label.setText(message)
         self.loading_detail.setText(detail)
 
-    def refresh_stream_list(self):
+    def refresh_stream_list(self) -> None:
         """Refresh the stream list display (rate-limited to prevent rapid successive calls)."""
         if self._refresh_in_progress:
             # A refresh is already running, queue another one for when it's done
@@ -629,7 +640,7 @@ class MainWindow(QMainWindow):
             # Start cooldown timer to prevent rapid successive refreshes
             self._refresh_debounce_timer.start()
 
-    def _do_refresh_stream_list(self):
+    def _do_refresh_stream_list(self) -> None:
         """Actually perform the refresh (called after debounce delay)."""
         if not self._refresh_pending:
             return
@@ -643,7 +654,7 @@ class MainWindow(QMainWindow):
             if self._refresh_pending:
                 self._refresh_debounce_timer.start()
 
-    def _update_view(self):
+    def _update_view(self) -> None:
         """Update the view based on current state."""
         import time
 
@@ -754,7 +765,7 @@ class MainWindow(QMainWindow):
         # Pre-compute playing keys once (avoid calling is_playing 343*log(343) times during sort)
         playing_keys = set(streamlink.get_playing_streams()) if streamlink else set()
 
-        def sort_key(ls: Livestream):
+        def sort_key(ls: Livestream) -> tuple[Any, ...]:
             live = 0 if ls.live else 1
             is_playing = 0 if ls.channel.unique_key in playing_keys else 1
 
@@ -793,7 +804,7 @@ class MainWindow(QMainWindow):
         filtered.sort(key=sort_key)
         return filtered
 
-    def _populate_list(self, livestreams: list[Livestream]):
+    def _populate_list(self, livestreams: list[Livestream]) -> None:
         """Populate the virtualized list view with stream data.
 
         Uses in-place updates when possible (same streams in same order).
@@ -809,6 +820,8 @@ class MainWindow(QMainWindow):
             playing_keys = all_playing & set(new_keys)
         else:
             playing_keys = set()
+        assert self._stream_model is not None
+        assert self._stream_delegate is not None
         self._stream_model.update_playing_keys(playing_keys)
 
         # Check if we can do incremental update (same streams in same order)
@@ -837,7 +850,7 @@ class MainWindow(QMainWindow):
         finally:
             self.stream_list.setUpdatesEnabled(True)
 
-    def _update_live_count(self):
+    def _update_live_count(self) -> None:
         """Update the live count label."""
         monitor = self.app.monitor
         if not monitor:
@@ -848,7 +861,7 @@ class MainWindow(QMainWindow):
         live = len([ls for ls in monitor.livestreams if ls.live])
         self.live_count_label.setText(f"{live} live / {total} total")
 
-    def _on_filter_changed(self):
+    def _on_filter_changed(self) -> None:
         """Handle filter checkbox changes."""
         self.app.settings.hide_offline = self._hide_offline_action.isChecked()
         self.app.settings.favorites_only = self._favorites_action.isChecked()
@@ -857,7 +870,7 @@ class MainWindow(QMainWindow):
         self.app.save_settings()
         self.refresh_stream_list()
 
-    def _on_name_filter_changed(self, text: str):
+    def _on_name_filter_changed(self, text: str) -> None:
         """Handle name filter text change (debounced)."""
         self._name_filter = text
         if not hasattr(self, "_name_filter_timer"):
@@ -867,31 +880,31 @@ class MainWindow(QMainWindow):
             self._name_filter_timer.timeout.connect(self.refresh_stream_list)
         self._name_filter_timer.start()
 
-    def _on_sort_changed(self, index: int):
+    def _on_sort_changed(self, index: int) -> None:
         """Handle sort mode change."""
         self.app.settings.sort_mode = self.sort_combo.currentData()
         self.app.save_settings()
         self.refresh_stream_list()
 
-    def _on_stream_online(self, livestream):
+    def _on_stream_online(self, livestream: Livestream) -> None:
         """Handle stream going online."""
         self.set_status(f"{livestream.display_name} is live!")
         self.refresh_stream_list()
 
-    def _on_refresh_complete(self):
+    def _on_refresh_complete(self) -> None:
         """Handle refresh completion."""
         self.refresh_stream_list()
 
-    def _on_refresh_error(self, error_msg: str):
+    def _on_refresh_error(self, error_msg: str) -> None:
         """Handle refresh error - show message in status bar."""
         self.set_status(f"⚠ {error_msg}")
 
-    def _on_refresh(self):
+    def _on_refresh(self) -> None:
         """Handle refresh action."""
         self.set_status("Refreshing...")
         self.app.refresh(on_complete=lambda: self.set_status("Ready"))
 
-    def _zoom_in(self):
+    def _zoom_in(self) -> None:
         """Increase the stream list font size."""
         current = self.app.settings.font_size
         if current == 0:
@@ -904,7 +917,7 @@ class MainWindow(QMainWindow):
         if self._stream_model:
             self._stream_model.layoutChanged.emit()
 
-    def _zoom_out(self):
+    def _zoom_out(self) -> None:
         """Decrease the stream list font size."""
         current = self.app.settings.font_size
         if current == 0:
@@ -917,7 +930,7 @@ class MainWindow(QMainWindow):
         if self._stream_model:
             self._stream_model.layoutChanged.emit()
 
-    def _populate_theme_menu(self):
+    def _populate_theme_menu(self) -> None:
         """Build the Theme submenu with all available themes."""
         from ..core.theme_data import list_all_themes
 
@@ -932,7 +945,7 @@ class MainWindow(QMainWindow):
             )
             action.triggered.connect(lambda checked, slug=td.slug: self._apply_theme_by_slug(slug))
 
-    def _apply_theme_by_slug(self, slug: str):
+    def _apply_theme_by_slug(self, slug: str) -> None:
         """Apply a specific theme by its slug."""
         from ..core.theme_data import BUILTIN_THEMES, list_all_themes, theme_data_to_theme_colors
 
@@ -957,7 +970,7 @@ class MainWindow(QMainWindow):
         self._populate_theme_menu()
         self._apply_theme()
 
-    def _apply_theme(self):
+    def _apply_theme(self) -> None:
         """Apply the current theme to all windows."""
         app_stylesheet = get_app_stylesheet()
 
@@ -1065,36 +1078,42 @@ class MainWindow(QMainWindow):
         finally:
             self.setUpdatesEnabled(True)
 
-    def _on_item_double_clicked(self, index):
+    def _on_item_double_clicked(self, index: QModelIndex) -> None:
         """Handle double-click on list item."""
         livestream = index.data(StreamRole)
         if livestream:
             self._on_play_stream(livestream)
 
-    def _on_play_stream(self, livestream: Livestream):
+    def _on_play_stream(self, livestream: Livestream) -> None:
         """Handle playing a stream."""
         self.play_stream(livestream)
 
-    def play_stream(self, livestream: Livestream):
+    def play_stream(self, livestream: Livestream) -> None:
         """Launch a stream for playback."""
-        if not self.app.streamlink:
+        streamlink = self.app.streamlink
+        if not streamlink:
             return
 
         self.set_status(f"Launching {livestream.channel.display_name}...")
 
         # Launch in background
-        def launch():
+        def launch() -> None:
             try:
                 # Pre-check Chaturbate room status before launching
                 if livestream.channel.platform == StreamPlatform.CHATURBATE:
-                    status = self._check_chaturbate_room_status(livestream.channel.channel_id)
+                    status = self._check_chaturbate_room_status(
+                        livestream.channel.channel_id
+                    )
                     if status and status != "public":
                         label = status.replace("_", " ").title()
-                        name = livestream.channel.display_name or livestream.channel.channel_id
+                        name = (
+                            livestream.channel.display_name
+                            or livestream.channel.channel_id
+                        )
                         self._play_blocked.emit(f"{name} is in a {label} show")
                         return
 
-                process = self.app.streamlink.launch(livestream)
+                process = streamlink.launch(livestream)
                 if process:
                     self._stream_launched.emit(livestream.channel.display_name)
                 if process and process.stdout and self.app.settings.streamlink.show_console:
@@ -1111,7 +1130,9 @@ class MainWindow(QMainWindow):
                 ):
                     ch = livestream.channel
                     video_id = getattr(livestream, "video_id", None) or ""
-                    self._chat_launcher.open_chat(ch.channel_id, ch.platform.value, video_id)
+                    self._chat_launcher.open_chat(
+                        ch.channel_id, ch.platform, video_id
+                    )
             except Exception as e:
                 logger.error(f"Launch error: {e}")
 
@@ -1127,12 +1148,14 @@ class MainWindow(QMainWindow):
         ):
             self.app.open_builtin_chat(livestream)
 
-    def _on_stream_launched(self, display_name: str):
+    def _on_stream_launched(self, display_name: str) -> None:
         """Handle stream process started (called via signal from background thread)."""
         self.refresh_stream_list()
         self.set_status(f"Playing {display_name}")
 
-    def _open_console_window(self, channel_key: str, channel_name: str, process):
+    def _open_console_window(
+        self, channel_key: str, channel_name: str, process: subprocess.Popen[Any]
+    ) -> None:
         """Open a console window for streamlink output (called via signal on main thread)."""
         from .streamlink_console import StreamlinkConsoleWindow
 
@@ -1144,7 +1167,7 @@ class MainWindow(QMainWindow):
         console.destroyed.connect(lambda _key=channel_key: self._console_windows.pop(_key, None))
         console.show()
 
-    def _on_stop_stream(self, channel_key: str):
+    def _on_stop_stream(self, channel_key: str) -> None:
         """Handle stopping a stream."""
         if self.app.streamlink:
             self.app.streamlink.stop_stream(channel_key)
@@ -1159,7 +1182,7 @@ class MainWindow(QMainWindow):
         # Mark as checking to prevent repeated requests
         livestream.room_status = "checking"
 
-        def check():
+        def check() -> None:
             status = self._check_chaturbate_room_status(channel_id)
             livestream.room_status = status or "offline"
             self._room_status_checked.emit()
@@ -1181,12 +1204,13 @@ class MainWindow(QMainWindow):
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read())
-                return data.get("room_status", "offline")
+                result: str = data.get("room_status", "offline")
+                return result
         except Exception as e:
             logger.debug(f"Chaturbate room status check failed: {e}")
             return ""  # Empty = couldn't check, allow launch
 
-    def _on_toggle_favorite(self, channel_key: str):
+    def _on_toggle_favorite(self, channel_key: str) -> None:
         """Handle toggling favorite status."""
         monitor = self.app.monitor
         if not monitor:
@@ -1204,7 +1228,7 @@ class MainWindow(QMainWindow):
             self.app.save_channels()
             self.refresh_stream_list()
 
-    def _on_toggle_auto_launch(self, channel_key: str):
+    def _on_toggle_auto_launch(self, channel_key: str) -> None:
         """Handle toggling auto-launch status."""
         monitor = self.app.monitor
         if not monitor:
@@ -1217,7 +1241,7 @@ class MainWindow(QMainWindow):
                 self.refresh_stream_list()
                 break
 
-    def _on_open_chat(self, channel_id: str, platform: str, video_id: str):
+    def _on_open_chat(self, channel_id: str, platform: str, video_id: str) -> None:
         """Handle opening chat."""
         if self.app.settings.chat.mode == "builtin" and self.app.chat_manager:
             # Find the livestream for this channel
@@ -1225,7 +1249,9 @@ class MainWindow(QMainWindow):
             if livestream:
                 self.app.open_builtin_chat(livestream)
             return
-        self._chat_launcher.open_chat(channel_id, platform, video_id)
+        self._chat_launcher.open_chat(
+            channel_id, StreamPlatform(platform), video_id
+        )
 
     def _find_livestream(self, channel_id: str, platform: str) -> Livestream | None:
         """Find a livestream by channel_id and platform."""
@@ -1237,11 +1263,13 @@ class MainWindow(QMainWindow):
                 return ls
         return None
 
-    def _on_open_browser(self, channel_id: str, platform: str, video_id: str = ""):
+    def _on_open_browser(self, channel_id: str, platform: str, video_id: str = "") -> None:
         """Handle opening in browser."""
-        self._chat_launcher.open_channel(channel_id, platform, video_id=video_id or None)
+        self._chat_launcher.open_channel(
+            channel_id, StreamPlatform(platform), video_id=video_id or None
+        )
 
-    def _show_stream_context_menu(self, pos, livestream: Livestream) -> None:
+    def _show_stream_context_menu(self, pos: Any, livestream: Livestream) -> None:
         """Show right-click context menu for a stream."""
         menu = QMenu(self)
         channel = livestream.channel
@@ -1282,7 +1310,7 @@ class MainWindow(QMainWindow):
 
         menu.exec(pos)
 
-    def _toggle_selection_mode(self):
+    def _toggle_selection_mode(self) -> None:
         """Toggle selection mode."""
         if self._stream_model:
             is_selection = self._stream_model.is_selection_mode()
@@ -1291,26 +1319,26 @@ class MainWindow(QMainWindow):
             self.selection_bar.setVisible(not is_selection)
             self._update_selection_count()
 
-    def _exit_selection_mode(self):
+    def _exit_selection_mode(self) -> None:
         """Exit selection mode."""
         if self._stream_model:
             self._stream_model.set_selection_mode(False)
         self.select_btn.setChecked(False)
         self.selection_bar.setVisible(False)
 
-    def _on_escape(self):
+    def _on_escape(self) -> None:
         """Handle Escape key - exit selection mode or clear name filter."""
         if self._stream_model and self._stream_model.is_selection_mode():
             self._exit_selection_mode()
         elif self._name_filter:
             self.name_filter_edit.clear()
 
-    def _on_delete_key(self):
+    def _on_delete_key(self) -> None:
         """Handle Delete key - delete selected in selection mode."""
         if self._stream_model and self._stream_model.is_selection_mode():
             self._delete_selected()
 
-    def _on_ctrl_a(self):
+    def _on_ctrl_a(self) -> None:
         """Handle Ctrl+A - select all in selection mode, or enter selection mode."""
         if self.name_filter_edit.hasFocus():
             self.name_filter_edit.selectAll()
@@ -1320,24 +1348,24 @@ class MainWindow(QMainWindow):
                 self._toggle_selection_mode()
             self._select_all()
 
-    def _select_all(self):
+    def _select_all(self) -> None:
         """Select all visible rows."""
         if self._stream_model:
             self._stream_model.select_all()
         self._update_selection_count()
 
-    def _deselect_all(self):
+    def _deselect_all(self) -> None:
         """Deselect all rows."""
         if self._stream_model:
             self._stream_model.deselect_all()
         self._update_selection_count()
 
-    def _update_selection_count(self):
+    def _update_selection_count(self) -> None:
         """Update the selection count label."""
         count = self._stream_model.get_selection_count() if self._stream_model else 0
         self.selection_count_label.setText(f"{count} selected")
 
-    def _delete_selected(self):
+    def _delete_selected(self) -> None:
         """Move selected channels to trash."""
         selected_keys = self._stream_model.get_selected_keys() if self._stream_model else []
         if not selected_keys:
@@ -1351,7 +1379,8 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self.app.monitor.trash_channels(selected_keys)
+            if self.app.monitor:
+                self.app.monitor.trash_channels(selected_keys)
             self._exit_selection_mode()
             self.refresh_stream_list()
 
@@ -1361,44 +1390,45 @@ class MainWindow(QMainWindow):
 
     def _on_whisper_banner_clicked(self, sender_name: str, sender_id: str) -> None:
         """Open the DM tab for the whisper sender."""
-        self.app._ensure_chat_window()
-        self.app._chat_window.open_dm_tab(sender_name, sender_id)
-        self.app._chat_window.show()
-        self.app._chat_window.raise_()
-        self.app._chat_window.activateWindow()
+        chat_window = self.app._ensure_chat_window()
+        if chat_window:
+            chat_window.open_dm_tab(sender_name, sender_id)
+            chat_window.show()
+            chat_window.raise_()
+            chat_window.activateWindow()
 
-    def _on_new_whisper(self):
+    def _on_new_whisper(self) -> None:
         """Open the New Whisper dialog via the app."""
         self.app.open_new_whisper_dialog()
 
-    def _show_about(self):
+    def _show_about(self) -> None:
         """Show about dialog."""
         dialog = AboutDialog(self, self.app)
         dialog.exec()
 
-    def show_add_channel_dialog(self):
+    def show_add_channel_dialog(self) -> None:
         """Show the add channel dialog."""
         dialog = AddChannelDialog(self, self.app)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.refresh_stream_list()
 
-    def show_preferences_dialog(self, initial_tab: int = 0):
+    def show_preferences_dialog(self, initial_tab: int = 0) -> None:
         """Show the preferences dialog."""
         dialog = PreferencesDialog(self, self.app, initial_tab=initial_tab)
         dialog.exec()
         self._apply_settings()
         self.refresh_stream_list()
 
-    def _show_chat_preferences(self):
+    def _show_chat_preferences(self) -> None:
         """Open preferences dialog directly on the Chat tab."""
         self.show_preferences_dialog(initial_tab=2)
 
-    def show_export_dialog(self):
+    def show_export_dialog(self) -> None:
         """Show the export dialog."""
         dialog = ExportDialog(self, self.app)
         dialog.exec()
 
-    def show_import_dialog(self):
+    def show_import_dialog(self) -> None:
         """Show the import dialog."""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Import Channels", "", "JSON Files (*.json);;All Files (*)"
@@ -1406,7 +1436,7 @@ class MainWindow(QMainWindow):
         if file_path:
             self._import_from_file(file_path)
 
-    def _import_from_file(self, file_path: str):
+    def _import_from_file(self, file_path: str) -> None:
         """Import channels and settings from a file."""
         import json
 
@@ -1430,7 +1460,7 @@ class MainWindow(QMainWindow):
                     dont_notify=ch_data.get("dont_notify", False),
                 )
 
-                if self.app.monitor.add_channel_direct(channel):
+                if self.app.monitor and self.app.monitor.add_channel_direct(channel):
                     imported += 1
 
             # Import settings if present
@@ -1529,7 +1559,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Import Error", f"Failed to import: {e}")
 
-    def closeEvent(self, event):  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Handle window close event."""
         # First-time close prompt
         if not self.app.settings.close_to_tray_asked and self.app.tray_icon:
@@ -1590,7 +1620,7 @@ class MainWindow(QMainWindow):
             self._save_window_geometry()
             event.accept()
 
-    def _save_window_geometry(self):
+    def _save_window_geometry(self) -> None:
         """Save current window position and size to settings."""
         pos = self.pos()
         self.app.settings.window.width = self.width()
@@ -1599,21 +1629,20 @@ class MainWindow(QMainWindow):
         self.app.settings.window.y = pos.y()
         self.app.save_settings()
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle mouse/wheel events on stream list viewport."""
-        from PySide6.QtCore import QEvent
-
         if obj != self.stream_list.viewport():
             return super().eventFilter(obj, event)
 
         # Ctrl+Wheel for font scaling
         if event.type() == QEvent.Type.Wheel:
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            wheel = cast(QWheelEvent, event)
+            if wheel.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 default_size = QApplication.font().pointSize()
                 current = self.app.settings.font_size
                 if current == 0:
                     current = default_size
-                delta = 1 if event.angleDelta().y() > 0 else -1
+                delta = 1 if wheel.angleDelta().y() > 0 else -1
                 new_size = max(6, min(30, current + delta))
                 self.app.settings.font_size = new_size
                 self.app.save_settings()
@@ -1624,43 +1653,50 @@ class MainWindow(QMainWindow):
                 return True
 
         # Right-click context menu
-        if (
-            event.type() == QEvent.Type.MouseButtonPress
-            and event.button() == Qt.MouseButton.RightButton
-        ):
-            index = self.stream_list.indexAt(event.pos())
-            if index.isValid():
-                livestream = index.data(StreamRole)
-                if livestream:
-                    self._show_stream_context_menu(event.globalPosition().toPoint(), livestream)
-                    return True
+        if event.type() == QEvent.Type.MouseButtonPress:
+            me = cast(QMouseEvent, event)
+            if me.button() == Qt.MouseButton.RightButton:
+                index = self.stream_list.indexAt(me.pos())
+                if index.isValid():
+                    livestream = index.data(StreamRole)
+                    if livestream:
+                        self._show_stream_context_menu(
+                            me.globalPosition().toPoint(), livestream
+                        )
+                        return True
 
         # Selection mode: shift+click for range, track anchor on normal click
         if (
             event.type() == QEvent.Type.MouseButtonRelease
-            and event.button() == Qt.MouseButton.LeftButton
             and self._stream_model
             and self._stream_model.is_selection_mode()
         ):
-            index = self.stream_list.indexAt(event.pos())
-            if index.isValid():
-                has_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-                if has_shift and self._last_clicked_index is not None:
-                    self._stream_model.select_range(self._last_clicked_index.row(), index.row())
-                    self._update_selection_count()
-                    return True
-                else:
-                    # Track anchor for next shift+click (let editorEvent handle toggle)
-                    self._last_clicked_index = index
+            me = cast(QMouseEvent, event)
+            if me.button() == Qt.MouseButton.LeftButton:
+                index = self.stream_list.indexAt(me.pos())
+                if index.isValid():
+                    has_shift = bool(
+                        me.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                    )
+                    if has_shift and self._last_clicked_index is not None:
+                        self._stream_model.select_range(
+                            self._last_clicked_index.row(), index.row()
+                        )
+                        self._update_selection_count()
+                        return True
+                    else:
+                        # Track anchor for next shift+click
+                        self._last_clicked_index = index
 
         # Video preview on hover over live channels (suppress when over buttons)
         if event.type() == QEvent.Type.MouseMove:
+            me = cast(QMouseEvent, event)
             ctrl = self._ensure_preview_controller()
             if ctrl:
-                index = self.stream_list.indexAt(event.pos())
+                index = self.stream_list.indexAt(me.pos())
                 if index.isValid():
                     livestream = index.data(StreamRole)
-                    over_button = self._is_over_button(index.row(), event.pos())
+                    over_button = self._is_over_button(index.row(), me.pos())
                     is_playing = (
                         livestream
                         and self.app.streamlink
@@ -1713,12 +1749,14 @@ class MainWindow(QMainWindow):
         if not enabled and self._preview_controller:
             self._preview_controller.on_hover_leave()
 
-    def _is_over_button(self, row: int, pos) -> bool:
+    def _is_over_button(self, row: int, pos: Any) -> bool:
         """Check if the position is over any delegate button rect."""
+        if not self._stream_delegate:
+            return False
         rects = self._stream_delegate._button_rects.get(row, {})
         return any(rect.contains(pos) for rect in rects.values())
 
-    def _ensure_preview_controller(self):
+    def _ensure_preview_controller(self) -> Any:
         """Lazily create the video preview controller."""
         if self._preview_controller is not None:
             return self._preview_controller
@@ -1742,7 +1780,7 @@ class MainWindow(QMainWindow):
 
     # --- Trash dialog ---
 
-    def _show_trash_dialog(self):
+    def _show_trash_dialog(self) -> None:
         """Show the trash bin dialog."""
         if not self.app.monitor:
             return
@@ -1758,7 +1796,7 @@ class MainWindow(QMainWindow):
         self.app.save_settings()
         apply_always_on_top([self], checked)
 
-    def _quit_app(self):
+    def _quit_app(self) -> None:
         """Quit the application (bypasses minimize-to-tray)."""
         self._force_quit = True
         self.close()
@@ -1767,7 +1805,7 @@ class MainWindow(QMainWindow):
 class TrashDialog(QDialog):
     """Dialog for managing trashed channels."""
 
-    def __init__(self, parent, monitor):
+    def __init__(self, parent: QWidget, monitor: "StreamMonitor") -> None:
         super().__init__(parent)
         self.monitor = monitor
         self.restored_any = False
@@ -1805,7 +1843,7 @@ class TrashDialog(QDialog):
 
         self._populate()
 
-    def _populate(self):
+    def _populate(self) -> None:
         """Populate the list with trashed channels."""
         self.list_widget.clear()
         trash = self.monitor.get_trash()
@@ -1849,7 +1887,7 @@ class TrashDialog(QDialog):
                 indices.append(idx)
         return indices
 
-    def _restore_selected(self):
+    def _restore_selected(self) -> None:
         """Restore selected channels from trash."""
         indices = self._get_selected_indices()
         if not indices:
@@ -1858,7 +1896,7 @@ class TrashDialog(QDialog):
         self.restored_any = True
         self._populate()
 
-    def _delete_permanently(self):
+    def _delete_permanently(self) -> None:
         """Permanently delete selected channels from trash."""
         indices = self._get_selected_indices()
         if not indices:
@@ -1873,7 +1911,7 @@ class TrashDialog(QDialog):
             self.monitor.permanently_delete_trash(indices)
             self._populate()
 
-    def _empty_trash(self):
+    def _empty_trash(self) -> None:
         """Empty the entire trash."""
         trash = self.monitor.get_trash()
         if not trash:

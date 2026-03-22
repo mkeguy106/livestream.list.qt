@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...core.models import StreamPlatform
+from ...core.models import Channel, StreamPlatform
 
 if TYPE_CHECKING:
     from ..app import Application
@@ -36,11 +36,11 @@ class ImportFollowsDialog(QDialog):
 
     def __init__(
         self,
-        parent,
+        parent: QWidget | None,
         app: Application,
         platform: StreamPlatform,
         start_import: bool = False,
-    ):
+    ) -> None:
         super().__init__(parent)
         self.app = app
         self.platform = platform
@@ -139,17 +139,17 @@ class ImportFollowsDialog(QDialog):
         else:
             self.stack.setCurrentIndex(0)  # Login
 
-    def _start_login(self):
+    def _start_login(self) -> None:
         """Start the OAuth login flow."""
         self.stack.setCurrentIndex(1)  # Waiting
 
-        def login_thread():
+        def login_thread() -> bool:
             try:
                 from ...api.twitch import TwitchApiClient
 
                 client = TwitchApiClient(self.app.settings.twitch)
 
-                async def do_login():
+                async def do_login() -> bool:
                     success = await client.oauth_login(timeout=120)
                     if success:
                         self.app.settings.save()
@@ -158,15 +158,14 @@ class ImportFollowsDialog(QDialog):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    result = loop.run_until_complete(do_login())
-                    return result
+                    return loop.run_until_complete(do_login())
                 finally:
                     loop.close()
             except Exception as e:
                 logger.error(f"Login error: {e}")
                 return False
 
-        def on_complete():
+        def on_complete() -> None:
             if self.app.settings.twitch.access_token:
                 self.stack.setCurrentIndex(2)  # Ready
             else:
@@ -176,7 +175,7 @@ class ImportFollowsDialog(QDialog):
         # Connect signal for thread-safe callback
         self.login_complete.connect(on_complete)
 
-        def run_login():
+        def run_login() -> None:
             login_thread()
             # Emit signal to update UI on main thread
             self.login_complete.emit()
@@ -187,16 +186,16 @@ class ImportFollowsDialog(QDialog):
         thread.daemon = True
         thread.start()
 
-    def _start_import_follows(self):
+    def _start_import_follows(self) -> None:
         """Start importing followed channels."""
         self.stack.setCurrentIndex(3)  # Importing
         self.close_btn.setEnabled(False)
 
-        def import_thread():
+        def import_thread() -> list[Channel]:
             try:
                 from ...api.twitch import TwitchApiClient
 
-                async def do_import():
+                async def do_import() -> list[Channel]:
                     client = TwitchApiClient(self.app.settings.twitch)
                     client._session = None
 
@@ -213,25 +212,25 @@ class ImportFollowsDialog(QDialog):
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    channels = loop.run_until_complete(do_import())
-                    return channels
+                    return loop.run_until_complete(do_import())
                 finally:
                     loop.close()
             except Exception as e:
                 logger.error(f"Import error: {e}")
                 return []
 
-        def process_channels(channels):
+        def process_channels(channels: list[Channel]) -> None:
             if not channels:
                 self.import_label.setText("No channels found or error occurred.")
                 self.close_btn.setEnabled(True)
                 return
 
             self.import_progress.setRange(0, len(channels))
+            monitor = self.app.monitor
 
             added = 0
             for i, ch in enumerate(channels):
-                if self.app.monitor.add_channel_direct(ch):
+                if monitor and monitor.add_channel_direct(ch):
                     added += 1
 
                 self.import_progress.setValue(i + 1)
@@ -246,7 +245,7 @@ class ImportFollowsDialog(QDialog):
         # Connect signal for thread-safe callback
         self.import_complete.connect(process_channels)
 
-        def run_import():
+        def run_import() -> None:
             channels = import_thread()
             self.import_complete.emit(channels)
 

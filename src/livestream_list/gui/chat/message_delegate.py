@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
-from PySide6.QtCore import QModelIndex, QRect, QSize, Qt
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex, QPoint, QRect, QSize, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -26,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...chat.emotes.cache import EmoteCache
-from ...chat.models import ChatBadge, ChatMessage
+from ...chat.models import ChatBadge, ChatEmote, ChatMessage
 from ...core.settings import BuiltinChatSettings
 from ..theme import get_theme
 from .message_model import MessageRole
@@ -114,9 +115,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._image_store: EmoteCache | None = None
         self._animation_time_ms: int = 0
         # Cache for sizeHint calculations: (msg_id, width, settings_hash) -> QSize
-        self._size_cache: dict[tuple, QSize] = {}
+        self._size_cache: dict[tuple[object, ...], QSize] = {}
         self._font_bundle: _FontBundle | None = None
-        self._settings_hash_cache: tuple | None = None
+        self._settings_hash_cache: tuple[object, ...] | None = None
         self._size_cache_max = 2000
         self._scaled_cache: dict[tuple[str, int], QPixmap] = {}
         self._scaled_cache_max = 1200
@@ -191,7 +192,11 @@ class ChatMessageDelegate(QStyledItemDelegate):
             return color
 
         # Adjust HSL lightness toward readable range
-        h, s, l, a = color.getHslF()  # noqa: E741
+        hsl: tuple[float, ...] = color.getHslF()  # type: ignore[assignment]
+        h: float = hsl[0]
+        s: float = hsl[1]
+        l: float = hsl[2]  # noqa: E741
+        a: float = hsl[3]
         dark_bg = bg_lum < 0.5
         for _ in range(20):
             l = min(l + 0.05, 0.9) if dark_bg else max(l - 0.05, 0.15)  # noqa: E741
@@ -378,7 +383,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._font_bundle = None
         self._settings_hash_cache = None
 
-    def _get_settings_hash(self) -> tuple:
+    def _get_settings_hash(self) -> tuple[object, ...]:
         """Return a tuple of settings that affect message sizing."""
         if self._settings_hash_cache is None:
             self._settings_hash_cache = (
@@ -450,7 +455,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             return 1.0
 
     def _current_scale_from_option(self, option: QStyleOptionViewItem) -> float:
-        widget = option.widget
+        widget = option.widget  # type: ignore[attr-defined]
         if widget is not None:
             try:
                 return float(widget.devicePixelRatioF())
@@ -458,33 +463,33 @@ class ChatMessageDelegate(QStyledItemDelegate):
                 return 1.0
         return 1.0
 
-    def _get_image_ref_for_scale(self, emote, scale: float):
+    def _get_image_ref_for_scale(self, emote: ChatEmote, scale: float) -> Any:
         if not self._image_store or not getattr(emote, "image_set", None):
             return None
-        image_set = emote.image_set.bind(self._image_store)
+        image_set = emote.image_set.bind(self._image_store)  # type: ignore[union-attr]
         emote.image_set = image_set
         return image_set.get_image_or_loaded(scale=scale)
 
-    def _get_image_ref(self, emote, painter: QPainter):
+    def _get_image_ref(self, emote: ChatEmote, painter: QPainter) -> Any:
         return self._get_image_ref_for_scale(emote, self._current_scale(painter))
 
-    def _get_badge_image_ref_for_scale(self, badge, scale: float):
+    def _get_badge_image_ref_for_scale(self, badge: ChatBadge, scale: float) -> Any:
         if not self._image_store or not getattr(badge, "image_set", None):
             return None
-        image_set = badge.image_set.bind(self._image_store)
+        image_set = badge.image_set.bind(self._image_store)  # type: ignore[union-attr]
         badge.image_set = image_set
         return image_set.get_image_or_loaded(scale=scale)
 
-    def _get_loaded_pixmap(self, image_ref) -> QPixmap | None:
+    def _get_loaded_pixmap(self, image_ref: Any) -> QPixmap | None:
         if not image_ref:
             return None
         frames = image_ref.store.get_frames(image_ref.key)
         if frames:
-            return frames[0]
+            return frames[0]  # type: ignore[no-any-return]
         if image_ref.is_loaded():
             pixmap = image_ref.store.get(image_ref.key)
             if pixmap and not pixmap.isNull():
-                return pixmap
+                return pixmap  # type: ignore[no-any-return]
         return None
 
     @staticmethod
@@ -532,7 +537,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self._scaled_animated_cache[cache_key] = scaled
         return scaled
 
-    def _select_animated_frame(self, image_ref, frames: list[QPixmap]) -> QPixmap | None:
+    def _select_animated_frame(self, image_ref: Any, frames: list[QPixmap]) -> QPixmap | None:
         """Select the correct animation frame based on per-frame delays."""
         if not frames:
             return None
@@ -568,14 +573,16 @@ class ChatMessageDelegate(QStyledItemDelegate):
         instead of duplicating the math in every method.
         """
         padding_v = self.settings.line_spacing
-        rect = option.rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
+        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        rect = opt_rect.adjusted(PADDING_H, padding_v, -PADDING_H, -padding_v)
         rect_x = rect.x()
         rect_y = rect.y()
         available_width = rect.width()
         x = rect_x
         y = rect_y
 
-        fb = self._get_font_bundle(option.font)
+        opt_font: QFont = option.font  # type: ignore[attr-defined]
+        fb = self._get_font_bundle(opt_font)
         fm = fb.main_fm
         scale = self._current_scale_from_option(option)
 
@@ -684,7 +691,10 @@ class ChatMessageDelegate(QStyledItemDelegate):
         )
 
     def paint(  # noqa: N802
-        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> None:
         """Paint a chat message."""
         message: ChatMessage | None = index.data(MessageRole)
@@ -695,25 +705,30 @@ class ChatMessageDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Background
-        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_selected = bool(
+            option.state & QStyle.StateFlag.State_Selected  # type: ignore[attr-defined]
+        )
+        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        opt_palette = option.palette  # type: ignore[attr-defined]
+        opt_font: QFont = option.font  # type: ignore[attr-defined]
         if is_selected:
-            painter.fillRect(option.rect, option.palette.highlight())
+            painter.fillRect(opt_rect, opt_palette.highlight())
         elif message.is_system:
             # System message background - semi-transparent purple
             sys_bg = QColor(self._system_message_color)
             sys_bg.setAlpha(40)
-            painter.fillRect(option.rect, sys_bg)
+            painter.fillRect(opt_rect, sys_bg)
         elif message.is_hype_chat:
             hype_bg = QColor(self._hype_chat_accent)
             hype_bg.setAlpha(30)
-            painter.fillRect(option.rect, hype_bg)
+            painter.fillRect(opt_rect, hype_bg)
             # Left accent bar for hype chat
-            accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
+            accent_rect = QRect(opt_rect.x(), opt_rect.y(), 3, opt_rect.height())
             painter.fillRect(accent_rect, self._hype_chat_accent)
         elif message.is_mention:
-            painter.fillRect(option.rect, self._mention_highlight)
+            painter.fillRect(opt_rect, self._mention_highlight)
             # Left accent bar for mentions
-            accent_rect = QRect(option.rect.x(), option.rect.y(), 3, option.rect.height())
+            accent_rect = QRect(opt_rect.x(), opt_rect.y(), 3, opt_rect.height())
             painter.fillRect(accent_rect, self._mention_accent)
         elif self.settings.show_alternating_rows:
             if index.row() % 2 == 0:
@@ -721,7 +736,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
             else:
                 color = self._alt_row_odd
             if color.alpha() > 0:
-                painter.fillRect(option.rect, color)
+                painter.fillRect(opt_rect, color)
 
         # Apply moderation display mode
         mod_display = self.settings.moderated_message_display
@@ -733,12 +748,12 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Compute prefix layout (shared coordinates for all elements)
         layout = self._compute_prefix_layout(option, message)
-        fb = self._get_font_bundle(option.font)
+        fb = self._get_font_bundle(opt_font)
 
         painter.setFont(fb.main)
 
         # Highlight text color for selected state
-        highlight_color = option.palette.highlightedText().color() if is_selected else None
+        highlight_color = opt_palette.highlightedText().color() if is_selected else None
 
         # Timestamp (optional)
         if self.settings.show_timestamps:
@@ -921,7 +936,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         self,
         painter: QPainter,
         text: str,
-        emote_positions: list,
+        emote_positions: list[tuple[int, int, ChatEmote]],
         x: int,
         y: int,
         line_height: int,
@@ -1223,7 +1238,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
         painter.setFont(font)
 
     def sizeHint(  # noqa: N802
-        self, option: QStyleOptionViewItem, index: QModelIndex
+        self,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> QSize:
         """Calculate the size needed for a message.
 
@@ -1231,15 +1248,16 @@ class ChatMessageDelegate(QStyledItemDelegate):
         Cache is keyed by message ID, available width, and relevant settings.
         """
         message: ChatMessage | None = index.data(MessageRole)
+        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
         if not message:
-            return QSize(option.rect.width(), 24)
+            return QSize(opt_rect.width(), 24)
 
         # Hidden moderated messages take zero height
         if message.is_moderated and self.settings.moderated_message_display == "hidden":
-            return QSize(option.rect.width(), 0)
+            return QSize(opt_rect.width(), 0)
 
         # Calculate available width early for cache lookup
-        rect_width = option.rect.width()
+        rect_width = opt_rect.width()
         if rect_width <= 0:
             parent = self.parent()
             if parent and hasattr(parent, "viewport"):
@@ -1255,7 +1273,8 @@ class ChatMessageDelegate(QStyledItemDelegate):
 
         # Cache miss - calculate size
         padding_v = self.settings.line_spacing
-        fb = self._get_font_bundle(option.font)
+        opt_font: QFont = option.font  # type: ignore[attr-defined]
+        fb = self._get_font_bundle(opt_font)
         fm = fb.main_fm
         scale = self._current_scale_from_option(option)
 
@@ -1353,7 +1372,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         event: QHelpEvent,
         view: QAbstractItemView,
         option: QStyleOptionViewItem,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> bool:
         """Show emote tooltip on hover."""
         if not isinstance(event, QHelpEvent):
@@ -1386,7 +1405,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
             return QRect()
         return layout.username_rect
 
-    def _get_emote_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
+    def _get_emote_at_position(
+        self, pos: QPoint, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> ChatEmote | None:
         """Find which emote (if any) is at the given position, accounting for wrapping."""
         layout = self._compute_prefix_layout(option, message)
         if not layout.has_content:
@@ -1454,7 +1475,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         return None
 
     def _get_url_at_position(
-        self, pos, option: QStyleOptionViewItem, message: ChatMessage
+        self, pos: QPoint, option: QStyleOptionViewItem, message: ChatMessage
     ) -> str | None:
         """Find which URL (if any) is at the given position, accounting for wrapping."""
         url_ranges = self._get_url_ranges(message.text)
@@ -1565,7 +1586,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         right_edge: int,
         line_height: int,
         fm: QFontMetrics,
-        pos,
+        pos: QPoint,
         url_ranges: list[tuple[int, int, str]],
         text_offset: int,
     ) -> str | None:
@@ -1634,7 +1655,9 @@ class ChatMessageDelegate(QStyledItemDelegate):
             current_x += word_width
         return current_x, current_y
 
-    def _get_badge_at_position(self, pos, option: QStyleOptionViewItem, message: ChatMessage):
+    def _get_badge_at_position(
+        self, pos: QPoint, option: QStyleOptionViewItem, message: ChatMessage
+    ) -> ChatBadge | None:
         """Find which badge (if any) is at the given position."""
         has_badges = message.user.badges and (
             self.settings.show_badges or self.settings.show_mod_badges
@@ -1666,7 +1689,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         return layout.reply_rect
 
     def _get_mention_at_position(
-        self, pos, option: QStyleOptionViewItem, message: ChatMessage
+        self, pos: QPoint, option: QStyleOptionViewItem, message: ChatMessage
     ) -> str | None:
         """Find which @mention (if any) is at the given position.
 
@@ -1780,7 +1803,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
         right_edge: int,
         line_height: int,
         fm: QFontMetrics,
-        pos,
+        pos: QPoint,
         mention_ranges: list[tuple[int, int, str]],
         text_offset: int,
     ) -> str | None:
@@ -1837,7 +1860,7 @@ class ChatMessageDelegate(QStyledItemDelegate):
     def _compute_wrapped_lines_with_emotes(
         self,
         text: str,
-        emote_positions: list,
+        emote_positions: list[tuple[int, int, ChatEmote]],
         content_width: int,
         fm: QFontMetrics,
         emote_height: int,

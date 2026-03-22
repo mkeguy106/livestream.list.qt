@@ -31,7 +31,7 @@ class YouTubeImportDialog(QDialog):
     import_complete = Signal(object)  # list[Channel] or Exception
     filter_progress = Signal(int, int, str)  # checked, total, channel_name
 
-    def __init__(self, parent, app: Application):
+    def __init__(self, parent: QWidget | None, app: Application) -> None:
         super().__init__(parent)
         self.app = app
         self._added_count = 0
@@ -110,7 +110,7 @@ class YouTubeImportDialog(QDialog):
         self.import_complete.connect(self._on_import_complete)
         self.filter_progress.connect(self._on_filter_progress)
 
-    def _start_import(self):
+    def _start_import(self) -> None:
         """Start fetching YouTube subscriptions in a background thread."""
         self.stack.setCurrentIndex(1)
         self.close_btn.setEnabled(False)
@@ -125,7 +125,7 @@ class YouTubeImportDialog(QDialog):
 
         import threading
 
-        def run():
+        def run() -> None:
             try:
                 from ...api.youtube import YouTubeApiClient
 
@@ -141,7 +141,9 @@ class YouTubeImportDialog(QDialog):
 
                     if self._filter_livestreams and channels:
                         # Filter to only channels that do livestreams
-                        def progress_callback(checked, total, name):
+                        def progress_callback(
+                            checked: int, total: int, name: str
+                        ) -> None:
                             self.filter_progress.emit(checked, total, name)
 
                         channels = loop.run_until_complete(
@@ -158,13 +160,13 @@ class YouTubeImportDialog(QDialog):
         thread = threading.Thread(target=run, daemon=True)
         thread.start()
 
-    def _on_filter_progress(self, checked: int, total: int, channel_name: str):
+    def _on_filter_progress(self, checked: int, total: int, channel_name: str) -> None:
         """Update UI with filter progress."""
         self.import_label.setText(f"Checking livestream capability...\n{channel_name}")
         self.import_progress.setRange(0, total)
         self.import_progress.setValue(checked)
 
-    def _on_import_complete(self, result):
+    def _on_import_complete(self, result: object) -> None:
         """Handle import completion on the main thread."""
         if isinstance(result, Exception):
             self.done_label.setText(f"Import failed: {result}")
@@ -173,7 +175,7 @@ class YouTubeImportDialog(QDialog):
             return
 
         channels = result
-        if not channels:
+        if not channels or not isinstance(channels, list):
             self.done_label.setText("No subscriptions found.")
             self.stack.setCurrentIndex(2)
             self.close_btn.setEnabled(True)
@@ -181,9 +183,10 @@ class YouTubeImportDialog(QDialog):
 
         # Add channels
         self.import_progress.setRange(0, len(channels))
+        monitor = self.app.monitor
         added = 0
         for i, ch in enumerate(channels):
-            if self.app.monitor.add_channel_direct(ch):
+            if monitor and monitor.add_channel_direct(ch):
                 added += 1
             self.import_progress.setValue(i + 1)
             QApplication.processEvents()

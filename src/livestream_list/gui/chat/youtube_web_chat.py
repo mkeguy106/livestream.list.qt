@@ -6,9 +6,9 @@ import html
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl, Signal
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...core.models import Livestream
@@ -59,7 +59,7 @@ _tracker_connected: bool = False
 _force_logged_out: bool = False
 
 
-def _on_cookie_added(cookie) -> None:
+def _on_cookie_added(cookie: Any) -> None:
     """Track YouTube/Google cookies as they're added to the profile."""
     global _force_logged_out
     domain = cookie.domain()
@@ -71,7 +71,7 @@ def _on_cookie_added(cookie) -> None:
             _force_logged_out = False
 
 
-def _on_cookie_removed(cookie) -> None:
+def _on_cookie_removed(cookie: Any) -> None:
     """Track YouTube/Google cookies as they're removed from the profile."""
     domain = cookie.domain()
     if "youtube.com" in domain or "google.com" in domain:
@@ -257,11 +257,14 @@ class YouTubeWebChatWidget(QWidget):
             url += "&dark_theme=1"
         return QUrl(url)
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Intercept Ctrl+scroll on the Chromium render widget to handle zoom."""
-        is_ctrl_scroll = (
-            event.type() == QEvent.Type.Wheel
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        from PySide6.QtGui import QWheelEvent
+
+        if not isinstance(event, QWheelEvent):
+            return super().eventFilter(obj, event)
+        is_ctrl_scroll = bool(
+            event.modifiers() & Qt.KeyboardModifier.ControlModifier
         )
         if is_ctrl_scroll:
             page = self._web_view.page() if self._web_view else None
@@ -385,7 +388,7 @@ class YouTubeWebChatWidget(QWidget):
         else:
             self._title_refresh_timer.stop()
 
-    def set_socials(self, socials: dict) -> None:
+    def set_socials(self, socials: dict[str, str]) -> None:
         """Set channel socials and update the banner."""
         self._socials = socials
 
@@ -425,7 +428,7 @@ class YouTubeWebChatWidget(QWidget):
 
     # --- No-op methods (called by ChatWindow signal handlers on all widgets) ---
 
-    def add_messages(self, messages: list) -> None:  # noqa: ARG002
+    def add_messages(self, messages: list[object]) -> None:  # noqa: ARG002
         pass
 
     def apply_moderation(self, event: object) -> None:  # noqa: ARG002
@@ -467,7 +470,7 @@ class YouTubeWebChatWidget(QWidget):
     def show_raid_banner(self, message: object) -> None:  # noqa: ARG002
         pass
 
-    def get_all_messages(self) -> list:
+    def get_all_messages(self) -> list[object]:
         return []
 
     def repaint_messages(self) -> None:

@@ -289,7 +289,7 @@ def _get_chromium_password(keyring_label: str) -> str | None:
         import keyring as kr
 
         browser_name = keyring_label.replace(" Safe Storage", "")
-        password = kr.get_password(keyring_label, browser_name)
+        password = kr.get_password(keyring_label, browser_name)  # type: ignore[assignment]
         if password:
             logger.debug(f"Found via keyring library: {keyring_label}")
             return password
@@ -513,7 +513,11 @@ def _extract_cookies(
 class BrowserSelectDialog(QDialog):
     """Dialog for selecting which browser to import cookies from."""
 
-    def __init__(self, browsers: list[tuple[str, str, str, str, str]], parent=None):
+    def __init__(
+        self,
+        browsers: list[tuple[str, str, str, str, str]],
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Import YouTube Cookies")
         self.setMinimumWidth(380)
@@ -1089,7 +1093,7 @@ def _read_twitch_firefox(db_path: str) -> str | None:
         row = cursor.fetchone()
         conn.close()
         if row and row[0]:
-            return row[0]
+            return str(row[0])
     except Exception as e:
         logger.error(f"Failed to read Twitch cookie from Firefox: {e}")
     finally:
@@ -1117,7 +1121,7 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
         if row:
             encrypted_value, plain_value = row
             if plain_value:
-                return plain_value
+                return str(plain_value)
             if encrypted_value:
                 decrypted = _decrypt_chromium_value(encrypted_value, key)
                 if decrypted:
@@ -1132,12 +1136,12 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
 def _read_twitch_token_via_ytdlp(browser_name: str) -> str | None:
     """Extract Twitch auth-token using yt-dlp (handles Firefox encryption)."""
     try:
-        from yt_dlp.cookies import extract_cookies_from_browser  # type: ignore[import-untyped]
+        from yt_dlp.cookies import extract_cookies_from_browser
 
         jar = extract_cookies_from_browser(browser_name)
         for cookie in jar:
             if cookie.name == "auth-token" and cookie.domain.endswith(".twitch.tv"):
-                return cookie.value
+                return str(cookie.value)
     except Exception as e:
         logger.debug(f"yt-dlp Twitch cookie extraction failed for {browser_name}: {e}")
     return None
@@ -1371,6 +1375,7 @@ def _extract_twitch_auth_token_flatpak() -> str | None:
         return None
     try:
         result = json.loads(output)
-        return result.get("token")
+        token = result.get("token")
+        return str(token) if token is not None else None
     except (json.JSONDecodeError, KeyError):
         return None

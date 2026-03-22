@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from ...__version__ import __version__
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 class ExportDialog(QDialog):
     """Dialog for exporting channels and settings."""
 
-    def __init__(self, parent, app: Application):
+    def __init__(self, parent: QWidget | None, app: Application) -> None:
         super().__init__(parent)
         self.app = app
 
@@ -33,7 +34,8 @@ class ExportDialog(QDialog):
         layout = QVBoxLayout(self)
 
         # Info
-        channel_count = len(self.app.monitor.channels)
+        monitor = self.app.monitor
+        channel_count = len(monitor.channels) if monitor else 0
         info_label = QLabel(f"Export {channel_count} channels")
         layout.addWidget(info_label)
 
@@ -50,7 +52,7 @@ class ExportDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-    def _on_export(self):
+    def _on_export(self) -> None:
         """Handle export."""
         import json
         from datetime import datetime
@@ -64,8 +66,10 @@ class ExportDialog(QDialog):
         if not file_path:
             return
 
+        monitor = self.app.monitor
+
         try:
-            data = {
+            data: dict[str, object] = {
                 "meta": {
                     "schema_version": 1,
                     "app_version": __version__,
@@ -74,8 +78,9 @@ class ExportDialog(QDialog):
                 "channels": [],
             }
 
-            for channel in self.app.monitor.channels:
-                ch_data = {
+            channels_list: list[dict[str, object]] = []
+            for channel in monitor.channels if monitor else []:
+                ch_data: dict[str, object] = {
                     "channel_id": channel.channel_id,
                     "platform": channel.platform.value,
                     "display_name": channel.display_name,
@@ -83,7 +88,8 @@ class ExportDialog(QDialog):
                     "auto_launch": channel.auto_launch,
                     "dont_notify": channel.dont_notify,
                 }
-                data["channels"].append(ch_data)
+                channels_list.append(ch_data)
+            data["channels"] = channels_list
 
             if self.include_settings_cb.isChecked():
                 # Export all settings with secrets (tokens/cookies) stripped
@@ -107,7 +113,9 @@ class ExportDialog(QDialog):
                 json.dump(data, f, indent=2)
 
             self.accept()
-            QMessageBox.information(self.parent(), "Export Complete", f"Exported to {file_path}")
+            parent = self.parent()
+            parent_widget = parent if isinstance(parent, QWidget) else None
+            QMessageBox.information(parent_widget, "Export Complete", f"Exported to {file_path}")
 
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export: {e}")

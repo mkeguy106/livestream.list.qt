@@ -4,7 +4,7 @@ import logging
 import re
 from collections import OrderedDict
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class LinkPreviewWorker(QThread):
 
     preview_ready = Signal(str, str)  # url, title
 
-    def __init__(self, url: str, parent=None):
+    def __init__(self, url: str, parent: QObject | None = None):
         super().__init__(parent)
         self._url = url
 
@@ -62,12 +62,12 @@ class LinkPreviewWorker(QThread):
 class LinkPreviewCache:
     """Cache for link preview titles with async background fetching."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._cache: OrderedDict[str, str] = OrderedDict()
         self._pending: set[str] = set()
         self._workers: list[LinkPreviewWorker] = []
 
-    def get_or_fetch(self, url: str, parent=None) -> str | None:
+    def get_or_fetch(self, url: str, parent: QObject | None = None) -> str | None:
         """Get cached title or start a background fetch.
 
         Returns:

@@ -2,9 +2,9 @@
 
 import subprocess
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QMainWindow, QPlainTextEdit
+from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtGui import QCloseEvent, QFont
+from PySide6.QtWidgets import QMainWindow, QPlainTextEdit, QWidget
 
 
 class ProcessReaderThread(QThread):
@@ -13,12 +13,16 @@ class ProcessReaderThread(QThread):
     line_received = Signal(str)
     process_exited = Signal(int)
 
-    def __init__(self, process: subprocess.Popen, parent=None):
+    def __init__(
+        self, process: subprocess.Popen[str], parent: QObject | None = None
+    ):
         super().__init__(parent)
         self._process = process
 
-    def run(self):
+    def run(self) -> None:
         try:
+            if self._process.stdout is None:
+                return
             for line in self._process.stdout:
                 if isinstance(line, bytes):
                     line = line.decode("utf-8", errors="replace")
@@ -35,9 +39,9 @@ class StreamlinkConsoleWindow(QMainWindow):
     def __init__(
         self,
         channel_name: str,
-        process: subprocess.Popen,
+        process: subprocess.Popen[str],
         auto_close: bool = False,
-        parent=None,
+        parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.setWindowTitle(f"Streamlink — {channel_name}")
@@ -56,12 +60,12 @@ class StreamlinkConsoleWindow(QMainWindow):
         self._reader.process_exited.connect(self._on_exit)
         self._reader.start()
 
-    def _append_line(self, line: str):
+    def _append_line(self, line: str) -> None:
         self._text.appendPlainText(line)
         if "error: unrecognized arguments:" in line:
             self._has_unrecognized_args = True
 
-    def _on_exit(self, exit_code: int):
+    def _on_exit(self, exit_code: int) -> None:
         self._text.appendPlainText(f"\n--- Process exited with code {exit_code} ---")
         if self._has_unrecognized_args and exit_code == 2:
             self._text.appendPlainText(
@@ -77,6 +81,6 @@ class StreamlinkConsoleWindow(QMainWindow):
         if self._auto_close:
             self.close()
 
-    def closeEvent(self, event):  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         self._reader.wait(2000)
         super().closeEvent(event)

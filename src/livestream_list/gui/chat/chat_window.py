@@ -2,8 +2,18 @@
 
 import logging
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QIcon, QMouseEvent, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QEnterEvent,
+    QIcon,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPixmap,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QCompleter,
     QDialog,
@@ -61,7 +71,7 @@ def _create_dot_icon(color: QColor, size: int = 12) -> QIcon:
 class _NewWhisperDialog(QDialog):
     """Dialog for starting a new whisper conversation."""
 
-    def __init__(self, known_usernames: list[str], parent=None):
+    def __init__(self, known_usernames: list[str], parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("New Whisper")
         self.setMinimumWidth(300)
@@ -136,7 +146,13 @@ class _TabButton(QWidget):
     clicked = Signal()
     close_clicked = Signal()
 
-    def __init__(self, icon: QIcon | None, text: str, closable: bool = True, parent=None):
+    def __init__(
+        self,
+        icon: QIcon | None,
+        text: str,
+        closable: bool = True,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self._active = False
         self._text = text
@@ -190,7 +206,7 @@ class _TabButton(QWidget):
             self._close_btn.clicked.connect(self.close_clicked.emit)
             layout.addWidget(self._close_btn)
         else:
-            self._close_btn = None
+            self._close_btn = None  # type: ignore[assignment]
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -277,7 +293,7 @@ class _TabButton(QWidget):
         else:
             self._update_style()
 
-    def enterEvent(self, event) -> None:  # noqa: N802
+    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802
         if not self._active and not self._flash_timer:
             theme = get_theme()
             self.setStyleSheet(f"""
@@ -288,11 +304,11 @@ class _TabButton(QWidget):
             """)
         super().enterEvent(event)
 
-    def leaveEvent(self, event) -> None:  # noqa: N802
+    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
         self._update_style()
         super().leaveEvent(event)
 
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         """Enable stylesheet backgrounds on custom QWidget subclass."""
         from PySide6.QtWidgets import QStyle, QStyleOption
 
@@ -314,7 +330,7 @@ class _FlowTabBar(QWidget):
     tab_close_requested = Signal(int)
     context_menu_requested = Signal(int, object)  # index, QPoint(global)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._tabs: list[_TabButton] = []
         theme = get_theme()
@@ -376,14 +392,14 @@ class _FlowTabBar(QWidget):
     def count(self) -> int:
         return len(self._tabs)
 
-    def tab_at(self, pos) -> int:
+    def tab_at(self, pos: QPoint) -> int:
         """Find which tab index is at a local position, or -1."""
         for i, tab in enumerate(self._tabs):
             if tab.geometry().contains(pos):
                 return i
         return -1
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._relayout()
 
@@ -417,7 +433,7 @@ class _FlowTabBar(QWidget):
         total_height = y + row_height + 4
         self.setFixedHeight(max(30, total_height))
 
-    def _on_context_menu(self, pos) -> None:
+    def _on_context_menu(self, pos: QPoint) -> None:
         index = self.tab_at(pos)
         if index >= 0:
             self.context_menu_requested.emit(index, self.mapToGlobal(pos))
@@ -429,7 +445,7 @@ class FlowTabWidget(QWidget):
     tabCloseRequested = Signal(int)  # noqa: N815
     currentChanged = Signal(int)  # noqa: N815
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self._current_index = -1
 
@@ -527,7 +543,7 @@ class ChatWindow(QMainWindow):
         super().__init__(parent)
         self.chat_manager = chat_manager
         self.settings = settings
-        self._widgets: dict[str, ChatWidget] = {}
+        self._widgets: dict[str, QWidget] = {}
         self._livestreams: dict[str, Livestream] = {}
         self._popout_windows: dict[str, ChatPopoutWindow] = {}
         self._metrics_timer: QTimer | None = None
@@ -675,7 +691,7 @@ class ChatWindow(QMainWindow):
             self._tab_widget._stack.setStyleSheet(f"background-color: {theme.widget_bg};")
             # Update all chat widgets
             for widget in self._widgets.values():
-                widget.apply_theme()
+                widget.apply_theme()  # type: ignore[attr-defined]
             # Update popout windows
             for popout in self._popout_windows.values():
                 popout.apply_theme()
@@ -709,26 +725,26 @@ class ChatWindow(QMainWindow):
     def update_animation_state(self) -> None:
         """Update animation timers on all widgets (call after prefs change)."""
         animate = self.settings.chat.builtin.animate_emotes
-        has_any = any(w.has_animated_emotes() for w in self._widgets.values())
+        has_any = any(w.has_animated_emotes() for w in self._widgets.values())  # type: ignore[attr-defined]
         if animate and has_any:
             self.chat_manager.gif_timer.start()
         else:
             self.chat_manager.gif_timer.stop()
         for widget in self._widgets.values():
-            widget.set_animation_enabled(animate)
+            widget.set_animation_enabled(animate)  # type: ignore[attr-defined]
 
     def update_banner_settings(self) -> None:
         """Update banner visibility and colors on all widgets (call after prefs change)."""
         for widget in self._widgets.values():
-            widget.update_banner_settings()
+            widget.update_banner_settings()  # type: ignore[attr-defined]
 
     def update_spellcheck(self) -> None:
         """Update spellcheck and autocorrect state on all widgets."""
         enabled = self.settings.chat.builtin.spellcheck_enabled
         autocorrect = self.settings.chat.builtin.autocorrect_enabled
         for widget in self._widgets.values():
-            widget.set_spellcheck_enabled(enabled)
-            widget.set_autocorrect_enabled(autocorrect and enabled)
+            widget.set_spellcheck_enabled(enabled)  # type: ignore[attr-defined]
+            widget.set_autocorrect_enabled(autocorrect and enabled)  # type: ignore[attr-defined]
 
     def update_metrics_bar(self) -> None:
         """Refresh status bar metrics/visibility."""
@@ -763,7 +779,7 @@ class ChatWindow(QMainWindow):
             fresh = ls_map.get(channel_key)
             if fresh:
                 self._livestreams[channel_key] = fresh
-                widget.update_livestream(fresh)
+                widget.update_livestream(fresh)  # type: ignore[attr-defined]
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
@@ -773,7 +789,7 @@ class ChatWindow(QMainWindow):
         if channel_key in self._widgets:
             # Focus existing tab and update livestream data (e.g., title may have changed)
             widget = self._widgets[channel_key]
-            widget.update_livestream(livestream)
+            widget.update_livestream(livestream)  # type: ignore[attr-defined]
             idx = self._tab_widget.indexOf(widget)
             if idx >= 0:
                 self._tab_widget.setCurrentIndex(idx)
@@ -810,7 +826,7 @@ class ChatWindow(QMainWindow):
             widget = self._create_native_chat_widget(channel_key, livestream)
 
         # Apply current theme colors to the new widget
-        widget.apply_theme()
+        widget.apply_theme()  # type: ignore[attr-defined]
 
         self._widgets[channel_key] = widget
 
@@ -913,13 +929,13 @@ class ChatWindow(QMainWindow):
         """Handle a chat connection being established."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_connected()
+            widget.set_connected()  # type: ignore[attr-defined]
 
-    def _on_messages_received(self, channel_key: str, messages: list) -> None:
+    def _on_messages_received(self, channel_key: str, messages: list[object]) -> None:
         """Route messages to the correct chat widget."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.add_messages(messages)
+            widget.add_messages(messages)  # type: ignore[attr-defined]
 
             # Flash tab on @mention if it's not the current tab
             idx = self._tab_widget.indexOf(widget)
@@ -934,7 +950,7 @@ class ChatWindow(QMainWindow):
         """Route moderation events to the correct chat widget."""
         widget = self._widgets.get(channel_key)
         if widget and isinstance(event, ModerationEvent):
-            widget.apply_moderation(event)
+            widget.apply_moderation(event)  # type: ignore[attr-defined]
 
     def _on_room_state_changed(self, channel_key: str, state: object) -> None:
         """Route room state changes to the correct chat widget."""
@@ -942,7 +958,7 @@ class ChatWindow(QMainWindow):
 
         widget = self._widgets.get(channel_key)
         if widget and isinstance(state, ChatRoomState):
-            widget.update_room_state(state)
+            widget.update_room_state(state)  # type: ignore[attr-defined]
 
     def _on_hype_train_event(self, channel_key: str, event: object) -> None:
         """Route hype train events to the correct chat widget."""
@@ -950,11 +966,11 @@ class ChatWindow(QMainWindow):
             return
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.update_hype_train(event)
+            widget.update_hype_train(event)  # type: ignore[attr-defined]
         # Also route to popout if applicable
         popout = self._popout_windows.get(channel_key)
         if popout and popout._widget:
-            popout._widget.update_hype_train(event)
+            popout._widget.update_hype_train(event)  # type: ignore[attr-defined]
 
     def _on_raid_received(self, channel_key: str, message: object) -> None:
         """Route raid events to the correct chat widget."""
@@ -964,23 +980,23 @@ class ChatWindow(QMainWindow):
             return
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.show_raid_banner(message)
+            widget.show_raid_banner(message)  # type: ignore[attr-defined]
         popout = self._popout_windows.get(channel_key)
         if popout and popout._widget:
-            popout._widget.show_raid_banner(message)
+            popout._widget.show_raid_banner(message)  # type: ignore[attr-defined]
 
     def _on_badge_map_ready(self, channel_key: str) -> None:
         """Re-resolve badges on existing messages after badge data arrives."""
         widget = self._widgets.get(channel_key)
         if not widget:
             return
-        messages = widget.get_all_messages()
+        messages = widget.get_all_messages()  # type: ignore[attr-defined]
         if not messages:
             return
         resolved = self.chat_manager.resolve_badges_on_messages(channel_key, messages)
         if resolved:
             logger.info(f"Retroactively resolved {resolved} badges for {channel_key}")
-            widget.repaint_messages()
+            widget.repaint_messages()  # type: ignore[attr-defined]
 
     def _on_emote_cache_updated(self) -> None:
         """Handle emote/badge image loaded - debounce repaint requests."""
@@ -995,12 +1011,12 @@ class ChatWindow(QMainWindow):
         self._emote_repaint_pending = False
         user_emote_names = self.chat_manager.get_user_emote_names()
         for widget in self._widgets.values():
-            widget.set_emote_map(
-                self.chat_manager.get_emote_map(widget.channel_key),
-                self.chat_manager.get_channel_emote_names(widget.channel_key),
+            widget.set_emote_map(  # type: ignore[attr-defined]
+                self.chat_manager.get_emote_map(widget.channel_key),  # type: ignore[attr-defined]
+                self.chat_manager.get_channel_emote_names(widget.channel_key),  # type: ignore[attr-defined]
                 user_emote_names,
             )
-            widget.invalidate_message_layout()
+            widget.invalidate_message_layout()  # type: ignore[attr-defined]
             # Refresh emote picker icons if it's currently visible
             if hasattr(widget, "_emote_picker") and widget._emote_picker.isVisible():
                 widget._emote_picker.refresh_icons()
@@ -1021,12 +1037,12 @@ class ChatWindow(QMainWindow):
             # Push the updated emote map to the widget so autocomplete and
             # spellcheck dictionary stay in sync (e.g. Kick native emotes
             # learned from incoming messages).
-            widget.set_emote_map(
-                self.chat_manager.get_emote_map(widget.channel_key),
-                self.chat_manager.get_channel_emote_names(widget.channel_key),
+            widget.set_emote_map(  # type: ignore[attr-defined]
+                self.chat_manager.get_emote_map(widget.channel_key),  # type: ignore[attr-defined]
+                self.chat_manager.get_channel_emote_names(widget.channel_key),  # type: ignore[attr-defined]
                 user_emote_names,
             )
-            self._schedule_emote_backfill(widget)
+            self._schedule_emote_backfill(widget)  # type: ignore[arg-type]
 
     def _schedule_emote_backfill(self, widget: ChatWidget) -> None:
         """Backfill third-party emotes in batches to avoid UI stalls."""
@@ -1065,9 +1081,9 @@ class ChatWindow(QMainWindow):
         reply_parent_text = ""
         if reply_to_msg_id:
             widget = self._widgets.get(channel_key)
-            if widget and widget._reply_to_msg:
-                reply_parent_display_name = widget._reply_to_msg.user.display_name
-                reply_parent_text = widget._reply_to_msg.text
+            if widget and widget._reply_to_msg:  # type: ignore[attr-defined]
+                reply_parent_display_name = widget._reply_to_msg.user.display_name  # type: ignore[attr-defined]
+                reply_parent_text = widget._reply_to_msg.text  # type: ignore[attr-defined]
         self.chat_manager.send_message(
             channel_key,
             text,
@@ -1112,7 +1128,7 @@ class ChatWindow(QMainWindow):
         self.chat_manager.on_emote_settings_changed()
         # Update banner visibility on all widgets (shared settings object)
         for widget in self._widgets.values():
-            widget.update_banner_settings()
+            widget.update_banner_settings()  # type: ignore[attr-defined]
         # Only relayout the active widget to avoid lockups
         # Other widgets will be relayouted when they become active
         current_widget = self._tab_widget.currentWidget()
@@ -1137,7 +1153,7 @@ class ChatWindow(QMainWindow):
     def _on_tab_close(self, index: int) -> None:
         """Handle tab close button clicked."""
         widget = self._tab_widget.widget(index)
-        if not hasattr(widget, "channel_key"):
+        if not widget or not hasattr(widget, "channel_key"):
             return
         if isinstance(widget, ChatWidget) and widget._is_dm:
             # DM tabs have no connection — just remove the widget
@@ -1152,27 +1168,35 @@ class ChatWindow(QMainWindow):
         else:
             self.close_chat(widget.channel_key)
 
-    def _on_tab_context_menu(self, index: int, global_pos) -> None:
+    def _on_tab_context_menu(self, index: int, global_pos: QPoint) -> None:
         """Show context menu on tab bar right-click."""
         from PySide6.QtWidgets import QMenu
 
         widget = self._tab_widget.widget(index)
-        if not hasattr(widget, "channel_key"):
+        if not widget or not hasattr(widget, "channel_key"):
             return
 
         menu = QMenu(self)
         popout_action = menu.addAction("Pop Out")
-        popout_action.triggered.connect(lambda: self._on_popout_requested(widget.channel_key))
+        ch_key = widget.channel_key
+        popout_action.triggered.connect(lambda: self._on_popout_requested(ch_key))
         menu.exec(global_pos)
 
     def _on_auth_state_changed(self, _authenticated: bool) -> None:
         """Update all widgets when auth state changes (platform-aware)."""
         for widget in self._widgets.values():
-            if widget._is_dm:
-                # DM tabs are always Twitch
-                widget.set_authenticated(bool(self.settings.twitch.access_token))
+            if not hasattr(widget, "livestream"):
                 continue
-            platform = widget.livestream.channel.platform
+            if getattr(widget, "_is_dm", False):
+                # DM tabs are always Twitch
+                widget.set_authenticated(  # type: ignore[attr-defined]
+                    bool(self.settings.twitch.access_token)
+                )
+                continue
+            ls: Livestream | None = getattr(widget, "livestream", None)
+            if not ls:
+                continue
+            platform = ls.channel.platform
             if platform == StreamPlatform.KICK:
                 auth = bool(self.settings.kick.access_token)
             elif platform == StreamPlatform.YOUTUBE:
@@ -1181,45 +1205,45 @@ class ChatWindow(QMainWindow):
                 auth = bool(self.settings.chaturbate.login_name)
             else:
                 auth = bool(self.settings.twitch.access_token)
-            widget.set_authenticated(auth)
+            widget.set_authenticated(auth)  # type: ignore[attr-defined]
 
     def _on_chat_error(self, channel_key: str, message: str) -> None:
         """Show a chat error in the relevant widget."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.show_error(message)
+            widget.show_error(message)  # type: ignore[attr-defined]
 
     def _on_chat_disconnected(self, channel_key: str) -> None:
         """Handle a chat connection being lost."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_disconnected()
+            widget.set_disconnected()  # type: ignore[attr-defined]
 
     def _on_chat_reconnecting(self, channel_key: str, delay: float) -> None:
         """Handle a chat connection preparing to reconnect."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_reconnecting(delay)
+            widget.set_reconnecting(delay)  # type: ignore[attr-defined]
 
     def _on_chat_reconnect_failed(self, channel_key: str) -> None:
         """Handle exhausted reconnection attempts."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_reconnect_failed()
+            widget.set_reconnect_failed()  # type: ignore[attr-defined]
 
-    def _on_socials_fetched(self, channel_key: str, socials: dict) -> None:
+    def _on_socials_fetched(self, channel_key: str, socials: dict[str, str]) -> None:
         """Update a chat widget with fetched social links."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_socials(socials)
+            widget.set_socials(socials)  # type: ignore[attr-defined]
 
-    def _on_sub_anniversary_fetched(self, channel_key: str, sub_info: dict) -> None:
+    def _on_sub_anniversary_fetched(self, channel_key: str, sub_info: dict[str, object]) -> None:
         """Update a chat widget with fetched sub anniversary info."""
         widget = self._widgets.get(channel_key)
         if widget:
-            widget.set_sub_anniversary(sub_info)
+            widget.set_sub_anniversary(sub_info)  # type: ignore[attr-defined]
 
-    def _on_whisper_received(self, platform: str, message) -> None:
+    def _on_whisper_received(self, platform: str, message: object) -> None:
         """Handle an incoming or sent whisper — create/focus a DM tab."""
         from ...chat.models import ChatMessage as ChatMsg
 
@@ -1247,7 +1271,7 @@ class ChatWindow(QMainWindow):
         # _create_dm_tab already loaded history which includes this message.
         widget = self._widgets.get(dm_key)
         if widget and not tab_just_created:
-            widget.add_messages([message])
+            widget.add_messages([message])  # type: ignore[attr-defined]
 
             # Flash tab if not current
             idx = self._tab_widget.indexOf(widget)
@@ -1314,15 +1338,15 @@ class ChatWindow(QMainWindow):
     def _on_dm_message_sent(self, channel_key: str, text: str, reply_to_msg_id: str) -> None:
         """Handle a message sent from a DM tab — send as whisper."""
         widget = self._widgets.get(channel_key)
-        if not widget or not widget._is_dm:
+        if not widget or not widget._is_dm:  # type: ignore[attr-defined]
             return
 
-        to_user_id = widget._dm_partner_id
-        to_display_name = widget._dm_partner_name
+        to_user_id = widget._dm_partner_id  # type: ignore[attr-defined]
+        to_display_name = widget._dm_partner_name  # type: ignore[attr-defined]
 
         if not to_user_id:
             # Try to resolve the user ID from the username
-            self._resolve_and_send_whisper(widget, to_display_name, text)
+            self._resolve_and_send_whisper(widget, to_display_name, text)  # type: ignore[arg-type]
             return
 
         self.chat_manager.send_whisper(to_user_id, to_display_name, text)
@@ -1337,18 +1361,24 @@ class ChatWindow(QMainWindow):
             resolved = _Signal(str)  # user_id or ""
             error = _Signal(str)
 
-            def __init__(self, login, token, client_id, parent=None):
+            def __init__(
+                self,
+                login: str,
+                token: str,
+                client_id: str,
+                parent: QWidget | None = None,
+            ) -> None:
                 super().__init__(parent)
                 self._login = login
                 self._token = token
                 self._client_id = client_id
 
-            def run(self):
+            def run(self) -> None:
                 import asyncio
 
                 import aiohttp
 
-                async def resolve():
+                async def resolve() -> str:
                     headers = {
                         "Authorization": f"Bearer {self._token}",
                         "Client-Id": self._client_id,
@@ -1363,7 +1393,7 @@ class ChatWindow(QMainWindow):
                                 data = await resp.json()
                                 users = data.get("data", [])
                                 if users:
-                                    return users[0].get("id", "")
+                                    return users[0].get("id", "")  # type: ignore[no-any-return]
                     return ""
 
                 loop = asyncio.new_event_loop()
@@ -1380,14 +1410,14 @@ class ChatWindow(QMainWindow):
 
         worker = _ResolveWorker(username, token, client_id, parent=self)
 
-        def on_resolved(user_id):
+        def on_resolved(user_id: str) -> None:
             if user_id:
                 widget._dm_partner_id = user_id
                 self.chat_manager.send_whisper(user_id, username, text)
             else:
                 widget.show_error(f"Could not find Twitch user '{username}'")
 
-        def on_error(err):
+        def on_error(err: str) -> None:
             widget.show_error(f"Failed to resolve user: {err}")
 
         worker.resolved.connect(on_resolved)
@@ -1488,7 +1518,7 @@ class ChatWindow(QMainWindow):
 
     def _on_always_on_top_changed(self, on_top: bool) -> None:
         """Apply always-on-top to the main chat window and all popouts."""
-        windows = [self] + list(self._popout_windows.values())
+        windows: list[QMainWindow] = [self] + list(self._popout_windows.values())
         apply_always_on_top(windows, on_top)
 
     def save_window_state(self) -> None:
@@ -1500,7 +1530,7 @@ class ChatWindow(QMainWindow):
         ws.x = pos.x()
         ws.y = pos.y()
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Disconnect tabbed chats and hide. Popouts stay connected."""
         self.save_window_state()
 
@@ -1567,14 +1597,14 @@ class ChatPopoutWindow(QMainWindow):
     def take_widget(self) -> QWidget | None:
         """Remove and return the chat widget for re-docking."""
         widget = self._widget
-        self._widget = None
+        self._widget = None  # type: ignore[assignment]
         if widget:
             # Detach widget from this window so closing doesn't destroy it
             widget.setParent(None)
             self.setCentralWidget(QWidget())
         return widget
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Emit closed signal when window is closed."""
         self.closed.emit(self.channel_key)
         super().closeEvent(event)

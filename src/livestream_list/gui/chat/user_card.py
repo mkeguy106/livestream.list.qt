@@ -7,7 +7,7 @@ import webbrowser
 
 import aiohttp
 from PySide6.QtCore import QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QFont, QKeySequence, QPixmap
+from PySide6.QtGui import QContextMenuEvent, QFont, QKeyEvent, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -64,7 +64,9 @@ class UserCardFetchWorker:
     GQL_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 
     @staticmethod
-    async def fetch_twitch_user_info(login: str, channel_login: str = "") -> dict | None:
+    async def fetch_twitch_user_info(
+        login: str, channel_login: str = ""
+    ) -> dict[str, object] | None:
         """Fetch Twitch user card info via GraphQL.
 
         Uses its own aiohttp session and static GQL credentials so it can
@@ -193,13 +195,13 @@ class UserCardFetchWorker:
                     data = await resp.json()
                     if data and isinstance(data, list) and len(data) > 0:
                         pronoun_id = data[0].get("pronoun_id", "")
-                        return PRONOUN_MAP.get(pronoun_id, pronoun_id)
+                        return str(PRONOUN_MAP.get(pronoun_id, pronoun_id))
         except Exception as e:
             logger.debug(f"Failed to fetch pronouns for {login}: {e}")
         return ""
 
     @staticmethod
-    async def fetch_kick_user_info(slug: str) -> dict | None:
+    async def fetch_kick_user_info(slug: str) -> dict[str, object] | None:
         """Fetch Kick user info from the public channel API.
 
         Returns dict with: bio, followers_count, verified, profile_pic_url, country.
@@ -234,7 +236,7 @@ class UserCardFetchWorker:
             return None
 
     @staticmethod
-    async def fetch_youtube_user_info(channel_id: str) -> dict | None:
+    async def fetch_youtube_user_info(channel_id: str) -> dict[str, str] | None:
         """Fetch YouTube channel info by scraping the /about page.
 
         Returns dict with: description, subscriber_count_text, joined_date_text,
@@ -540,7 +542,7 @@ class UserCardPopup(QFrame):
             self._text_labels.append(self._created_label)
             layout.addWidget(self._created_label)
         else:
-            self._created_label = None
+            self._created_label = None  # type: ignore[assignment]
 
         # Followers / subscribers (Twitch and YouTube, loaded async)
         self._followers_label = QLabel()
@@ -784,14 +786,14 @@ class UserCardPopup(QFrame):
             if clipboard:
                 clipboard.setText(text)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         """Handle Ctrl+C to copy card text."""
         if event.matches(QKeySequence.StandardKey.Copy):
             self._copy_text()
             return
         super().keyPressEvent(event)
 
-    def contextMenuEvent(self, event) -> None:  # noqa: N802
+    def contextMenuEvent(self, event: QContextMenuEvent) -> None:  # noqa: N802
         """Show right-click context menu with copy options."""
         menu = QMenu(self)
         selected = self._get_selected_text()

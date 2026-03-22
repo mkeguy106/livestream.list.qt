@@ -2,15 +2,36 @@
 
 import logging
 import time
+from typing import Any
 
-from PySide6.QtCore import QEvent, QLineF, QModelIndex, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QHelpEvent, QPainter, QPen
+from PySide6.QtCore import (
+    QAbstractItemModel,
+    QEvent,
+    QLineF,
+    QModelIndex,
+    QPersistentModelIndex,
+    QRect,
+    QSize,
+    Qt,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QHelpEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+)
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QToolTip,
+    QWidget,
 )
 
 from ...core.models import Livestream, StreamPlatform, UIStyle
@@ -91,11 +112,11 @@ class StreamRowDelegate(QStyledItemDelegate):
     browser_clicked = Signal(str, str, str)  # channel_id, platform, video_id
     room_status_requested = Signal(object)  # Livestream needing room status check
 
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings: Any, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._settings = settings
         # Size cache: (unique_key, width, settings_hash) -> QSize
-        self._size_cache: dict[tuple, QSize] = {}
+        self._size_cache: dict[tuple[object, ...], QSize] = {}
         self._size_cache_max = 500
         # Button rects: row -> {"play": QRect, "favorite": QRect, ...}
         self._button_rects: dict[int, dict[str, QRect]] = {}
@@ -159,7 +180,7 @@ class StreamRowDelegate(QStyledItemDelegate):
         self._fm_cache[font_size] = (fm, title_fm)
         return fm, title_fm
 
-    def _get_settings_hash(self) -> tuple:
+    def _get_settings_hash(self) -> tuple[object, ...]:
         """Return a tuple of settings that affect row sizing."""
         return (
             self._settings.font_size,
@@ -173,7 +194,7 @@ class StreamRowDelegate(QStyledItemDelegate):
             self._settings.channel_info.show_viewers,
         )
 
-    def _get_style_config(self) -> dict:
+    def _get_style_config(self) -> dict[str, Any]:
         """Get the current UI style configuration."""
         return UI_STYLES.get(self._settings.ui_style, UI_STYLES[UIStyle.DEFAULT])
 
@@ -189,7 +210,10 @@ class StreamRowDelegate(QStyledItemDelegate):
         return font_size / default_size if default_size > 0 else 1.0
 
     def paint(  # noqa: N802
-        self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
+        self,
+        painter: QPainter,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> None:
         """Paint a stream row."""
         self._paint_count += 1
@@ -201,7 +225,9 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         is_playing = index.data(PlayingRole) or False
         is_selected_checkbox = index.data(SelectionRole) or False
-        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
+        is_selected = bool(
+            option.state & QStyle.StateFlag.State_Selected  # type: ignore[attr-defined]
+        )
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -212,17 +238,18 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         # Row index (used for alternating colors and button rects)
         row = index.row()
+        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
 
         # Background
         if is_selected:
-            painter.fillRect(option.rect, self._selection_bg)
+            painter.fillRect(opt_rect, self._selection_bg)
         else:
             alt_color = self._list_alt_row_even if row % 2 == 0 else self._list_alt_row_odd
             if alt_color.alpha() > 0:
-                painter.fillRect(option.rect, self._widget_bg)
-                painter.fillRect(option.rect, alt_color)
+                painter.fillRect(opt_rect, self._widget_bg)
+                painter.fillRect(opt_rect, alt_color)
             else:
-                painter.fillRect(option.rect, self._widget_bg)
+                painter.fillRect(opt_rect, self._widget_bg)
 
         # Margins (fixed minimum, only grow with scale)
         margin_h = max(style["margin_h"], int(style["margin_h"] * scale))
@@ -230,7 +257,7 @@ class StreamRowDelegate(QStyledItemDelegate):
         spacing = max(style["spacing"], int(style["spacing"] * scale))
         icon_size = int(style["icon_size"] * scale)
 
-        rect = option.rect.adjusted(margin_h, margin_v, -margin_h, -margin_v)
+        rect = opt_rect.adjusted(margin_h, margin_v, -margin_h, -margin_v)
         x = rect.x()
         y = rect.y()
         row_height = rect.height()
@@ -523,17 +550,20 @@ class StreamRowDelegate(QStyledItemDelegate):
             self._last_debug_time = now
 
     def sizeHint(  # noqa: N802
-        self, option: QStyleOptionViewItem, index: QModelIndex
+        self,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> QSize:
         """Calculate the size needed for a stream row."""
         self._sizehint_count += 1
 
         livestream: Livestream | None = index.data(StreamRole)
+        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
         if not livestream:
-            return QSize(option.rect.width(), 40)
+            return QSize(opt_rect.width(), 40)
 
         # Calculate width
-        rect_width = option.rect.width()
+        rect_width = opt_rect.width()
         if rect_width <= 0:
             parent = self.parent()
             if parent and hasattr(parent, "viewport"):
@@ -572,13 +602,19 @@ class StreamRowDelegate(QStyledItemDelegate):
         return result
 
     def editorEvent(  # noqa: N802
-        self, event: QEvent, model, option: QStyleOptionViewItem, index: QModelIndex
+        self,
+        event: QEvent,
+        model: QAbstractItemModel,
+        option: QStyleOptionViewItem,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> bool:
         """Handle mouse events for button clicks."""
         if event.type() != QEvent.Type.MouseButtonRelease:
             return False
-
-        pos = event.pos()
+        mouse_event = event if isinstance(event, QMouseEvent) else None
+        if not mouse_event:
+            return False
+        pos = mouse_event.pos()
         row = index.row()
         rects = self._button_rects.get(row, {})
 
@@ -639,9 +675,9 @@ class StreamRowDelegate(QStyledItemDelegate):
     def helpEvent(  # noqa: N802
         self,
         event: QHelpEvent,
-        view,
+        view: QAbstractItemView,
         option: QStyleOptionViewItem,
-        index: QModelIndex,
+        index: QModelIndex | QPersistentModelIndex,
     ) -> bool:
         """Show tooltip for buttons and private/hidden Chaturbate rooms."""
         if event.type() != QEvent.Type.ToolTip:

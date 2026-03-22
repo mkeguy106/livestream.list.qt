@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -29,11 +30,11 @@ if TYPE_CHECKING:
 class AddChannelDialog(QDialog):
     """Dialog for adding channels manually or importing from Twitch."""
 
-    def __init__(self, parent, app: Application):
+    def __init__(self, parent: QWidget | None, app: Application) -> None:
         super().__init__(parent)
         self.app = app
-        self._detected_platform = None
-        self._detected_channel = None
+        self._detected_platform: StreamPlatform | None = None
+        self._detected_channel: str | None = None
 
         self.setWindowTitle("Add Channel")
         self.setMinimumWidth(450)
@@ -138,16 +139,14 @@ class AddChannelDialog(QDialog):
         # Auto-paste from clipboard on dialog open
         self._try_paste_clipboard()
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Handle focus events for auto-paste."""
-        from PySide6.QtCore import QEvent
-
         if obj == self.channel_edit and event.type() == QEvent.Type.FocusIn:
             if not self._has_auto_pasted and not self.channel_edit.text():
                 self._try_paste_clipboard()
         return super().eventFilter(obj, event)
 
-    def _try_paste_clipboard(self):
+    def _try_paste_clipboard(self) -> None:
         """Try to paste URL from clipboard."""
         clipboard = QApplication.clipboard()
         text = clipboard.text()
@@ -160,7 +159,7 @@ class AddChannelDialog(QDialog):
         patterns = ["twitch.tv", "youtube.com", "youtu.be", "kick.com", "chaturbate.com"]
         return any(p in text.lower() for p in patterns)
 
-    def _on_text_changed(self, text: str):
+    def _on_text_changed(self, text: str) -> None:
         """Handle channel text change."""
         result = self._parse_channel_url(text)
         if result:
@@ -180,7 +179,9 @@ class AddChannelDialog(QDialog):
             self._detected_channel = None
             self.hint_label.setText("")
 
-    def _parse_channel_url(self, text: str):
+    def _parse_channel_url(
+        self, text: str
+    ) -> tuple[StreamPlatform, str] | None:
         """Parse a channel URL and return (platform, channel_id) or None."""
         text = text.strip()
 
@@ -229,29 +230,30 @@ class AddChannelDialog(QDialog):
 
         return None
 
-    def _on_add(self):
+    def _on_add(self) -> None:
         """Handle add button click."""
         channel_id = self._detected_channel or self.channel_edit.text().strip()
         platform = self._detected_platform or self.platform_combo.currentData()
+        monitor = self.app.monitor
 
-        if not channel_id:
+        if not channel_id or not monitor:
             QMessageBox.warning(self, "Error", "Please enter a channel name or URL.")
             return
 
         # Add channel in background
         self.setEnabled(False)
 
-        async def add_channel():
-            return await self.app.monitor.add_channel(channel_id, platform)
+        async def add_channel() -> object:
+            return await monitor.add_channel(channel_id, platform)
 
-        def on_complete(result):
+        def on_complete(result: object) -> None:
             self.setEnabled(True)
             if result:
                 self.accept()
             else:
                 QMessageBox.warning(self, "Error", "Channel not found.")
 
-        def on_error(error):
+        def on_error(error: str) -> None:
             self.setEnabled(True)
             QMessageBox.warning(self, "Error", f"Failed to add channel: {error}")
 
@@ -262,7 +264,7 @@ class AddChannelDialog(QDialog):
         worker.error.connect(on_error)
         worker.start()
 
-    def _update_twitch_status(self):
+    def _update_twitch_status(self) -> None:
         """Update Twitch login status display."""
         if self.app.settings.twitch.access_token:
             login = self.app.settings.twitch.login_name
@@ -283,7 +285,7 @@ class AddChannelDialog(QDialog):
             self.twitch_import_btn.hide()
             self.twitch_logout_btn.hide()
 
-    def _on_twitch_login(self):
+    def _on_twitch_login(self) -> None:
         """Handle Twitch login."""
         from .import_follows import ImportFollowsDialog
 
@@ -297,11 +299,12 @@ class AddChannelDialog(QDialog):
 
         # Suppress notifications for any channels imported during login
         added = getattr(dialog, "_added_count", 0)
-        if added > 0:
-            self.app.monitor.suppress_notifications()
+        monitor = self.app.monitor
+        if added > 0 and monitor:
+            monitor.suppress_notifications()
 
-            def on_refresh_complete():
-                self.app.monitor.resume_notifications()
+            def on_refresh_complete() -> None:
+                monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -310,7 +313,7 @@ class AddChannelDialog(QDialog):
 
             self.app.refresh(on_complete=on_refresh_complete)
 
-    def _on_import_follows(self):
+    def _on_import_follows(self) -> None:
         """Handle import follows."""
         from .import_follows import ImportFollowsDialog
 
@@ -319,11 +322,12 @@ class AddChannelDialog(QDialog):
 
         # Suppress notifications during import refresh
         added = getattr(dialog, "_added_count", 0)
-        if added > 0:
-            self.app.monitor.suppress_notifications()
+        monitor = self.app.monitor
+        if added > 0 and monitor:
+            monitor.suppress_notifications()
 
-            def on_refresh_complete():
-                self.app.monitor.resume_notifications()
+            def on_refresh_complete() -> None:
+                monitor.resume_notifications()
                 if self.app.main_window:
                     self.app.main_window.refresh_stream_list()
 
@@ -332,10 +336,9 @@ class AddChannelDialog(QDialog):
 
             self.app.refresh(on_complete=on_refresh_complete)
 
-    def _on_twitch_logout(self):
+    def _on_twitch_logout(self) -> None:
         """Handle Twitch logout."""
-        self.app.settings.twitch.access_token = None
-        self.app.settings.twitch.user_id = None
+        self.app.settings.twitch.access_token = ""
         self.app.settings.twitch.login_name = ""
         self.app.save_settings()
         self._update_twitch_status()

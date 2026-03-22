@@ -7,9 +7,10 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QEvent, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from ...core.models import Livestream
@@ -55,7 +56,7 @@ def _ensure_webengine() -> bool:
     return _chaturbate_webengine_available
 
 
-def _on_cookie_added(cookie) -> None:
+def _on_cookie_added(cookie: Any) -> None:
     """Track Chaturbate cookies as they're added to the profile."""
     global _force_logged_out
     domain = cookie.domain()
@@ -67,7 +68,7 @@ def _on_cookie_added(cookie) -> None:
             _force_logged_out = False
 
 
-def _on_cookie_removed(cookie) -> None:
+def _on_cookie_removed(cookie: Any) -> None:
     """Track Chaturbate cookie removals.
 
     We intentionally do NOT remove from _tracked_cookies here.
@@ -484,7 +485,7 @@ class ChaturbateWebChatWidget(QWidget):
         if self.livestream and self.livestream.live:
             self._title_refresh_timer.start()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         """Reposition the loading overlay to cover the web view area."""
         super().resizeEvent(event)
         if self._loading_overlay and self._web_view:
@@ -509,11 +510,14 @@ class ChaturbateWebChatWidget(QWidget):
             if hasattr(self, "_isolation_timeout"):
                 self._isolation_timeout.start()
 
-    def eventFilter(self, obj, event):  # noqa: N802
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
         """Intercept Ctrl+scroll on the Chromium render widget to handle zoom."""
-        is_ctrl_scroll = (
-            event.type() == QEvent.Type.Wheel
-            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        from PySide6.QtGui import QWheelEvent
+
+        if not isinstance(event, QWheelEvent):
+            return super().eventFilter(obj, event)
+        is_ctrl_scroll = bool(
+            event.modifiers() & Qt.KeyboardModifier.ControlModifier
         )
         if is_ctrl_scroll:
             page = self._web_view.page() if self._web_view else None
@@ -546,7 +550,7 @@ class ChaturbateWebChatWidget(QWidget):
         self._isolation_attempts = 0
         self._web_view.page().runJavaScript(_DISMISS_AGE_GATE_JS, 0, self._on_age_gate_result)
 
-    def _on_age_gate_result(self, result) -> None:
+    def _on_age_gate_result(self, result: object) -> None:
         """Handle age gate dismissal, then isolate chat."""
         logger.debug(f"Chaturbate age gate: {result}")
         # Wait for page to settle after age gate dismissal
@@ -565,7 +569,7 @@ class ChaturbateWebChatWidget(QWidget):
             return
         self._web_view.page().runJavaScript(_ISOLATE_CHAT_JS, 0, self._on_isolation_result)
 
-    def _on_isolation_result(self, result) -> None:
+    def _on_isolation_result(self, result: object) -> None:
         """Handle chat isolation result."""
         if result is None:
             logger.warning("Chat isolation: JS returned None (script error?)")
@@ -707,7 +711,7 @@ class ChaturbateWebChatWidget(QWidget):
         else:
             self._title_refresh_timer.stop()
 
-    def set_socials(self, socials: dict) -> None:
+    def set_socials(self, socials: dict[str, str]) -> None:
         self._socials = socials
         if not socials or not self.settings.show_socials_banner or self._socials_dismissed:
             self._socials_banner.hide()
@@ -745,7 +749,7 @@ class ChaturbateWebChatWidget(QWidget):
 
     # --- No-op methods (called by ChatWindow signal handlers on all widgets) ---
 
-    def add_messages(self, messages: list) -> None:  # noqa: ARG002
+    def add_messages(self, messages: list[object]) -> None:  # noqa: ARG002
         pass
 
     def apply_moderation(self, event: object) -> None:  # noqa: ARG002
@@ -787,7 +791,7 @@ class ChaturbateWebChatWidget(QWidget):
     def show_raid_banner(self, message: object) -> None:  # noqa: ARG002
         pass
 
-    def get_all_messages(self) -> list:
+    def get_all_messages(self) -> list[object]:
         return []
 
     def repaint_messages(self) -> None:

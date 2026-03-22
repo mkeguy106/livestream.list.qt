@@ -1,6 +1,8 @@
 """Stream list model for virtualized QListView."""
 
-from PySide6.QtCore import QAbstractListModel, QModelIndex, Qt
+from __future__ import annotations
+
+from PySide6.QtCore import QAbstractListModel, QModelIndex, QObject, QPersistentModelIndex, Qt
 
 from ...core.models import Livestream
 
@@ -18,20 +20,26 @@ class StreamListModel(QAbstractListModel):
     faster for large lists (343+ streams).
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._streams: list[Livestream] = []
         self._playing_keys: set[str] = set()
         self._selected_keys: set[str] = set()
         self._selection_mode: bool = False
 
-    def rowCount(self, parent=QModelIndex()) -> int:  # noqa: N802
+    def rowCount(  # noqa: N802
+        self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()
+    ) -> int:
         """Return the number of streams in the model."""
         if parent.isValid():
             return 0
         return len(self._streams)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):
+    def data(  # noqa: N802
+        self,
+        index: QModelIndex | QPersistentModelIndex,
+        role: int = Qt.ItemDataRole.DisplayRole,
+    ) -> object:
         """Return data for the given index and role."""
         if not index.isValid() or index.row() >= len(self._streams):
             return None
