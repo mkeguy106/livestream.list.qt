@@ -514,7 +514,7 @@ def main():
 
         # ── 3. Main window - compact mode (dark) ──
         apply_theme(settings, ThemeMode.DARK, qt_app, window)
-        settings.ui_style = UIStyle.COMPACT_2
+        settings.ui_style = UIStyle.COMPACT_3
         window.resize(360, 700)  # 900 * 0.4 = 360 (60% narrower)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
