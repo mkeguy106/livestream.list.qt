@@ -127,6 +127,26 @@ class PlaybackTab(QScrollArea):
 
         layout.addWidget(record_group)
 
+        # Video Preview group
+        preview_group = QGroupBox("Video Preview")
+        preview_layout = QFormLayout(preview_group)
+
+        self.preview_hover_cb = QCheckBox("Show live preview on hover")
+        self.preview_hover_cb.setChecked(self.app.settings.streamlink.preview_on_hover)
+        self.preview_hover_cb.setToolTip(
+            "Show a small live video preview when hovering over a live channel"
+        )
+        self.preview_hover_cb.toggled.connect(self._on_streamlink_changed)
+        preview_layout.addRow("", self.preview_hover_cb)
+
+        self.preview_audio_cb = QCheckBox("Enable audio in preview")
+        self.preview_audio_cb.setChecked(self.app.settings.streamlink.preview_audio)
+        self.preview_audio_cb.setToolTip("Play audio in the hover preview (muted by default)")
+        self.preview_audio_cb.toggled.connect(self._on_streamlink_changed)
+        preview_layout.addRow("", self.preview_audio_cb)
+
+        layout.addWidget(preview_group)
+
         # Launch Method group (per-platform)
         launch_group = QGroupBox("Launch Method")
         launch_layout = QFormLayout(launch_group)
@@ -210,6 +230,8 @@ class PlaybackTab(QScrollArea):
         self.app.settings.streamlink.auto_close_console = self.auto_close_console_cb.isChecked()
         self.app.settings.streamlink.record_streams = self.record_streams_cb.isChecked()
         self.app.settings.streamlink.record_directory = self.record_dir_edit.text()
+        self.app.settings.streamlink.preview_on_hover = self.preview_hover_cb.isChecked()
+        self.app.settings.streamlink.preview_audio = self.preview_audio_cb.isChecked()
         self.app.save_settings()
 
     def _on_browse_record_directory(self):
@@ -260,6 +282,8 @@ class PlaybackTab(QScrollArea):
         self.auto_close_console_cb.setChecked(defaults.auto_close_console)
         self.record_streams_cb.setChecked(defaults.record_streams)
         self.record_dir_edit.setText(defaults.record_directory)
+        self.preview_hover_cb.setChecked(defaults.preview_on_hover)
+        self.preview_audio_cb.setChecked(defaults.preview_audio)
         for combo, value in (
             (self.twitch_launch_combo, defaults.twitch_launch_method.value),
             (self.youtube_launch_combo, defaults.youtube_launch_method.value),

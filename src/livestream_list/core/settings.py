@@ -78,6 +78,10 @@ class StreamlinkSettings:
     record_streams: bool = False
     record_directory: str = ""
 
+    # Video preview on hover
+    preview_on_hover: bool = True
+    preview_audio: bool = False
+
 
 @dataclass
 class NotificationSettings:
@@ -654,6 +658,8 @@ class Settings:
                 auto_close_console=s.get("auto_close_console", True),
                 record_streams=s.get("record_streams", False),
                 record_directory=s.get("record_directory", ""),
+                preview_on_hover=s.get("preview_on_hover", True),
+                preview_audio=s.get("preview_audio", False),
             )
 
         # Notifications
@@ -748,12 +754,8 @@ class Settings:
                 use_platform_name_colors=builtin_data.get("use_platform_name_colors", True),
                 show_stream_title=builtin_data.get("show_stream_title", True),
                 show_socials_banner=builtin_data.get("show_socials_banner", True),
-                show_sub_anniversary_banner=builtin_data.get(
-                    "show_sub_anniversary_banner", True
-                ),
-                dismissed_sub_anniversaries=builtin_data.get(
-                    "dismissed_sub_anniversaries", {}
-                ),
+                show_sub_anniversary_banner=builtin_data.get("show_sub_anniversary_banner", True),
+                dismissed_sub_anniversaries=builtin_data.get("dismissed_sub_anniversaries", {}),
                 spellcheck_enabled=builtin_data.get("spellcheck_enabled", True),
                 autocorrect_enabled=builtin_data.get("autocorrect_enabled", True),
                 user_card_hover=builtin_data.get("user_card_hover", True),

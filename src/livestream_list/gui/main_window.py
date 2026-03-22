@@ -45,6 +45,7 @@ from .dialogs import (
     PreferencesDialog,
 )
 from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
+from .stream_list.video_preview import VideoPreviewController
 from .theme import ThemeManager, get_app_stylesheet, get_theme
 from .window_utils import apply_always_on_top
 
@@ -324,6 +325,10 @@ class MainWindow(QMainWindow):
         self.stream_list.verticalScrollBar().valueChanged.connect(
             lambda: self._stream_delegate.clear_button_rects()
         )
+
+        # Video preview on hover (lazy — controller checks mpv availability)
+        self._preview_controller: VideoPreviewController | None = None
+        self._preview_controller_checked = False
 
         list_layout.addWidget(self.stream_list)
 
@@ -1193,15 +1198,10 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         channel = livestream.channel
 
-        is_playing = (
-            self._stream_model
-            and channel.unique_key in self._stream_model._playing_keys
-        )
+        is_playing = self._stream_model and channel.unique_key in self._stream_model._playing_keys
         if is_playing:
             stop_action = menu.addAction("\u25a0 Close Channel")
-            stop_action.triggered.connect(
-                lambda: self._on_stop_stream(channel.unique_key)
-            )
+            stop_action.triggered.connect(lambda: self._on_stop_stream(channel.unique_key))
         else:
             play_action = menu.addAction("\u25b6 Play Channel")
             play_action.triggered.connect(lambda: self._on_play_stream(livestream))
@@ -1522,6 +1522,9 @@ class MainWindow(QMainWindow):
             # Close the chat window if it's open
             if hasattr(self.app, "_chat_window") and self.app._chat_window:
                 self.app._chat_window.close()
+            # Clean up video preview
+            if self._preview_controller:
+                self._preview_controller.cleanup()
             # Close all streamlink console windows
             for console in list(self._console_windows.values()):
                 console.close()
@@ -1593,7 +1596,42 @@ class MainWindow(QMainWindow):
                     # Track anchor for next shift+click (let editorEvent handle toggle)
                     self._last_clicked_index = index
 
+        # Video preview on hover over live channels
+        if event.type() == QEvent.Type.MouseMove:
+            ctrl = self._ensure_preview_controller()
+            if ctrl:
+                index = self.stream_list.indexAt(event.pos())
+                if index.isValid():
+                    livestream = index.data(StreamRole)
+                    if livestream and livestream.live:
+                        ctrl.on_hover_enter(livestream)
+                    else:
+                        ctrl.on_hover_leave()
+                else:
+                    ctrl.on_hover_leave()
+
+        if event.type() == QEvent.Type.Leave:
+            if self._preview_controller:
+                self._preview_controller.on_hover_leave()
+
         return super().eventFilter(obj, event)
+
+    def _ensure_preview_controller(self) -> VideoPreviewController | None:
+        """Lazily create the video preview controller."""
+        if self._preview_controller is not None:
+            return self._preview_controller
+        if self._preview_controller_checked:
+            return None
+        self._preview_controller_checked = True
+        if not self.app.streamlink:
+            return None
+        self._preview_controller = VideoPreviewController(
+            settings=self.app.settings,
+            launcher=self.app.streamlink,
+            main_window=self,
+            parent=self,
+        )
+        return self._preview_controller
 
     # --- Trash dialog ---
 
