@@ -22,8 +22,16 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Validate version format
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if ! echo "$VERSION" | grep -qP '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
       - name: Create draft release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           name: Livestream List Qt v${{ steps.version.outputs.VERSION }}
           draft: true
@@ -43,6 +51,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Get version from tag
         id: version
@@ -53,8 +63,10 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           DATE=$(date -u +%Y-%m-%d)
           METAINFO="data/app.livestreamlist.LivestreamListQt.metainfo.xml"
-          if ! grep -q "version=\"${VERSION}\"" "$METAINFO"; then
-            sed -i "s|<releases>|<releases>\n    <release version=\"${VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
+          # Escape sed special characters in VERSION to prevent injection
+          SAFE_VERSION=$(printf '%s' "$VERSION" | sed 's/[|&/\\]/\\&/g')
+          if ! grep -q "version=\"${SAFE_VERSION}\"" "$METAINFO"; then
+            sed -i "s|<releases>|<releases>\n    <release version=\"${SAFE_VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
           fi
 
       - name: Build Flatpak in Docker
@@ -80,7 +92,7 @@ jobs:
           docker rm "$CONTAINER_ID"
 
       - name: Upload Flatpak to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           files: livestreamListQt-v${{ steps.version.outputs.VERSION }}.flatpak
         env:
@@ -97,6 +109,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Get version from tag
         id: version
@@ -117,11 +131,22 @@ jobs:
       - name: Download yt-dlp.exe
         shell: pwsh
         run: |
-          $ytdlpUrl = (Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest").assets |
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+          $ytdlpUrl = $release.assets |
             Where-Object { $_.name -eq "yt-dlp.exe" } |
             Select-Object -ExpandProperty browser_download_url
+          $sha256Url = $release.assets |
+            Where-Object { $_.name -eq "SHA2-256SUMS" } |
+            Select-Object -ExpandProperty browser_download_url
           Invoke-WebRequest -Uri $ytdlpUrl -OutFile yt-dlp.exe
-          Write-Host "Downloaded yt-dlp.exe"
+          Invoke-WebRequest -Uri $sha256Url -OutFile SHA2-256SUMS
+          $expectedHash = (Get-Content SHA2-256SUMS | Select-String "yt-dlp.exe").ToString().Split(" ")[0]
+          $actualHash = (Get-FileHash yt-dlp.exe -Algorithm SHA256).Hash.ToLower()
+          if ($actualHash -ne $expectedHash) {
+            Write-Error "SHA256 mismatch! Expected: $expectedHash, Got: $actualHash"
+            exit 1
+          }
+          Write-Host "Downloaded yt-dlp.exe (SHA256 verified: $actualHash)"
 
       - name: Build with PyInstaller
         run: pyinstaller livestream-list-qt.spec --noconfirm
@@ -132,7 +157,7 @@ jobs:
           "%ProgramFiles(x86)%\Inno Setup 6\iscc.exe" /DAppVersion=${{ steps.version.outputs.VERSION }} installer\livestream-list-qt.iss
 
       - name: Upload installer to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         with:
           files: dist/LivestreamListQt-v${{ steps.version.outputs.VERSION }}-Setup.exe
         env:
