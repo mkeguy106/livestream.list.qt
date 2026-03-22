@@ -495,7 +495,7 @@ def main():
 
     window = MainWindow(mock_app)
     window._initial_check_complete = True
-    window.resize(540, 700)  # 900 * 0.6 = 540 (40% narrower)
+    window.resize(700, 700)
     window.show()
     window.refresh_stream_list()
     # Force QListView to compute correct sizeHints after initial layout
@@ -530,7 +530,7 @@ def main():
 
         # Reset to default style and size
         settings.ui_style = UIStyle.DEFAULT
-        window.resize(540, 700)
+        window.resize(700, 700)
         if window._stream_delegate:
             window._stream_delegate.invalidate_size_cache()
         window.stream_list.scheduleDelayedItemsLayout()
