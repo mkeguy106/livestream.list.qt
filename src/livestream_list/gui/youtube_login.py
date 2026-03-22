@@ -473,7 +473,7 @@ def _detect_available_browsers() -> list[tuple[str, str, str, str, str]]:
 def _read_cookies_via_ytdlp(browser_name: str) -> dict[str, str]:
     """Extract cookies using yt-dlp (handles Firefox encryption and Chromium decryption)."""
     try:
-        from yt_dlp.cookies import extract_cookies_from_browser
+        from yt_dlp.cookies import extract_cookies_from_browser  # type: ignore[import-untyped]
 
         jar = extract_cookies_from_browser(browser_name)
         cookies: dict[str, str] = {}
@@ -1132,7 +1132,7 @@ def _read_twitch_chromium(db_path: str, keyring_label: str) -> str | None:
 def _read_twitch_token_via_ytdlp(browser_name: str) -> str | None:
     """Extract Twitch auth-token using yt-dlp (handles Firefox encryption)."""
     try:
-        from yt_dlp.cookies import extract_cookies_from_browser
+        from yt_dlp.cookies import extract_cookies_from_browser  # type: ignore[import-untyped]
 
         jar = extract_cookies_from_browser(browser_name)
         for cookie in jar:

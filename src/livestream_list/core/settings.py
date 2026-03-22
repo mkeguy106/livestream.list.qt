@@ -11,7 +11,7 @@ from dataclasses import fields as dc_fields
 from enum import Enum as _Enum
 from pathlib import Path
 
-from appdirs import user_config_dir, user_data_dir
+from appdirs import user_config_dir, user_data_dir  # type: ignore[import-untyped]
 
 from .models import LaunchMethod, SortMode, StreamQuality, UIStyle
 
