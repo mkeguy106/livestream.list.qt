@@ -7,6 +7,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from .dictionary import CustomDictionary
 
@@ -111,13 +112,13 @@ class _SpellBackend:
 
     def __init__(self) -> None:
         self.name: str = ""
-        self._engine: object = None
+        self._engine: Any = None
         self._init_backend()
 
     def _init_backend(self) -> None:
         # Try hunspell first (fast C extension, Linux/Flatpak only)
         try:
-            import hunspell as _hunspell
+            import hunspell as _hunspell  # type: ignore[import-not-found]
 
             dic_path, aff_path = _find_hunspell_dict()
             self._engine = _hunspell.HunSpell(dic_path, aff_path)
@@ -128,7 +129,9 @@ class _SpellBackend:
 
         # Fall back to pyspellchecker (pure Python, cross-platform)
         try:
-            from spellchecker import SpellChecker as PySpellChecker
+            from spellchecker import (
+                SpellChecker as PySpellChecker,  # type: ignore[import-not-found]
+            )
 
             self._engine = PySpellChecker(distance=1)
             self.name = "pyspellchecker"
@@ -142,15 +145,15 @@ class _SpellBackend:
 
     def check(self, word: str) -> bool:
         if self.name == "hunspell":
-            return self._engine.spell(word)  # type: ignore[union-attr]
+            return self._engine.spell(word)  # type: ignore[no-any-return]
         # pyspellchecker: word is known if it's in the frequency dictionary
-        return word.lower() in self._engine  # type: ignore[operator]
+        return word.lower() in self._engine
 
     def suggest(self, word: str) -> list[str]:
         if self.name == "hunspell":
-            return self._engine.suggest(word)  # type: ignore[union-attr]
+            return self._engine.suggest(word)  # type: ignore[no-any-return]
         # pyspellchecker returns an unordered set or None
-        candidates = self._engine.candidates(word)  # type: ignore[union-attr]
+        candidates = self._engine.candidates(word)
         if not candidates:
             return []
         # Sort by edit distance so get_confident_correction works correctly
@@ -158,9 +161,9 @@ class _SpellBackend:
 
     def add(self, word: str) -> None:
         if self.name == "hunspell":
-            self._engine.add(word)  # type: ignore[union-attr]
+            self._engine.add(word)
         else:
-            self._engine.word_frequency.load_words([word.lower()])  # type: ignore[union-attr]
+            self._engine.word_frequency.load_words([word.lower()])
 
     def add_batch(self, words: list[str]) -> None:
         """Add multiple words at once (much faster for pyspellchecker)."""
@@ -168,9 +171,9 @@ class _SpellBackend:
             return
         if self.name == "hunspell":
             for word in words:
-                self._engine.add(word)  # type: ignore[union-attr]
+                self._engine.add(word)
         else:
-            self._engine.word_frequency.load_words([w.lower() for w in words])  # type: ignore[union-attr]
+            self._engine.word_frequency.load_words([w.lower() for w in words])
 
 
 class SpellChecker:
