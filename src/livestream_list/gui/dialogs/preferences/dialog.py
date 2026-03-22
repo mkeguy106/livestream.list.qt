@@ -28,9 +28,7 @@ logger = logging.getLogger(__name__)
 class PreferencesDialog(QDialog):
     """Preferences dialog with multiple tabs."""
 
-    def __init__(
-        self, parent: QWidget | None, app: Application, initial_tab: int = 0
-    ) -> None:
+    def __init__(self, parent: QWidget | None, app: Application, initial_tab: int = 0) -> None:
         super().__init__(parent)
         self.app = app
         self._loading = True  # Prevent cascading updates during init

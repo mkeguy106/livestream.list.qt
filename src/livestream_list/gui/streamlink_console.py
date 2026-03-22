@@ -13,9 +13,7 @@ class ProcessReaderThread(QThread):
     line_received = Signal(str)
     process_exited = Signal(int)
 
-    def __init__(
-        self, process: subprocess.Popen[str], parent: QObject | None = None
-    ):
+    def __init__(self, process: subprocess.Popen[str], parent: QObject | None = None):
         super().__init__(parent)
         self._process = process
 

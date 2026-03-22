@@ -229,9 +229,7 @@ class StreamlinkLauncher:
             record_dir = os.path.expanduser(self.settings.record_directory)
             if os.path.isdir(record_dir):
                 # Safe filename: ChannelName_2026-02-16_14-30-00.ts
-                safe_name = re.sub(
-                    r"[^\w\-.]", "_", livestream.channel.display_name or ""
-                )
+                safe_name = re.sub(r"[^\w\-.]", "_", livestream.channel.display_name or "")
                 timestamp = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H-%M-%S")
                 filename = f"{safe_name}_{timestamp}.ts"
                 record_path = os.path.join(record_dir, filename)

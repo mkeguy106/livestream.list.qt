@@ -263,9 +263,7 @@ class YouTubeWebChatWidget(QWidget):
 
         if not isinstance(event, QWheelEvent):
             return super().eventFilter(obj, event)
-        is_ctrl_scroll = bool(
-            event.modifiers() & Qt.KeyboardModifier.ControlModifier
-        )
+        is_ctrl_scroll = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
         if is_ctrl_scroll:
             page = self._web_view.page() if self._web_view else None
             if page:

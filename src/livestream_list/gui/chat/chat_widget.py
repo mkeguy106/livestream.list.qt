@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 import webbrowser
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
@@ -1171,14 +1171,12 @@ class ChatWidget(QWidget, ChatSearchMixin):
             for dialog in list(self._history_dialogs):
                 dialog.apply_moderation(event)
 
-    def load_disk_history(self, chat_log_writer: object) -> None:
+    def load_disk_history(self, chat_log_writer: Any) -> None:
         """Load recent messages from disk chat logs into the message list."""
-        settings = chat_log_writer.settings  # type: ignore[attr-defined]
+        settings = chat_log_writer.settings
         if not settings.enabled or not settings.load_history_on_open:
             return
-        messages = chat_log_writer.load_recent_history(  # type: ignore[attr-defined]
-            self.channel_key, settings.history_lines
-        )
+        messages = chat_log_writer.load_recent_history(self.channel_key, settings.history_lines)
         if messages:
             self._model.add_messages(messages)
 
@@ -1657,9 +1655,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         try:
             from ..app import Application
 
-            app = Application.instance()
+            app = cast(Any, Application.instance())
             if app:
-                app.save_settings()  # type: ignore[attr-defined]
+                app.save_settings()
         except Exception:
             pass
 
@@ -2670,7 +2668,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                        option.rect = self._list_view.visualRect(index)
                         name_rect = self._delegate._get_username_rect(option, message)
                         if name_rect.isValid() and name_rect.contains(event.pos()):
                             self._show_user_card(message.user, event.globalPos())
@@ -2711,7 +2709,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                    option.rect = self._list_view.visualRect(index)
                     name_rect = self._delegate._get_username_rect(option, message)
                     if name_rect.isValid() and name_rect.contains(event.pos()):
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2750,7 +2748,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                    option.rect = self._list_view.visualRect(index)
                     viewport = self._list_view.viewport()
                     tip_pos = event.globalPos()
 
@@ -3353,7 +3351,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                        option.rect = self._list_view.visualRect(index)
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3371,7 +3369,7 @@ class UserHistoryDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                    option.rect = self._list_view.visualRect(index)
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3671,7 +3669,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                        option.rect = self._list_view.visualRect(index)
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3689,7 +3687,7 @@ class ConversationDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                    option.rect = self._list_view.visualRect(index)
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3975,7 +3973,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                     if message and isinstance(message, ChatMessage):
                         option = QStyleOptionViewItem()
                         self._list_view.initViewItemOption(option)
-                        option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                        option.rect = self._list_view.visualRect(index)
                         url = self._delegate._get_url_at_position(event.pos(), option, message)
                         if url:
                             try:
@@ -3992,7 +3990,7 @@ class ReplyThreadDialog(QDialog, ChatSearchMixin):
                 if message and isinstance(message, ChatMessage):
                     option = QStyleOptionViewItem()
                     self._list_view.initViewItemOption(option)
-                    option.rect = self._list_view.visualRect(index)  # type: ignore[attr-defined]
+                    option.rect = self._list_view.visualRect(index)
                     url = self._delegate._get_url_at_position(event.pos(), option, message)
                     if url:
                         viewport.setCursor(Qt.CursorShape.PointingHandCursor)

@@ -478,7 +478,8 @@ class FlowTabWidget(QWidget):
         """Remove tab at index."""
         if 0 <= index < self._stack.count():
             widget = self._stack.widget(index)
-            self._stack.removeWidget(widget)
+            if widget is not None:
+                self._stack.removeWidget(widget)
             self._tab_bar.remove_tab(index)
             # Update current index
             if self._stack.count() == 0:

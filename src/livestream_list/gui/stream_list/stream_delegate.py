@@ -225,9 +225,7 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         is_playing = index.data(PlayingRole) or False
         is_selected_checkbox = index.data(SelectionRole) or False
-        is_selected = bool(
-            option.state & QStyle.StateFlag.State_Selected  # type: ignore[attr-defined]
-        )
+        is_selected = bool(option.state & QStyle.StateFlag.State_Selected)
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -238,7 +236,7 @@ class StreamRowDelegate(QStyledItemDelegate):
 
         # Row index (used for alternating colors and button rects)
         row = index.row()
-        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        opt_rect: QRect = option.rect
 
         # Background
         if is_selected:
@@ -558,7 +556,7 @@ class StreamRowDelegate(QStyledItemDelegate):
         self._sizehint_count += 1
 
         livestream: Livestream | None = index.data(StreamRole)
-        opt_rect: QRect = option.rect  # type: ignore[attr-defined]
+        opt_rect: QRect = option.rect
         if not livestream:
             return QSize(opt_rect.width(), 40)
 

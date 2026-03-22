@@ -179,9 +179,7 @@ class AddChannelDialog(QDialog):
             self._detected_channel = None
             self.hint_label.setText("")
 
-    def _parse_channel_url(
-        self, text: str
-    ) -> tuple[StreamPlatform, str] | None:
+    def _parse_channel_url(self, text: str) -> tuple[StreamPlatform, str] | None:
         """Parse a channel URL and return (platform, channel_id) or None."""
         text = text.strip()
 
