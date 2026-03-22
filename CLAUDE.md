@@ -447,12 +447,28 @@ After pushing a new release, perform these cleanup checks:
    - Clone/pull the wiki and update relevant pages (Features, Chat, Preferences, Troubleshooting, etc.)
    - Commit and push wiki changes
 
-## Git Commits
+## Git Workflow
+
+**Branch protection is enabled on `main`.** Direct commits to `main` are not allowed.
+
+### Making Changes
+
+1. **Create a feature branch** from `main` (e.g., `fix/description`, `feature/description`, `refactor/description`)
+2. **Commit changes** to the feature branch
+3. **Push the branch** and **create a pull request** to merge into `main`
+4. PR requires 1 approving review and all conversations resolved before merge
+5. Linear history is enforced — use squash or rebase merges, not merge commits
+
+### Commit Messages
 
 Never include in commit messages:
 - "Generated with Claude Code"
 - "Co-Authored-By: Claude"
 - Any reference to AI, Claude, or automated generation
+
+### Releases
+
+Releases are created by pushing a version tag (`v*`) to `main` after a PR is merged. Always test locally before tagging. See [Before Creating a Release](#before-creating-a-release) and [Release Hygiene](#release-hygiene).
 
 ## Documentation Maintenance
 
