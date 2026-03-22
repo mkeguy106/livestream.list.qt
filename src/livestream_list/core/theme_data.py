@@ -1,11 +1,16 @@
 """Theme data model and I/O for custom themes."""
 
+from __future__ import annotations
+
 import json
 import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..gui.theme import ThemeColors
 
 from .settings import get_config_dir
 
@@ -152,7 +157,7 @@ class ThemeData:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ThemeData":
+    def from_dict(cls, data: dict[str, Any]) -> ThemeData:
         """Deserialize from dict."""
         return cls(
             name=data.get("name", "Untitled"),
@@ -476,7 +481,7 @@ BUILTIN_THEME_ORDER: list[str] = [
 ]
 
 
-def theme_data_to_theme_colors(data: "ThemeData") -> object:
+def theme_data_to_theme_colors(data: ThemeData) -> ThemeColors:
     """Convert a ThemeData to a ThemeColors instance.
 
     Missing fields are filled from the base theme (dark or light).
