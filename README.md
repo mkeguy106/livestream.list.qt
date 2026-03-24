@@ -10,7 +10,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
 >
 > This project was entirely vibe-coded with Claude AI. I'm just some guy who threw prompts at an AI until something worked. Use at your own risk.
 >
-> ![Claude Code is all you need](https://preview.redd.it/claude-code-is-all-you-need-v0-uizq4o7ae39f1.jpg?width=500&format=pjpg&auto=webp&s=ab076cd0c28db7d74c41b8fe86da8c03f505eb8b)
+> ![Claude Code is all you need](docs/i_made.webp)
 
 ---
 
