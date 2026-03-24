@@ -425,9 +425,10 @@ Test the specific functionality that was changed. Only after confirming it works
 
 After pushing a new release, perform these cleanup checks:
 
-1. **Prune old releases**: Keep only the latest release per minor version series. Delete older patch releases (e.g., if v0.9.1 exists, delete v0.9.0). Each flatpak is ~170MB so old releases add up fast.
+1. **Prune old releases**: Keep only the **latest release**. Delete all older releases. Each release is ~350MB (Flatpak + Windows installer), and users should always be on the latest version. If a release is bad, revert and tag a new one — git history has everything.
    ```bash
    gh release list
+   # Delete all except the latest
    gh release delete <tag> --yes --cleanup-tag
    ```
 
@@ -436,18 +437,7 @@ After pushing a new release, perform these cleanup checks:
    git branch -r --merged origin/main | grep -v main | sed 's|origin/||' | xargs -r git push origin --delete
    ```
 
-3. **Check total release storage**: Should stay under ~1GB (keep 4-5 releases max).
-   ```bash
-   gh api repos/mkeguy106/livestream.list.qt/releases --paginate --jq '[.[] | .assets[0].size // 0] | add / 1048576 | floor'
-   # Shows total MB across all release assets
-   ```
-
-4. **Verify repo size**: Should remain well under 1GB.
-   ```bash
-   gh api repos/mkeguy106/livestream.list.qt --jq '.size'  # KB
-   ```
-
-5. **Sync documentation**: Review all changes since the last release and ensure CLAUDE.md, README.md, and the wiki are up to date. Use the decision matrix in the [Documentation Maintenance](#documentation-maintenance) section to determine what needs updating. At minimum:
+3. **Sync documentation**: Review all changes since the last release and ensure CLAUDE.md, README.md, and the wiki are up to date. Use the decision matrix in the [Documentation Maintenance](#documentation-maintenance) section to determine what needs updating. At minimum:
    - Compare `git log <previous-tag>..HEAD` to identify all changes included in the release
    - Update CLAUDE.md for any new pitfalls, architecture changes, or API changes
    - Update README.md feature list, keyboard shortcuts, and roadmap checkboxes
