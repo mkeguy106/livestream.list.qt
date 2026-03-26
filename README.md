@@ -62,6 +62,9 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Works on KDE, XFCE, Cinnamon, Budgie, LXQt, MATE, and GNOME (with AppIndicator extension)
 - **Run in Background** - Keep running when window is closed to receive notifications
   - First-launch prompt to choose behavior (quit or run in background)
+- **Single Instance** - Prevents multiple instances from running simultaneously
+  - Second launch brings existing window to foreground with a warning dialog
+  - Override with `--allow-multiple` or `-m` flag
 - **Launch on Startup** - Option to start automatically when you log in
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
   - Console window for viewing streamlink/yt-dlp output in real-time (auto-closes by default)
@@ -192,6 +195,12 @@ livestream-list-qt
 # or
 python -m livestream_list
 ```
+
+**Command-line options:**
+
+| Flag | Description |
+|------|-------------|
+| `-m`, `--allow-multiple` | Allow multiple instances to run simultaneously |
 
 ### Keyboard Shortcuts
 

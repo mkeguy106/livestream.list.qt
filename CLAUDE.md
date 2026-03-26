@@ -132,6 +132,7 @@ Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a 
 
 ### Data Flow
 
+0. `run()` (app.py) creates `SingleInstanceGuard` via `QLocalServer`/`QLocalSocket` — blocks duplicate launches, signals existing instance to raise window. Skipped with `--allow-multiple`.
 1. `Application` (app.py) initializes `StreamMonitor` and `Settings`
 2. `StreamMonitor` owns API clients and channel/livestream state
 3. `AsyncWorker` runs async operations in background threads, emits Qt Signals on completion
@@ -224,6 +225,7 @@ Core architecture files (most other files follow patterns established in these):
 | `core/theme_data.py` | Theme definitions, built-in themes, theme file I/O |
 | `api/twitch.py` | Twitch Helix + GraphQL client |
 | `core/platform.py` | Platform detection (`IS_WINDOWS`, `IS_LINUX`, `IS_FLATPAK`, `host_command()`) |
+| `core/single_instance.py` | Single-instance guard via `QLocalServer`/`QLocalSocket`, `--allow-multiple` override |
 | `core/credential_store.py` | Keyring-based secret storage (tokens, cookies) |
 | `core/streamlink.py` | StreamlinkLauncher, subprocess management, Turbo auth, recording |
 | `gui/streamlink_console.py` | Console window for streamlink/yt-dlp output, auto-close on exit |
@@ -310,6 +312,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `webbrowser.open()` blocks main thread | Python's `webbrowser` module calls `subprocess.wait(5)` internally, blocking for ~4.5s. Run on a daemon thread: `threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()` |
 | Unknown platform in channels.json | `_load_channels` in `monitor.py` skips channels with unknown `StreamPlatform` values (e.g., from experimental branches) with a warning instead of crashing |
 | Chaturbate private room shows as live | Bulk API returns private rooms as "online". Individual API `room_status` field detects private/hidden/group shows. Live Chaturbate channels are verified via concurrent individual API checks during refresh. Stream delegate shows dimmed color + tooltip for non-public rooms. |
+| Stale single-instance socket after crash | `SingleInstanceGuard.start_listening()` calls `QLocalServer.removeServer()` and retries once if `listen()` fails. Socket name is `"livestream-list-qt"`. |
 
 ## CI/CD
 
