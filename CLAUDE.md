@@ -81,7 +81,7 @@ pytest tests/test_file.py::test_name -v
 - Target: Python 3.10
 - Selected rules: `E`, `F`, `I`, `N`, `W`, `UP`
 - pytest uses `asyncio_mode = "auto"` (no `@pytest.mark.asyncio` needed)
-- Build system: hatchling (version sourced from `__version__.py`)
+- Build system: hatchling + hatch-vcs (version derived from git tags)
 
 ### Mypy Configuration
 
@@ -234,7 +234,15 @@ All paths relative to `src/livestream_list/`.
 
 ### Versioning
 
-Version is defined in `src/livestream_list/__version__.py`. Update `__version__ = "x.y.z"` before release.
+Version is derived from git tags via `hatch-vcs`. No version file to edit manually.
+
+```bash
+# Release: just tag and push
+git tag v1.8.0
+git push --tags
+```
+
+At runtime, `__version__` is read via `importlib.metadata.version("livestream-list-qt")` in `__init__.py`. Dev builds between tags show versions like `1.7.2.dev3+gabcdef`.
 
 ### Configuration Paths
 
@@ -468,7 +476,14 @@ Never include in commit messages:
 
 ### Releases
 
-Releases are created by pushing a version tag (`v*`) to `main` after a PR is merged. Always test locally before tagging. See [Before Creating a Release](#before-creating-a-release) and [Release Hygiene](#release-hygiene).
+Releases are tag-driven. After a PR is merged to `main`, tag and push — no version file to edit:
+
+```bash
+git tag v1.8.0
+git push --tags
+```
+
+The CI workflow triggers on `v*` tags and builds Flatpak + Windows installer. Always test locally before tagging. See [Before Creating a Release](#before-creating-a-release) and [Release Hygiene](#release-hygiene).
 
 ## Documentation Maintenance
 
