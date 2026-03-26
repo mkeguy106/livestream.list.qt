@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -60,7 +60,10 @@ Homepage = "https://github.com/mkeguy106/livestream-list-linux"
 Repository = "https://github.com/mkeguy106/livestream-list-linux.git"
 
 [tool.hatch.version]
-path = "src/livestream_list/__version__.py"
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/livestream_list/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/livestream_list"]

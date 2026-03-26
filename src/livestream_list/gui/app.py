@@ -16,7 +16,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QApplication
 
-from ..__version__ import __version__
+from .. import __version__
 from ..chat.manager import ChatManager
 from ..core.models import Livestream
 from ..core.monitor import StreamMonitor

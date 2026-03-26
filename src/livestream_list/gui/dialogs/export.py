@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...__version__ import __version__
+from ... import __version__
 
 if TYPE_CHECKING:
     from ..app import Application
