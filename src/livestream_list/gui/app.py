@@ -817,7 +817,7 @@ class Application(QApplication):
             self.streamlink.stop_all_streams()
 
 
-def run() -> int:
+def run(*, allow_multiple: bool = False) -> int:
     """Run the application."""
     # Import here to avoid circular imports
     from .main_window import MainWindow
@@ -830,6 +830,26 @@ def run() -> int:
     Application.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
     app = Application()
+
+    # Single-instance guard (after QApplication exists for QLocalServer/QMessageBox)
+    guard: SingleInstanceGuard | None = None
+    if not allow_multiple:
+        from ..core.single_instance import SingleInstanceGuard
+
+        guard = SingleInstanceGuard(parent=app)
+        if guard.is_already_running():
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.warning(
+                None,
+                "Already Running",
+                "Livestream List is already running.\n\n"
+                "The existing window has been brought to the foreground.\n\n"
+                "Use --allow-multiple to run multiple instances.",
+            )
+            return 0
+        guard.start_listening()
+
     app.initialize()
 
     # Set application icon (used for taskbar/window icon)
@@ -838,6 +858,16 @@ def run() -> int:
     # Create main window
     main_window = MainWindow(app)
     app.main_window = main_window
+
+    # Connect single-instance raise signal to window focus
+    if guard is not None:
+
+        def _raise_window() -> None:
+            main_window.showNormal()
+            main_window.raise_()
+            main_window.activateWindow()
+
+        guard.raise_requested.connect(_raise_window)
 
     # Create tray icon if available
     if is_tray_available():
@@ -873,6 +903,10 @@ def run() -> int:
 
     # Connect cleanup
     app.aboutToQuit.connect(app.cleanup)
+
+    # Clean up guard on quit
+    if guard is not None:
+        app.aboutToQuit.connect(guard.cleanup)
 
     # Start async initialization
     def on_channels_loaded(count: int) -> None:

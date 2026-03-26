@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Main entry point for Livestream List."""
 
+import argparse
 import faulthandler
 import logging
 import sys
@@ -29,14 +30,31 @@ def setup_logging() -> None:
     logging.getLogger("pytchat").setLevel(logging.WARNING)
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        prog="livestream-list-qt",
+        description="Monitor livestreams on Twitch, YouTube, Kick, and Chaturbate",
+    )
+    parser.add_argument(
+        "-m",
+        "--allow-multiple",
+        action="store_true",
+        default=False,
+        help="Allow multiple instances of the application to run simultaneously",
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> int:
     """Main entry point."""
     setup_logging()
+    args = parse_args()
 
     try:
         from livestream_list.gui.app import run
 
-        return run()
+        return run(allow_multiple=args.allow_multiple)
     except ImportError as e:
         logging.error(f"Failed to import GUI: {e}")
         logging.error("Make sure PySide6 is installed:")
