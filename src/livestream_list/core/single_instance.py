@@ -73,7 +73,8 @@ class SingleInstanceGuard(QObject):
         if client is None:
             return
         client.waitForReadyRead(1000)
-        data = bytes(client.readAll().data()).decode("utf-8", errors="replace")
+        raw = client.readAll().data()
+        data = bytes(raw).decode("utf-8", errors="replace")
         client.close()
         if data.strip() == "raise":
             logger.info("Received raise request from another instance")

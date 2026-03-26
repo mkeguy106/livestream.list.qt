@@ -2,16 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+from PySide6.QtCore import QByteArray
 
 from livestream_list.core.single_instance import SOCKET_NAME, SingleInstanceGuard
-
-
-@pytest.fixture
-def _no_qapp(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure QLocalServer/QLocalSocket don't need a real QApplication."""
-    # Tests that create real Qt objects will need a QApplication;
-    # for unit tests we mock the Qt classes entirely.
 
 
 class TestSingleInstanceGuard:
@@ -58,6 +51,36 @@ class TestSingleInstanceGuard:
         guard = SingleInstanceGuard()
         guard.is_already_running()
         mock_socket.disconnectFromServer.assert_called_once()
+
+    def test_on_new_connection_emits_raise_requested(self) -> None:
+        """Server emits raise_requested when client sends 'raise'."""
+        guard = SingleInstanceGuard()
+        mock_server = MagicMock()
+        guard._server = mock_server
+
+        mock_client = MagicMock()
+        mock_client.waitForReadyRead.return_value = True
+        mock_client.readAll.return_value = QByteArray(b"raise")
+        mock_server.nextPendingConnection.return_value = mock_client
+
+        received: list[bool] = []
+        guard.raise_requested.connect(lambda: received.append(True))
+
+        guard._on_new_connection()
+
+        assert received == [True]
+        mock_client.close.assert_called_once()
+
+    def test_cleanup_closes_server_and_sets_none(self) -> None:
+        """cleanup() closes the server and sets it to None."""
+        guard = SingleInstanceGuard()
+        mock_server = MagicMock()
+        guard._server = mock_server
+
+        guard.cleanup()
+
+        mock_server.close.assert_called_once()
+        assert guard._server is None
 
 
 def test_socket_name_is_stable() -> None:
