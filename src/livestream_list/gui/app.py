@@ -817,7 +817,7 @@ class Application(QApplication):
             self.streamlink.stop_all_streams()
 
 
-def run() -> int:
+def run(*, allow_multiple: bool = False) -> int:
     """Run the application."""
     # Import here to avoid circular imports
     from .main_window import MainWindow

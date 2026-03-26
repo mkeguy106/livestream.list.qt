@@ -86,3 +86,25 @@ class TestSingleInstanceGuard:
 def test_socket_name_is_stable() -> None:
     """Socket name should be a fixed, known value."""
     assert SOCKET_NAME == "livestream-list-qt"
+
+
+from livestream_list.main import parse_args
+
+
+class TestParseArgs:
+    """Tests for CLI argument parsing."""
+
+    def test_default_no_allow_multiple(self) -> None:
+        """Default: allow_multiple is False."""
+        args = parse_args([])
+        assert args.allow_multiple is False
+
+    def test_long_flag(self) -> None:
+        """--allow-multiple sets the flag."""
+        args = parse_args(["--allow-multiple"])
+        assert args.allow_multiple is True
+
+    def test_short_flag(self) -> None:
+        """-m sets the flag."""
+        args = parse_args(["-m"])
+        assert args.allow_multiple is True
