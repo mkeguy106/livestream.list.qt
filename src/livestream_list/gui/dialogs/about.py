@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from ...__version__ import __version__
+from ... import __version__
 
 if TYPE_CHECKING:
     from ..app import Application

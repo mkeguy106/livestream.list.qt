@@ -85,3 +85,6 @@ credentials.json
 .DS_Store
 Thumbs.db
 livestream-list-export-*.json
+
+# hatch-vcs generated version file
+src/livestream_list/_version.py
