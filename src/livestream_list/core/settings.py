@@ -83,6 +83,9 @@ class StreamlinkSettings:
     preview_on_hover: bool = True
     preview_audio: bool = False
 
+    # Global auto-play toggle — when False, no channels auto-launch on go-live
+    auto_play_enabled: bool = True
+
 
 @dataclass
 class NotificationSettings:
