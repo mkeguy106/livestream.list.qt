@@ -67,6 +67,7 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Override with `--allow-multiple` or `-m` flag
 - **Launch on Startup** - Option to start automatically when you log in
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
+  - Auto-play: per-channel auto-launch when a stream goes live, with global toggle in toolbar
   - Console window for viewing streamlink/yt-dlp output in real-time (auto-closes by default)
   - Twitch Turbo ad-free viewing (auto-extracts browser auth-token, enabled by default)
   - Record streams to disk while watching (saves as `.ts` files)
