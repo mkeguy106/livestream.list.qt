@@ -500,8 +500,12 @@ class Application(QApplication):
         if self.notification_bridge:
             self.notification_bridge.queue_notification(livestream)
 
-        # Auto-launch if enabled for this channel
-        if livestream.channel.auto_launch and self.streamlink:
+        # Auto-launch if enabled globally AND for this channel
+        if (
+            self.settings.streamlink.auto_play_enabled
+            and livestream.channel.auto_launch
+            and self.streamlink
+        ):
             if not self.streamlink.is_playing(livestream.channel.unique_key):
                 logger.info("Auto-launching %s", livestream.display_name)
                 self.streamlink.launch(livestream)
