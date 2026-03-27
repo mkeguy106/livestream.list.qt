@@ -544,6 +544,15 @@ class MainWindow(QMainWindow):
         self.preview_btn.clicked.connect(self._toggle_preview)
         toolbar.addWidget(self.preview_btn)
 
+        self.auto_play_btn = QToolButton()
+        self.auto_play_btn.setText("A")
+        self.auto_play_btn.setObjectName("autoPlayButton")
+        self.auto_play_btn.setCheckable(True)
+        self.auto_play_btn.setChecked(self.app.settings.streamlink.auto_play_enabled)
+        self.auto_play_btn.clicked.connect(self._toggle_auto_play)
+        self._update_auto_play_button_style()
+        toolbar.addWidget(self.auto_play_btn)
+
         # Spacer to push filters to the right
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -1068,6 +1077,9 @@ class MainWindow(QMainWindow):
                 self.empty_label.setStyleSheet(muted_style)
             if hasattr(self, "delete_selected_btn"):
                 self.delete_selected_btn.setStyleSheet(f"color: {theme.status_error};")
+            # Update auto-play button accent color
+            if hasattr(self, "auto_play_btn"):
+                self._update_auto_play_button_style()
             # Update delegate theme and repaint
             if self._stream_delegate:
                 self._stream_delegate.apply_theme()
@@ -1733,6 +1745,34 @@ class MainWindow(QMainWindow):
         # Hide any active preview when disabling
         if not enabled and self._preview_controller:
             self._preview_controller.on_hover_leave()
+
+    def _toggle_auto_play(self) -> None:
+        """Toggle global auto-play setting."""
+        enabled = self.auto_play_btn.isChecked()
+        self.app.settings.streamlink.auto_play_enabled = enabled
+        self.app.save_settings()
+        self._update_auto_play_button_style()
+        # Refresh stream list to update per-channel "A" button appearance
+        self.refresh_stream_list()
+
+    def _update_auto_play_button_style(self) -> None:
+        """Update auto-play button appearance based on state."""
+        enabled = self.auto_play_btn.isChecked()
+        if enabled:
+            accent = get_theme().accent
+            # Choose contrasting text: white for dark accents, black for light
+            r, g, b = int(accent[1:3], 16), int(accent[3:5], 16), int(accent[5:7], 16)
+            luminance = 0.299 * r + 0.587 * g + 0.114 * b
+            text_color = "#000000" if luminance > 140 else "#ffffff"
+            self.auto_play_btn.setStyleSheet(
+                f"QToolButton {{ background-color: {accent}; color: {text_color};"
+                f" border: 1px solid {accent}; border-radius: 3px;"
+                f" font-weight: bold; padding: 2px 4px; }}"
+            )
+            self.auto_play_btn.setToolTip("Auto play is ON — click to disable")
+        else:
+            self.auto_play_btn.setStyleSheet("")
+            self.auto_play_btn.setToolTip("Auto play is OFF — click to enable")
 
     def _is_over_button(self, row: int, pos: Any) -> bool:
         """Check if the position is over any delegate button rect."""
