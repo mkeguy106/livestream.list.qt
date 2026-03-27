@@ -466,7 +466,13 @@ class StreamRowDelegate(QStyledItemDelegate):
         if self._settings.channel_icons.show_favorite:
             btn_rect = QRect(btn_x, btn_y, icon_size + BUTTON_PADDING, btn_height)
             button_rects["auto_launch"] = btn_rect
-            al_color = self._accent if channel.auto_launch else None
+            global_auto_play = self._settings.streamlink.auto_play_enabled
+            if channel.auto_launch and global_auto_play:
+                al_color = self._accent
+            elif channel.auto_launch and not global_auto_play:
+                al_color = self._text_muted
+            else:
+                al_color = None
             self._draw_button(painter, btn_rect, "A", is_selected, text_color=al_color)
             btn_x += icon_size + BUTTON_PADDING + btn_spacing
 
