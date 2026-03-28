@@ -299,6 +299,15 @@ class PerformanceSettings:
 
 
 @dataclass
+class LoggingSettings:
+    """File logging settings."""
+
+    enabled: bool = True
+    log_directory: str = ""  # empty = default (data_dir / "logs")
+    log_level: str = "INFO"  # "INFO" or "DEBUG"
+
+
+@dataclass
 class ChannelInfoSettings:
     """Channel row information visibility settings."""
 
@@ -357,6 +366,7 @@ class Settings:
     channel_info: ChannelInfoSettings = field(default_factory=ChannelInfoSettings)
     channel_icons: ChannelIconSettings = field(default_factory=ChannelIconSettings)
     performance: PerformanceSettings = field(default_factory=PerformanceSettings)
+    logging: LoggingSettings = field(default_factory=LoggingSettings)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
@@ -825,6 +835,10 @@ class Settings:
                     perf.get("kick_concurrency"), 10, min_val=1, max_val=50
                 ),
             )
+
+        # Logging
+        if "logging" in data:
+            settings.logging = cls._simple_dc_from_dict(LoggingSettings, data["logging"])
 
         return settings
 
