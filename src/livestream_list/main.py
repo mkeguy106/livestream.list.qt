@@ -5,6 +5,8 @@ import argparse
 import faulthandler
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 # Print Python traceback on SIGSEGV/SIGFPE/SIGABRT instead of silently crashing
 # sys.stderr is None in PyInstaller --windowed builds (no console)
@@ -30,6 +32,50 @@ def setup_logging() -> None:
     logging.getLogger("pytchat").setLevel(logging.WARNING)
 
 
+def configure_file_logging(enabled: bool, log_directory: str, log_level: str) -> None:
+    """Configure or remove the rotating file handler on the root logger.
+
+    Can be called at startup and again at runtime when settings change.
+    """
+    root = logging.getLogger()
+
+    # Remove any existing RotatingFileHandler
+    for handler in root.handlers[:]:
+        if isinstance(handler, RotatingFileHandler):
+            handler.close()
+            root.removeHandler(handler)
+
+    if not enabled:
+        return
+
+    # Resolve log directory
+    if log_directory:
+        log_dir = Path(log_directory)
+    else:
+        from livestream_list.core.settings import get_data_dir
+
+        log_dir = get_data_dir() / "logs"
+
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "livestream-list-qt.log"
+
+    level = getattr(logging, log_level.upper(), logging.INFO)
+
+    handler = RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=2,
+        encoding="utf-8",
+    )
+    handler.setLevel(level)
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    root.addHandler(handler)
+
+    # Ensure root logger level allows the file handler's level through
+    if root.level > level:
+        root.setLevel(level)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -52,6 +98,15 @@ def main() -> int:
     args = parse_args()
 
     try:
+        from livestream_list.core.settings import Settings
+
+        settings = Settings.load()
+        configure_file_logging(
+            enabled=settings.logging.enabled,
+            log_directory=settings.logging.log_directory,
+            log_level=settings.logging.log_level,
+        )
+
         from livestream_list.gui.app import run
 
         return run(allow_multiple=args.allow_multiple)
