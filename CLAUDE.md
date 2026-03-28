@@ -436,10 +436,10 @@ Test the specific functionality that was changed. Only after confirming it works
 
 After pushing a new release, perform these cleanup checks:
 
-1. **Prune old releases**: Keep only the **latest release**. Delete all older releases. Each release is ~350MB (Flatpak + Windows installer), and users should always be on the latest version. If a release is bad, revert and tag a new one — git history has everything.
+1. **Prune old releases (CRITICAL)**: The free GitHub Actions plan has **0.5 GB storage**. Each release is ~357MB (172MB exe + 184MB flatpak), so **only one release can exist at a time**. Delete the previous release **before or immediately after** publishing a new one. Failure to do this will block CI.
    ```bash
    gh release list
-   # Delete all except the latest
+   # Delete ALL previous releases before the new one consumes storage
    gh release delete <tag> --yes --cleanup-tag
    ```
 
