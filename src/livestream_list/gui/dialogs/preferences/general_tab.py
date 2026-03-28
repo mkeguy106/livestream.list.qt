@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt
@@ -127,6 +128,43 @@ class GeneralTab(QScrollArea):
         storage_layout.addRow("Emote cache size:", self.emote_cache_spin)
 
         layout.addWidget(storage_group)
+
+        # Logging group
+        logging_group = QGroupBox("Logging")
+        logging_layout = QFormLayout(logging_group)
+
+        self.logging_enabled_cb = QCheckBox("Enable file logging")
+        self.logging_enabled_cb.setChecked(self.app.settings.logging.enabled)
+        self.logging_enabled_cb.stateChanged.connect(self._on_logging_changed)
+        logging_layout.addRow(self.logging_enabled_cb)
+
+        self.log_level_combo = QComboBox()
+        self.log_level_combo.addItem("Info", "INFO")
+        self.log_level_combo.addItem("Debug", "DEBUG")
+        current_level = self.app.settings.logging.log_level
+        for i in range(self.log_level_combo.count()):
+            if self.log_level_combo.itemData(i) == current_level:
+                self.log_level_combo.setCurrentIndex(i)
+                break
+        self.log_level_combo.currentIndexChanged.connect(self._on_logging_changed)
+        logging_layout.addRow("Log level:", self.log_level_combo)
+
+        self.log_dir_edit = QLineEdit()
+        self.log_dir_edit.setPlaceholderText("Default (application data directory)")
+        self.log_dir_edit.setText(self.app.settings.logging.log_directory)
+        self.log_dir_edit.textChanged.connect(self._on_logging_changed)
+        log_dir_browse_btn = QPushButton("Browse...")
+        log_dir_browse_btn.clicked.connect(self._on_browse_log_dir)
+        log_dir_row = QHBoxLayout()
+        log_dir_row.addWidget(self.log_dir_edit)
+        log_dir_row.addWidget(log_dir_browse_btn)
+        logging_layout.addRow("Log directory:", log_dir_row)
+
+        open_log_dir_btn = QPushButton("Open Log Directory")
+        open_log_dir_btn.clicked.connect(self._on_open_log_dir)
+        logging_layout.addRow(open_log_dir_btn)
+
+        layout.addWidget(logging_group)
 
         # UI Style group
         style_group = QGroupBox("UI Style")
@@ -482,11 +520,51 @@ class GeneralTab(QScrollArea):
         if self.app.main_window:
             self.app.main_window.refresh_stream_list()
 
+    def _on_logging_changed(self, _: object = None) -> None:
+        if self._loading:
+            return
+        self.app.settings.logging.enabled = self.logging_enabled_cb.isChecked()
+        self.app.settings.logging.log_level = self.log_level_combo.currentData()
+        self.app.settings.logging.log_directory = self.log_dir_edit.text().strip()
+        self.app.save_settings()
+
+        from ....main import configure_file_logging
+
+        configure_file_logging(
+            enabled=self.app.settings.logging.enabled,
+            log_directory=self.app.settings.logging.log_directory,
+            log_level=self.app.settings.logging.log_level,
+        )
+
+    def _on_browse_log_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Log Directory")
+        if path:
+            self.log_dir_edit.setText(path)
+
+    def _on_open_log_dir(self) -> None:
+        import subprocess
+
+        from ....core.platform import IS_WINDOWS
+        from ....core.settings import get_data_dir
+
+        log_dir = self.log_dir_edit.text().strip()
+        if not log_dir:
+            log_dir = str(get_data_dir() / "logs")
+
+        path = Path(log_dir)
+        path.mkdir(parents=True, exist_ok=True)
+
+        if IS_WINDOWS:
+            subprocess.Popen(["explorer", str(path)])
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+
     def reset_defaults(self) -> None:
         """Reset General tab settings to defaults."""
         from ....core.settings import (
             ChannelIconSettings,
             ChannelInfoSettings,
+            LoggingSettings,
             NotificationSettings,
             Settings,
         )
@@ -539,6 +617,14 @@ class GeneralTab(QScrollArea):
         self.notif_raid_cb.setChecked(notif_defaults.raid_notifications_enabled)
         self.notif_mention_cb.setChecked(notif_defaults.mention_notifications_enabled)
         self.notif_mention_sound_path.setText(notif_defaults.mention_custom_sound_path)
+        # Logging
+        logging_defaults = LoggingSettings()
+        self.logging_enabled_cb.setChecked(logging_defaults.enabled)
+        for i in range(self.log_level_combo.count()):
+            if self.log_level_combo.itemData(i) == logging_defaults.log_level:
+                self.log_level_combo.setCurrentIndex(i)
+                break
+        self.log_dir_edit.setText(logging_defaults.log_directory)
         # Appearance
         self.style_combo.setCurrentIndex(defaults.ui_style)
         self.platform_colors_cb.setChecked(defaults.platform_colors)
