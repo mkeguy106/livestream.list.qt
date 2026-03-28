@@ -1534,10 +1534,19 @@ class MainWindow(QMainWindow):
                     "channel_info",
                     "channel_icons",
                     "performance",
+                    "logging",
                 ]:
                     if hasattr(new_settings, field_name):
                         setattr(self.app.settings, field_name, getattr(new_settings, field_name))
                 self.app.save_settings()
+                # Apply imported logging settings immediately
+                from ..main import configure_file_logging
+
+                configure_file_logging(
+                    enabled=self.app.settings.logging.enabled,
+                    log_directory=self.app.settings.logging.log_directory,
+                    log_level=self.app.settings.logging.log_level,
+                )
                 settings_imported = True
 
             self.app.save_channels()
