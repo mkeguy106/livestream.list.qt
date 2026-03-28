@@ -46,6 +46,7 @@ def configure_file_logging(enabled: bool, log_directory: str, log_level: str) ->
             root.removeHandler(handler)
 
     if not enabled:
+        root.setLevel(logging.INFO)
         return
 
     # Resolve log directory
@@ -71,9 +72,8 @@ def configure_file_logging(enabled: bool, log_directory: str, log_level: str) ->
     handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     root.addHandler(handler)
 
-    # Ensure root logger level allows the file handler's level through
-    if root.level > level:
-        root.setLevel(level)
+    # Set root level to minimum of INFO (console) and file level
+    root.setLevel(min(level, logging.INFO))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

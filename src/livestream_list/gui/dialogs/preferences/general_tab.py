@@ -152,7 +152,7 @@ class GeneralTab(QScrollArea):
         self.log_dir_edit = QLineEdit()
         self.log_dir_edit.setPlaceholderText("Default (application data directory)")
         self.log_dir_edit.setText(self.app.settings.logging.log_directory)
-        self.log_dir_edit.textChanged.connect(self._on_logging_changed)
+        self.log_dir_edit.editingFinished.connect(self._on_logging_changed)
         log_dir_browse_btn = QPushButton("Browse...")
         log_dir_browse_btn.clicked.connect(self._on_browse_log_dir)
         log_dir_row = QHBoxLayout()
@@ -544,7 +544,7 @@ class GeneralTab(QScrollArea):
     def _on_open_log_dir(self) -> None:
         import subprocess
 
-        from ....core.platform import IS_WINDOWS
+        from ....core.platform import IS_WINDOWS, host_command
         from ....core.settings import get_data_dir
 
         log_dir = self.log_dir_edit.text().strip()
@@ -557,7 +557,8 @@ class GeneralTab(QScrollArea):
         if IS_WINDOWS:
             subprocess.Popen(["explorer", str(path)])
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            cmd = host_command(["xdg-open", str(path)])
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def reset_defaults(self) -> None:
         """Reset General tab settings to defaults."""
