@@ -776,7 +776,7 @@ class MainWindow(QMainWindow):
 
         def sort_key(ls: Livestream) -> tuple[Any, ...]:
             live = 0 if ls.live else 1
-            is_playing = 0 if ls.channel.unique_key in playing_keys else 1
+            is_playing = 0 if ls.stream_key in playing_keys else 1
 
             if sort_mode == SortMode.NAME:
                 name = (ls.channel.display_name or ls.channel.channel_id).lower()
@@ -821,7 +821,7 @@ class MainWindow(QMainWindow):
         are created - only visible rows are painted by the delegate.
         """
         streamlink = self.app.streamlink
-        new_keys = [ls.channel.unique_key for ls in livestreams]
+        new_keys = [ls.stream_key for ls in livestreams]
 
         # Update playing keys (get all playing keys in one call rather than checking each)
         if streamlink:
@@ -1125,7 +1125,7 @@ class MainWindow(QMainWindow):
                     self._stream_launched.emit(livestream.channel.display_name)
                 if process and process.stdout and self.app.settings.streamlink.show_console:
                     self._console_requested.emit(
-                        livestream.channel.unique_key,
+                        livestream.stream_key,
                         livestream.channel.display_name,
                         process,
                     )
@@ -1277,10 +1277,10 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         channel = livestream.channel
 
-        is_playing = self._stream_model and channel.unique_key in self._stream_model._playing_keys
+        is_playing = self._stream_model and livestream.stream_key in self._stream_model._playing_keys
         if is_playing:
             stop_action = menu.addAction("\u25a0 Close Channel")
-            stop_action.triggered.connect(lambda: self._on_stop_stream(channel.unique_key))
+            stop_action.triggered.connect(lambda: self._on_stop_stream(livestream.stream_key))
         else:
             play_action = menu.addAction("\u25b6 Play Channel")
             play_action.triggered.connect(lambda: self._on_play_stream(livestream))
@@ -1706,7 +1706,7 @@ class MainWindow(QMainWindow):
                     is_playing = (
                         livestream
                         and self.app.streamlink
-                        and self.app.streamlink.is_playing(livestream.channel.unique_key)
+                        and self.app.streamlink.is_playing(livestream.stream_key)
                     )
                     if livestream and livestream.live and not over_button and not is_playing:
                         ctrl.on_hover_enter(livestream)
