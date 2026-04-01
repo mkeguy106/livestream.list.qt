@@ -775,7 +775,7 @@ class ChatWindow(QMainWindow):
 
     def update_livestreams(self, livestreams: list[Livestream]) -> None:
         """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""
-        ls_map = {ls.channel.unique_key: ls for ls in livestreams}
+        ls_map = {ls.stream_key: ls for ls in livestreams}
         for channel_key, widget in self._widgets.items():
             fresh = ls_map.get(channel_key)
             if fresh:

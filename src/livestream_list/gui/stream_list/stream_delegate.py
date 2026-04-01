@@ -576,7 +576,7 @@ class StreamRowDelegate(QStyledItemDelegate):
                 rect_width = 600
 
         # Check cache
-        cache_key = (livestream.channel.unique_key, rect_width, self._get_settings_hash())
+        cache_key = (livestream.stream_key, rect_width, self._get_settings_hash())
         if cache_key in self._size_cache:
             return self._size_cache[cache_key]
 
