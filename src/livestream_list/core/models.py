@@ -228,6 +228,18 @@ class Livestream:
         return ""
 
     @property
+    def stream_key(self) -> str:
+        """Key that uniquely identifies this stream instance.
+
+        For YouTube with a video_id, includes the video_id to distinguish
+        concurrent streams from the same channel. For all other cases,
+        falls back to channel.unique_key.
+        """
+        if self.channel.platform == StreamPlatform.YOUTUBE and self.video_id:
+            return f"{self.channel.unique_key}:{self.video_id}"
+        return self.channel.unique_key
+
+    @property
     def category_url(self) -> str:
         """Get the URL for this stream's category/game page."""
         if not self.game:
