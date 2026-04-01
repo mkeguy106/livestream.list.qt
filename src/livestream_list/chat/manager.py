@@ -251,7 +251,7 @@ class ChatManager(QObject):
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open a chat connection for a livestream."""
-        channel_key = livestream.channel.unique_key
+        channel_key = livestream.stream_key
         if channel_key in self._connections or channel_key in self._web_chat_keys:
             self.chat_opened.emit(channel_key, livestream)
             return

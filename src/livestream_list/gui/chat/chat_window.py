@@ -784,7 +784,7 @@ class ChatWindow(QMainWindow):
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
-        channel_key = livestream.channel.unique_key
+        channel_key = livestream.stream_key
         self._livestreams[channel_key] = livestream
 
         if channel_key in self._widgets:
