@@ -370,7 +370,7 @@ class StreamlinkLauncher:
             logger.warning("Streamlink is disabled")
             return None
 
-        channel_key = livestream.channel.unique_key
+        channel_key = livestream.stream_key
 
         # Stop existing stream for this channel if any (is_playing/stop_stream use lock)
         if self.is_playing(channel_key):
