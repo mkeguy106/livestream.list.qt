@@ -1277,10 +1277,11 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         channel = livestream.channel
 
-        is_playing = self._stream_model and livestream.stream_key in self._stream_model._playing_keys
+        stream_key = livestream.stream_key
+        is_playing = self._stream_model and stream_key in self._stream_model._playing_keys
         if is_playing:
             stop_action = menu.addAction("\u25a0 Close Channel")
-            stop_action.triggered.connect(lambda: self._on_stop_stream(livestream.stream_key))
+            stop_action.triggered.connect(lambda: self._on_stop_stream(stream_key))
         else:
             play_action = menu.addAction("\u25b6 Play Channel")
             play_action.triggered.connect(lambda: self._on_play_stream(livestream))
