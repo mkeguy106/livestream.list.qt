@@ -506,7 +506,7 @@ class Application(QApplication):
             and livestream.channel.auto_launch
             and self.streamlink
         ):
-            if not self.streamlink.is_playing(livestream.channel.unique_key):
+            if not self.streamlink.is_playing(livestream.stream_key):
                 logger.info("Auto-launching %s", livestream.display_name)
                 self.streamlink.launch(livestream)
                 self.open_stream_requested.emit(livestream)

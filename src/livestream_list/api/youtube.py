@@ -686,58 +686,88 @@ class YouTubeApiClient(BaseApiClient):
         # Neither method worked
         return Livestream(channel=channel, live=False)
 
+    async def _get_all_concurrent_streams(self, channel: Channel) -> list[Livestream]:
+        """Get all concurrent livestreams for a YouTube channel.
+
+        Returns a list of Livestream objects — one per concurrent live stream.
+        For offline channels, returns a single offline Livestream.
+        """
+        # Get primary stream via existing path
+        primary = await self._get_livestream_scrape(channel)
+        if primary is None:
+            # Scrape failed entirely, try yt-dlp fallback
+            if self._ytdlp_path and self.settings.use_ytdlp_fallback:
+                fallback = await self._get_livestream_ytdlp(channel)
+                return [fallback]
+            return [Livestream(channel=channel, live=False)]
+
+        if not primary.live:
+            return [primary]
+
+        # Channel is live — check for additional concurrent streams
+        live_ids = await self._fetch_concurrent_live_video_ids(channel.channel_id)
+        if len(live_ids) <= 1:
+            # Only one stream (or detection failed) — return the primary
+            return [primary]
+
+        # Multiple concurrent streams detected
+        results: list[Livestream] = [primary]
+        additional_ids = [vid for vid in live_ids if vid != primary.video_id]
+
+        for vid in additional_ids:
+            data = await self._fetch_video_player_response(vid)
+            if data:
+                ls = self._extract_livestream_from_data(data, channel)
+                if ls and ls.live:
+                    results.append(ls)
+
+        return results
+
     async def get_livestreams(self, channels: list[Channel]) -> list[Livestream]:
         """Get livestream status for multiple channels.
 
-        Uses fast HTML scraping for initial status check, then fetches full
-        metadata via yt-dlp for live channels (to get accurate start_time).
+        Returns a flat list of Livestream objects. YouTube channels with multiple
+        concurrent streams produce multiple entries in the result list.
         """
         if not channels:
             return []
 
-        # Use semaphore to limit concurrent HTTP requests
-        # HTML scraping is I/O-bound, so higher concurrency is fine
         semaphore = asyncio.Semaphore(self.concurrency)
 
-        async def fetch_with_semaphore(channel: Channel) -> Livestream:
+        async def fetch_with_semaphore(channel: Channel) -> list[Livestream]:
             async with semaphore:
-                return await self.get_livestream(channel)
+                try:
+                    return await self._get_all_concurrent_streams(channel)
+                except Exception as e:
+                    logger.error(f"Error fetching {channel.display_name}: {e}")
+                    return [Livestream(channel=channel, live=False, error_message=str(e))]
 
         tasks = [fetch_with_semaphore(channel) for channel in channels]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(*tasks)
 
-        # Convert exceptions to offline Livestream objects
+        # Flatten: each channel may have produced multiple Livestreams
         final_results: list[Livestream] = []
-        for i, result in enumerate(results):
-            if isinstance(result, BaseException):
-                final_results.append(
-                    Livestream(
-                        channel=channels[i],
-                        live=False,
-                        error_message=str(result),
-                    )
-                )
-            else:
-                final_results.append(result)
+        for channel_streams in results:
+            final_results.extend(channel_streams)
 
         # Second pass: fetch full metadata for live channels via yt-dlp
-        # This gets accurate start_time which HTML scraping may miss
         if self._ytdlp_path:
             live_indices = [i for i, ls in enumerate(final_results) if ls.live]
             if live_indices:
-                logger.debug(f"Fetching full metadata for {len(live_indices)} live YT channels")
-                ytdlp_semaphore = asyncio.Semaphore(4)  # Lower concurrency for subprocesses
+                logger.debug(
+                    f"Fetching full metadata for {len(live_indices)} live YT streams"
+                )
+                ytdlp_semaphore = asyncio.Semaphore(4)
 
                 async def fetch_ytdlp(idx: int) -> tuple[int, Livestream]:
                     async with ytdlp_semaphore:
                         ls = final_results[idx]
-                        # Pass existing video_id so yt-dlp fetches the same video
-                        # (not the /live page which may pick a different stream)
-                        full_ls = await self._get_livestream_ytdlp(ls.channel, video_id=ls.video_id)
-                        # Only use yt-dlp result if it's live and has start_time
+                        full_ls = await self._get_livestream_ytdlp(
+                            ls.channel, video_id=ls.video_id
+                        )
                         if full_ls.live and full_ls.start_time:
                             return (idx, full_ls)
-                        return (idx, ls)  # Keep original if yt-dlp failed
+                        return (idx, ls)
 
                 ytdlp_tasks = [fetch_ytdlp(idx) for idx in live_indices]
                 ytdlp_results = await asyncio.gather(*ytdlp_tasks, return_exceptions=True)

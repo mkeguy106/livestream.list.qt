@@ -303,7 +303,7 @@ class VideoPreviewController(QWidget):
         if not livestream.live:
             return
 
-        key = livestream.channel.unique_key
+        key = livestream.stream_key
         if self._launcher.is_playing(key):
             return
 
@@ -366,7 +366,7 @@ class VideoPreviewController(QWidget):
         if not livestream:
             return
 
-        key = livestream.channel.unique_key
+        key = livestream.stream_key
         self._current_key = key
 
         popup = self._ensure_popup()

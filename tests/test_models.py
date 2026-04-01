@@ -250,6 +250,49 @@ def test_chat_url_kick():
     assert ls.chat_url == "https://kick.com/popout/kickuser/chat"
 
 
+# --- Livestream.stream_key ---
+
+
+def test_stream_key_twitch_equals_unique_key():
+    """Non-YouTube platforms: stream_key == channel.unique_key."""
+    ch = Channel(channel_id="streamer", platform=StreamPlatform.TWITCH)
+    ls = Livestream(channel=ch)
+    assert ls.stream_key == "twitch:streamer"
+    assert ls.stream_key == ch.unique_key
+
+
+def test_stream_key_kick_equals_unique_key():
+    ch = Channel(channel_id="kickuser", platform=StreamPlatform.KICK)
+    ls = Livestream(channel=ch)
+    assert ls.stream_key == "kick:kickuser"
+    assert ls.stream_key == ch.unique_key
+
+
+def test_stream_key_youtube_no_video_id():
+    """YouTube without video_id: stream_key == channel.unique_key."""
+    ch = Channel(channel_id="UC1234", platform=StreamPlatform.YOUTUBE)
+    ls = Livestream(channel=ch)
+    assert ls.stream_key == "youtube:UC1234"
+    assert ls.stream_key == ch.unique_key
+
+
+def test_stream_key_youtube_with_video_id():
+    """YouTube with video_id: stream_key includes video_id."""
+    ch = Channel(channel_id="UC1234", platform=StreamPlatform.YOUTUBE)
+    ls = Livestream(channel=ch, video_id="dQw4w9WgXcQ")
+    assert ls.stream_key == "youtube:UC1234:dQw4w9WgXcQ"
+    assert ls.stream_key != ch.unique_key
+
+
+def test_stream_key_youtube_two_streams_differ():
+    """Two YouTube streams from same channel have different stream_keys."""
+    ch = Channel(channel_id="UC1234", platform=StreamPlatform.YOUTUBE)
+    ls1 = Livestream(channel=ch, video_id="video1")
+    ls2 = Livestream(channel=ch, video_id="video2")
+    assert ls1.stream_key != ls2.stream_key
+    assert ls1.channel.unique_key == ls2.channel.unique_key
+
+
 # --- Livestream.set_offline ---
 
 

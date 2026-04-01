@@ -52,9 +52,9 @@ class StreamListModel(QAbstractListModel):
         elif role == StreamRole:
             return livestream
         elif role == PlayingRole:
-            return livestream.channel.unique_key in self._playing_keys
+            return livestream.stream_key in self._playing_keys
         elif role == SelectionRole:
-            return livestream.channel.unique_key in self._selected_keys
+            return livestream.stream_key in self._selected_keys
 
         return None
 
@@ -67,7 +67,7 @@ class StreamListModel(QAbstractListModel):
         self.beginResetModel()
         self._streams = list(streams)
         # Clean up selected keys that no longer exist
-        current_keys = {s.channel.unique_key for s in streams}
+        current_keys = {s.stream_key for s in streams}
         self._selected_keys &= current_keys
         self.endResetModel()
 
@@ -82,7 +82,7 @@ class StreamListModel(QAbstractListModel):
 
         # Check if keys match in order
         for i, stream in enumerate(streams):
-            if stream.channel.unique_key != self._streams[i].channel.unique_key:
+            if stream.stream_key != self._streams[i].stream_key:
                 return False
 
         # Same order - update in place
@@ -111,7 +111,7 @@ class StreamListModel(QAbstractListModel):
 
         # Emit dataChanged only for affected rows
         for i, stream in enumerate(self._streams):
-            if stream.channel.unique_key in changed_keys:
+            if stream.stream_key in changed_keys:
                 idx = self.index(i)
                 self.dataChanged.emit(idx, idx, [PlayingRole])
 
@@ -140,7 +140,7 @@ class StreamListModel(QAbstractListModel):
         if row >= len(self._streams):
             return
 
-        key = self._streams[row].channel.unique_key
+        key = self._streams[row].stream_key
         if key in self._selected_keys:
             self._selected_keys.discard(key)
         else:
@@ -157,7 +157,7 @@ class StreamListModel(QAbstractListModel):
         if row >= len(self._streams):
             return
 
-        key = self._streams[row].channel.unique_key
+        key = self._streams[row].stream_key
         was_selected = key in self._selected_keys
 
         if selected and not was_selected:
@@ -172,7 +172,7 @@ class StreamListModel(QAbstractListModel):
         if not self._selection_mode:
             return
 
-        self._selected_keys = {s.channel.unique_key for s in self._streams}
+        self._selected_keys = {s.stream_key for s in self._streams}
         if self._streams:
             self.dataChanged.emit(
                 self.index(0),
@@ -191,7 +191,7 @@ class StreamListModel(QAbstractListModel):
         hi = min(hi, len(self._streams) - 1)
 
         for i in range(lo, hi + 1):
-            self._selected_keys.add(self._streams[i].channel.unique_key)
+            self._selected_keys.add(self._streams[i].stream_key)
 
         if self._streams:
             self.dataChanged.emit(

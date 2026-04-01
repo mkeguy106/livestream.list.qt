@@ -161,7 +161,6 @@ class StreamMonitor:
 
     async def refresh(self) -> None:
         """Refresh all livestream statuses."""
-        # Take a snapshot of channels under lock to avoid iteration issues
         with self._state_lock:
             if not self._channels:
                 return
@@ -191,11 +190,18 @@ class StreamMonitor:
             all_livestreams.extend(result)
 
         # Update internal state and fire events
-        events_to_fire: list[tuple[str, Livestream]] = []  # (event_type, livestream)
+        events_to_fire: list[tuple[str, Livestream]] = []
 
         with self._state_lock:
+            # Track which stream_keys we received per channel (for cleanup)
+            new_keys_by_channel: dict[str, set[str]] = {}
             for livestream in all_livestreams:
-                key = livestream.channel.unique_key
+                channel_key = livestream.channel.unique_key
+                new_keys_by_channel.setdefault(channel_key, set()).add(livestream.stream_key)
+
+            # Process incoming livestreams
+            for livestream in all_livestreams:
+                key = livestream.stream_key
                 existing = self._livestreams.get(key)
 
                 if existing:
@@ -209,7 +215,26 @@ class StreamMonitor:
                     if livestream.live:
                         events_to_fire.append(("online", livestream))
 
-        # Fire events outside the lock to avoid deadlocks
+            # Cleanup: remove stale YouTube stream_keys that are no longer live
+            # (e.g., one of two concurrent streams ended)
+            stale_keys: list[str] = []
+            for key, ls in list(self._livestreams.items()):
+                if ls.channel.platform != StreamPlatform.YOUTUBE:
+                    continue
+                channel_key = ls.channel.unique_key
+                if channel_key not in new_keys_by_channel:
+                    continue  # Channel wasn't refreshed this cycle
+                new_keys = new_keys_by_channel[channel_key]
+                if key not in new_keys and key != channel_key:
+                    # This stream_key (with video_id) is no longer in results
+                    stale_keys.append(key)
+
+            for key in stale_keys:
+                stale_ls = self._livestreams.pop(key)
+                if stale_ls.live:
+                    events_to_fire.append(("offline", stale_ls))
+
+        # Fire events outside the lock
         for event_type, livestream in events_to_fire:
             if event_type == "online":
                 self._fire_stream_online(livestream)
@@ -293,7 +318,7 @@ class StreamMonitor:
         livestream = await client.get_livestream(channel)
 
         with self._state_lock:
-            self._livestreams[channel.unique_key] = livestream
+            self._livestreams[livestream.stream_key] = livestream
 
         # Save to disk
         await self._save_channels()
@@ -306,7 +331,12 @@ class StreamMonitor:
 
         with self._state_lock:
             self._channels.pop(key, None)
-            self._livestreams.pop(key, None)
+            # Remove all stream_keys for this channel (base key + any with video_id suffix)
+            keys_to_remove = [
+                k for k in self._livestreams if k == key or k.startswith(key + ":")
+            ]
+            for k in keys_to_remove:
+                self._livestreams.pop(k, None)
 
         await self._save_channels()
 
@@ -352,7 +382,11 @@ class StreamMonitor:
         with self._state_lock:
             for key in keys:
                 self._channels.pop(key, None)
-                self._livestreams.pop(key, None)
+                keys_to_remove = [
+                    k for k in self._livestreams if k == key or k.startswith(key + ":")
+                ]
+                for k in keys_to_remove:
+                    self._livestreams.pop(k, None)
 
     def has_channel(self, key: str) -> bool:
         """Check if a channel exists by its unique key."""
@@ -453,9 +487,15 @@ class StreamMonitor:
                     "auto_launch": ch.auto_launch,
                     "added_at": ch.added_at.isoformat(),
                 }
-                livestream = self._livestreams.get(ch.unique_key)
-                if livestream and livestream.last_live_time:
-                    ch_data["last_live_time"] = livestream.last_live_time.isoformat()
+                # Pick the most recent last_live_time across all stream_keys for this channel
+                best_last_live: datetime | None = None
+                for key, ls in self._livestreams.items():
+                    if key == ch.unique_key or key.startswith(ch.unique_key + ":"):
+                        if ls.last_live_time:
+                            if best_last_live is None or ls.last_live_time > best_last_live:
+                                best_last_live = ls.last_live_time
+                if best_last_live:
+                    ch_data["last_live_time"] = best_last_live.isoformat()
                 data.append(ch_data)
         return data
 
@@ -578,7 +618,12 @@ class StreamMonitor:
         with self._state_lock:
             for key in keys:
                 ch = self._channels.pop(key, None)
-                self._livestreams.pop(key, None)
+                # Remove all stream_keys for this channel
+                keys_to_remove = [
+                    k for k in self._livestreams if k == key or k.startswith(key + ":")
+                ]
+                for k in keys_to_remove:
+                    self._livestreams.pop(k, None)
                 if ch:
                     self._trash.append(
                         {

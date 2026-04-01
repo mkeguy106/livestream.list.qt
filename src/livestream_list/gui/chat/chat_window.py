@@ -775,7 +775,7 @@ class ChatWindow(QMainWindow):
 
     def update_livestreams(self, livestreams: list[Livestream]) -> None:
         """Update stored livestream data from a fresh refresh (viewer count, title, etc.)."""
-        ls_map = {ls.channel.unique_key: ls for ls in livestreams}
+        ls_map = {ls.stream_key: ls for ls in livestreams}
         for channel_key, widget in self._widgets.items():
             fresh = ls_map.get(channel_key)
             if fresh:
@@ -784,7 +784,7 @@ class ChatWindow(QMainWindow):
 
     def open_chat(self, livestream: Livestream) -> None:
         """Open or focus a chat tab for a livestream."""
-        channel_key = livestream.channel.unique_key
+        channel_key = livestream.stream_key
         self._livestreams[channel_key] = livestream
 
         if channel_key in self._widgets:
