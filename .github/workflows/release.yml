@@ -73,6 +73,14 @@ jobs:
             sed -i "s|<releases>|<releases>\n    <release version=\"${SAFE_VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
           fi
 
+      - name: Pre-generate version file
+        run: |
+          # hatch-vcs needs .git to derive version from tags, but flatpak-builder
+          # copies the source into a sandbox without .git, causing a fallback dev
+          # version. Write _version.py now while .git is still present.
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          printf '__version__ = version = "%s"\n__version_tuple__ = tuple("%s".split("."))\n' "$VERSION" "$VERSION" > src/livestream_list/_version.py
+
       - name: Build Flatpak
         run: |
           dbus-uuidgen > /etc/machine-id
