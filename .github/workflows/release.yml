@@ -73,13 +73,14 @@ jobs:
             sed -i "s|<releases>|<releases>\n    <release version=\"${SAFE_VERSION}\" date=\"${DATE}\"/>|" "$METAINFO"
           fi
 
-      - name: Pre-generate version file
+      - name: Inject version into Flatpak build
         run: |
           # hatch-vcs needs .git to derive version from tags, but flatpak-builder
           # copies the source into a sandbox without .git, causing a fallback dev
-          # version. Write _version.py now while .git is still present.
+          # version. Inject SETUPTOOLS_SCM_PRETEND_VERSION into the pip install
+          # command so hatch-vcs uses the tag version directly.
           VERSION="${GITHUB_REF#refs/tags/v}"
-          printf '__version__ = version = "%s"\n__version_tuple__ = tuple("%s".split("."))\n' "$VERSION" "$VERSION" > src/livestream_list/_version.py
+          sed -i "s|pip3 install --prefix=\${FLATPAK_DEST} --no-cache-dir \.|SETUPTOOLS_SCM_PRETEND_VERSION=$VERSION pip3 install --prefix=\${FLATPAK_DEST} --no-cache-dir .|" app.livestreamlist.LivestreamListQt.yml
 
       - name: Build Flatpak
         run: |
