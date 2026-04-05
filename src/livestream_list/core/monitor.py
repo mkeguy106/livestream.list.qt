@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 # Debounce delay for saving channels (in seconds)
 SAVE_DEBOUNCE_DELAY = 2.0
 
+# Number of consecutive refreshes a YouTube concurrent-stream video_id must be
+# missing before we declare it offline. Protects against transient YouTube
+# scrape failures (HTTP timeouts, parse errors) causing a real live stream to
+# be removed and then re-notified when the next refresh succeeds.
+YOUTUBE_MISS_THRESHOLD = 2
+
 
 class StreamMonitor:
     """
@@ -46,6 +52,12 @@ class StreamMonitor:
 
         # Track initial load to suppress startup notifications
         self._initial_load_complete = False
+
+        # Consecutive-miss counters for YouTube concurrent-stream keys
+        # (keyed by stream_key with :video_id suffix). A stream_key is only
+        # removed after YOUTUBE_MISS_THRESHOLD consecutive misses, which
+        # absorbs transient YouTube scrape failures.
+        self._youtube_miss_counts: dict[str, int] = {}
 
         # Debounced save mechanism
         self._save_timer: threading.Timer | None = None
@@ -216,7 +228,10 @@ class StreamMonitor:
                         events_to_fire.append(("online", livestream))
 
             # Cleanup: remove stale YouTube stream_keys that are no longer live
-            # (e.g., one of two concurrent streams ended)
+            # (e.g., one of two concurrent streams ended). A stream_key is
+            # only considered stale after YOUTUBE_MISS_THRESHOLD consecutive
+            # misses to tolerate transient scrape failures that would
+            # otherwise trigger duplicate online notifications.
             stale_keys: list[str] = []
             for key, ls in list(self._livestreams.items()):
                 if ls.channel.platform != StreamPlatform.YOUTUBE:
@@ -225,12 +240,28 @@ class StreamMonitor:
                 if channel_key not in new_keys_by_channel:
                     continue  # Channel wasn't refreshed this cycle
                 new_keys = new_keys_by_channel[channel_key]
-                if key not in new_keys and key != channel_key:
-                    # This stream_key (with video_id) is no longer in results
+                if key == channel_key:
+                    continue  # Never reap the bare channel key here
+                if key in new_keys:
+                    # Present this cycle — reset miss counter
+                    self._youtube_miss_counts.pop(key, None)
+                    continue
+                # Missing this cycle — increment miss counter
+                misses = self._youtube_miss_counts.get(key, 0) + 1
+                if misses >= YOUTUBE_MISS_THRESHOLD:
                     stale_keys.append(key)
+                else:
+                    self._youtube_miss_counts[key] = misses
+                    logger.debug(
+                        "YouTube stream %s missing (%d/%d), keeping in state",
+                        key,
+                        misses,
+                        YOUTUBE_MISS_THRESHOLD,
+                    )
 
             for key in stale_keys:
                 stale_ls = self._livestreams.pop(key)
+                self._youtube_miss_counts.pop(key, None)
                 if stale_ls.live:
                     events_to_fire.append(("offline", stale_ls))
 
@@ -337,6 +368,7 @@ class StreamMonitor:
             ]
             for k in keys_to_remove:
                 self._livestreams.pop(k, None)
+                self._youtube_miss_counts.pop(k, None)
 
         await self._save_channels()
 
