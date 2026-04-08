@@ -754,17 +754,13 @@ class YouTubeApiClient(BaseApiClient):
         if self._ytdlp_path:
             live_indices = [i for i, ls in enumerate(final_results) if ls.live]
             if live_indices:
-                logger.debug(
-                    f"Fetching full metadata for {len(live_indices)} live YT streams"
-                )
+                logger.debug(f"Fetching full metadata for {len(live_indices)} live YT streams")
                 ytdlp_semaphore = asyncio.Semaphore(4)
 
                 async def fetch_ytdlp(idx: int) -> tuple[int, Livestream]:
                     async with ytdlp_semaphore:
                         ls = final_results[idx]
-                        full_ls = await self._get_livestream_ytdlp(
-                            ls.channel, video_id=ls.video_id
-                        )
+                        full_ls = await self._get_livestream_ytdlp(ls.channel, video_id=ls.video_id)
                         if full_ls.live and full_ls.start_time:
                             return (idx, full_ls)
                         return (idx, ls)
