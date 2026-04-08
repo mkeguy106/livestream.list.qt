@@ -363,9 +363,7 @@ class StreamMonitor:
         with self._state_lock:
             self._channels.pop(key, None)
             # Remove all stream_keys for this channel (base key + any with video_id suffix)
-            keys_to_remove = [
-                k for k in self._livestreams if k == key or k.startswith(key + ":")
-            ]
+            keys_to_remove = [k for k in self._livestreams if k == key or k.startswith(key + ":")]
             for k in keys_to_remove:
                 self._livestreams.pop(k, None)
                 self._youtube_miss_counts.pop(k, None)
