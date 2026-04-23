@@ -251,6 +251,27 @@ class Livestream:
             return f"https://kick.com/category/{self.game_slug}"
         return ""
 
+    @property
+    def channel_url(self) -> str:
+        """Get the URL for this channel's page."""
+        cid = self.channel.channel_id.lower()
+        platform = self.channel.platform
+        if platform == StreamPlatform.TWITCH:
+            return f"https://twitch.tv/{cid}"
+        if platform == StreamPlatform.KICK:
+            return f"https://kick.com/{cid}"
+        if platform == StreamPlatform.YOUTUBE:
+            if self.video_id:
+                return f"https://www.youtube.com/watch?v={self.video_id}"
+            if cid.startswith("@"):
+                return f"https://youtube.com/{cid}/live"
+            if cid.startswith("uc"):
+                return f"https://youtube.com/channel/{self.channel.channel_id}/live"
+            return f"https://youtube.com/@{cid}/live"
+        if platform == StreamPlatform.CHATURBATE:
+            return f"https://chaturbate.com/{cid}"
+        return f"https://twitch.tv/{cid}"
+
     def set_offline(self) -> None:
         """Mark the stream as offline."""
         self.live = False

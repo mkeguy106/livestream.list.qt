@@ -245,6 +245,7 @@ class YouTubeWebChatWidget(QWidget):
         # Apply banner styling and initial title
         self._update_banner_style()
         self._update_stream_title()
+        self._update_socials_banner()
         if not self.settings.show_stream_title:
             self._title_banner.hide()
         if self.livestream and self.livestream.live:
@@ -372,8 +373,7 @@ class YouTubeWebChatWidget(QWidget):
 
         if self.settings.show_socials_banner:
             self._socials_dismissed = False
-            if self._socials:
-                self.set_socials(self._socials)
+            self._update_socials_banner()
         else:
             self._socials_banner.hide()
 
@@ -389,8 +389,11 @@ class YouTubeWebChatWidget(QWidget):
     def set_socials(self, socials: dict[str, str]) -> None:
         """Set channel socials and update the banner."""
         self._socials = socials
+        self._update_socials_banner()
 
-        if not socials or not self.settings.show_socials_banner or self._socials_dismissed:
+    def _update_socials_banner(self) -> None:
+        """Update the socials banner with social links and channel globe link."""
+        if not self.settings.show_socials_banner or self._socials_dismissed:
             self._socials_banner.hide()
             return
 
@@ -407,10 +410,15 @@ class YouTubeWebChatWidget(QWidget):
         }
 
         links = []
-        for platform, url in socials.items():
+        for platform, url in self._socials.items():
             icon = social_icons.get(platform.lower(), "\U0001f517")
             label = platform.capitalize()
             links.append(f'{icon} <a href="{url}">{label}</a>')
+
+        # Globe icon linking to channel page (always present)
+        channel_url = self.livestream.channel_url if self.livestream else ""
+        if channel_url:
+            links.append(f'\U0001f310 <a href="{channel_url}">Channel</a>')
 
         if links:
             self._socials_banner.setText("  ".join(links))
