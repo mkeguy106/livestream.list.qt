@@ -680,6 +680,7 @@ class Settings:
                 record_directory=s.get("record_directory", ""),
                 preview_on_hover=s.get("preview_on_hover", True),
                 preview_audio=s.get("preview_audio", False),
+                auto_play_enabled=s.get("auto_play_enabled", True),
             )
 
         # Notifications

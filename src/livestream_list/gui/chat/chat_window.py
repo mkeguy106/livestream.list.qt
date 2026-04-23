@@ -208,6 +208,7 @@ class _TabButton(QWidget):
         else:
             self._close_btn = None  # type: ignore[assignment]
 
+        self._drag_start_pos: QPoint | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._update_style()
@@ -319,8 +320,24 @@ class _TabButton(QWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.position().toPoint()
             self.clicked.emit()
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._drag_start_pos is not None:
+            delta = event.position().toPoint() - self._drag_start_pos
+            if delta.manhattanLength() >= 10:
+                # Notify parent tab bar to start drag
+                parent = self.parent()
+                if isinstance(parent, _FlowTabBar):
+                    parent._start_tab_drag(self)
+                self._drag_start_pos = None
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        self._drag_start_pos = None
+        super().mouseReleaseEvent(event)
 
 
 class _FlowTabBar(QWidget):
@@ -328,6 +345,7 @@ class _FlowTabBar(QWidget):
 
     tab_clicked = Signal(int)
     tab_close_requested = Signal(int)
+    tab_moved = Signal(int, int)  # from_index, to_index
     context_menu_requested = Signal(int, object)  # index, QPoint(global)
 
     def __init__(self, parent: QWidget | None = None):
@@ -336,10 +354,13 @@ class _FlowTabBar(QWidget):
         theme = get_theme()
         self._active_color = theme.chat_tab_active
         self._inactive_color = theme.chat_tab_inactive
+        self._drag_tab: _TabButton | None = None
+        self._drag_index: int = -1
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(30)
+        self.setMouseTracking(True)
         self.setStyleSheet(f"background-color: {theme.window_bg};")
 
     def add_tab(self, icon: QIcon | None, text: str) -> int:
@@ -433,6 +454,44 @@ class _FlowTabBar(QWidget):
         total_height = y + row_height + 4
         self.setFixedHeight(max(30, total_height))
 
+    def _start_tab_drag(self, tab: _TabButton) -> None:
+        """Begin dragging a tab button."""
+        if tab not in self._tabs:
+            return
+        self._drag_tab = tab
+        self._drag_index = self._tabs.index(tab)
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.grabMouse()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._drag_tab is not None:
+            target = self.tab_at(event.position().toPoint())
+            if target >= 0 and target != self._drag_index:
+                self._move_tab(self._drag_index, target)
+                self._drag_index = target
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if self._drag_tab is not None:
+            self._drag_tab = None
+            self._drag_index = -1
+            self.releaseMouse()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().mouseReleaseEvent(event)
+
+    def _move_tab(self, from_idx: int, to_idx: int) -> None:
+        """Move a tab button from one index to another."""
+        tab = self._tabs.pop(from_idx)
+        self._tabs.insert(to_idx, tab)
+        # Reconnect signals with corrected indices
+        for i, t in enumerate(self._tabs):
+            t.clicked.disconnect()
+            t.close_clicked.disconnect()
+            t.clicked.connect(lambda idx=i: self.tab_clicked.emit(idx))
+            t.close_clicked.connect(lambda idx=i: self.tab_close_requested.emit(idx))
+        self._relayout()
+        self.tab_moved.emit(from_idx, to_idx)
+
     def _on_context_menu(self, pos: QPoint) -> None:
         index = self.tab_at(pos)
         if index >= 0:
@@ -456,6 +515,7 @@ class FlowTabWidget(QWidget):
         self._tab_bar = _FlowTabBar(self)
         self._tab_bar.tab_clicked.connect(self.setCurrentIndex)
         self._tab_bar.tab_close_requested.connect(self.tabCloseRequested.emit)
+        self._tab_bar.tab_moved.connect(self._on_tab_moved)
         layout.addWidget(self._tab_bar)
 
         self._stack = QStackedWidget(self)
@@ -517,6 +577,23 @@ class FlowTabWidget(QWidget):
             self._stack.setCurrentIndex(index)
             self._tab_bar.set_current(index)
             self.currentChanged.emit(index)
+
+    def _on_tab_moved(self, from_idx: int, to_idx: int) -> None:
+        """Reorder stacked widgets to match tab bar order."""
+        widget = self._stack.widget(from_idx)
+        if widget is None:
+            return
+        self._stack.removeWidget(widget)
+        self._stack.insertWidget(to_idx, widget)
+        # Update current index to follow the active tab
+        if self._current_index == from_idx:
+            self._current_index = to_idx
+        elif from_idx < self._current_index <= to_idx:
+            self._current_index -= 1
+        elif to_idx <= self._current_index < from_idx:
+            self._current_index += 1
+        self._stack.setCurrentIndex(self._current_index)
+        self._tab_bar.set_current(self._current_index)
 
     def setTabColors(self, active_color: str, inactive_color: str) -> None:  # noqa: N802
         """Update tab button colors."""
