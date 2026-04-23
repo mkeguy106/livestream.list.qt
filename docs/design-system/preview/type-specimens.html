@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Type — Specimens</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .card { border:1px solid var(--ll-border); border-radius:var(--ll-radius-md); background:var(--ll-widget-bg); padding:12px 14px; margin-bottom:10px;}
+  .row { display:grid; grid-template-columns: 180px 1fr; gap:14px; align-items:center; padding:6px 0;}
+  .lbl { font-family:var(--ll-font-mono); font-size:11px; color:var(--ll-fg-3);}
+  .name { font-weight:700; color:#9146FF; font-size:14px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#4CAF50; display:inline-block; vertical-align:middle; margin-right:6px;}
+  .viewers { font-weight:600; font-size:14px; font-variant-numeric:tabular-nums;}
+  .muted { color:var(--ll-fg-3); font-size:11px; font-family:var(--ll-font-mono);}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="row"><div class="lbl">Row primary (14/700)</div>
+      <div><span class="dot"></span><span class="name">shroud</span> <span style="color:var(--ll-fg-2); font-size:12px">3 hours 22 minutes</span></div></div>
+    <div class="row"><div class="lbl">Row secondary (12/400)</div>
+      <div style="color:var(--ll-fg-2); font-size:12px">Counter-Strike 2 — CS2 Ranked Grind — Road to Global</div></div>
+    <div class="row"><div class="lbl">Viewer count (14/600 tnum)</div>
+      <div class="viewers">42.8K</div></div>
+    <div class="row"><div class="lbl">Timestamp (mono 11)</div>
+      <div class="muted">12:27</div></div>
+  </div>
+</body></html>

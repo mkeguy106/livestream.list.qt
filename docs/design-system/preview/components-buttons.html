@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Components — Buttons</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .section { margin-bottom:14px;}
+  .lbl { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ll-fg-3); margin-bottom:6px;}
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center;}
+  .btn {
+    font: 400 13px/1 var(--ll-font-sans);
+    background: var(--ll-input-bg); color: var(--ll-text-primary);
+    border: 1px solid var(--ll-border); border-radius: var(--ll-radius-md);
+    padding: 6px 14px; cursor:pointer;
+  }
+  .btn.hover { background: var(--ll-accent-hover); color:#fff; border-color:var(--ll-accent-hover);}
+  .btn.press { background: var(--ll-accent); color:#fff; border-color:var(--ll-accent);}
+  .btn.disabled { background: var(--ll-border); color: var(--ll-text-muted); border-color:var(--ll-border);}
+  .btn.primary { background: var(--ll-accent); color:#fff; border-color:var(--ll-accent);}
+  .icon-btn {
+    width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+    background: var(--ll-input-bg); color: var(--ll-text-primary);
+    border: 1px solid var(--ll-border); border-radius: var(--ll-radius-md);
+    font: 700 12px/1 var(--ll-font-sans);
+  }
+</style>
+</head>
+<body>
+  <div class="section">
+    <div class="lbl">Push button — default / hover / press / disabled</div>
+    <div class="row">
+      <button class="btn">Save</button>
+      <button class="btn hover">Save</button>
+      <button class="btn press">Save</button>
+      <button class="btn disabled">Save</button>
+      <button class="btn primary">Add Channel</button>
+    </div>
+  </div>
+  <div class="section">
+    <div class="lbl">Icon / toolbar button · 28×28</div>
+    <div class="row">
+      <span class="icon-btn">+</span>
+      <span class="icon-btn">⟳</span>
+      <span class="icon-btn">A</span>
+      <span class="icon-btn">B</span>
+      <span class="icon-btn">C</span>
+      <span class="icon-btn">★</span>
+      <span class="icon-btn">▶</span>
+      <span class="icon-btn" style="background:var(--ll-accent); color:#fff; border-color:var(--ll-accent)">A</span>
+    </div>
+  </div>
+</body></html>

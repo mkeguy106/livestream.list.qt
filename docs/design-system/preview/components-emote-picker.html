@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Emote Picker</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .pop { width:420px; background:var(--ll-popup-bg); border:1px solid var(--ll-border); border-radius:4px; box-shadow:0 4px 16px rgba(0,0,0,.45); overflow:hidden;}
+  .tb { display:flex; gap:6px; padding:8px; border-bottom:1px solid var(--ll-border-light); background:var(--ll-widget-bg);}
+  .srch { flex:1; background:var(--ll-input-bg); border:1px solid var(--ll-border); border-radius:4px; padding:4px 8px; color:var(--ll-fg); font:12px var(--ll-font-sans); outline:none;}
+  .filt { background:var(--ll-input-bg); border:1px solid var(--ll-border); border-radius:4px; padding:4px 8px; color:var(--ll-fg); font:12px var(--ll-font-sans);}
+  .sec { padding:6px 10px 2px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--ll-fg-3);}
+  .grid { display:grid; grid-template-columns:repeat(8,1fr); gap:2px; padding:4px 8px 8px;}
+  .emo { aspect-ratio:1; display:flex; align-items:center; justify-content:center; font:700 10px var(--ll-font-mono); background:var(--ll-input-bg); border-radius:3px; cursor:pointer; color:var(--ll-fg); font-size:10px; line-height:1;}
+  .emo:hover { background:var(--ll-popup-hover);}
+  .emo.sel { background:var(--ll-accent); color:#fff;}
+  .emo.sub { opacity:.35;}
+</style>
+</head>
+<body>
+  <div class="pop">
+    <div class="tb">
+      <input class="srch" placeholder="Search emotes…"/>
+      <select class="filt"><option>All</option><option>Animated</option><option>Static</option></select>
+    </div>
+    <div class="sec">Channel · shroud</div>
+    <div class="grid">
+      <div class="emo sel">shrdBl</div><div class="emo">shrdW</div><div class="emo">shrdGg</div><div class="emo">shrdKek</div>
+      <div class="emo">shrdLol</div><div class="emo sub">shrdPog</div><div class="emo sub">shrdFire</div><div class="emo">shrdHyp</div>
+    </div>
+    <div class="sec">Twitch Global</div>
+    <div class="grid">
+      <div class="emo">Kappa</div><div class="emo">PogChamp</div><div class="emo">LUL</div><div class="emo">Kreygasm</div>
+      <div class="emo">4Head</div><div class="emo">BibleThump</div><div class="emo">ResidentSleeper</div><div class="emo">DansGame</div>
+    </div>
+    <div class="sec">7TV</div>
+    <div class="grid">
+      <div class="emo">Stare</div><div class="emo">Clap</div><div class="emo">peepoLeave</div><div class="emo">PepeLaugh</div>
+      <div class="emo">Sadge</div><div class="emo">Prayge</div><div class="emo">COPIUM</div><div class="emo">HUH</div>
+    </div>
+  </div>
+</body></html>

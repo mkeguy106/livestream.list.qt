@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Components — Inputs</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px;}
+  .field { display:flex; flex-direction:column; gap:4px;}
+  .lbl { font-size:11px; color:var(--ll-fg-2);}
+  .input, .select, .spin {
+    background:var(--ll-input-bg); color:var(--ll-text-primary);
+    border:1px solid var(--ll-border); border-radius:var(--ll-radius-md);
+    padding:5px 8px; font:13px var(--ll-font-sans);
+  }
+  .input.focus, .select.focus { border-color: var(--ll-accent); outline:none;}
+  .input::placeholder { color:var(--ll-text-muted);}
+  .check { display:flex; align-items:center; gap:8px; font-size:13px;}
+  .check .box { width:14px; height:14px; border:1px solid var(--ll-border); border-radius:2px; display:inline-block; background:var(--ll-input-bg);}
+  .check .box.on { background:var(--ll-accent); border-color:var(--ll-accent); position:relative;}
+  .check .box.on::after { content:'✓'; color:#fff; font-size:10px; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="field"><label class="lbl">Default</label><input class="input" value="https://twitch.tv/shroud"/></div>
+  <div class="field"><label class="lbl">Focus</label><input class="input focus" value="https://twitch.tv/shroud"/></div>
+  <div class="field"><label class="lbl">Placeholder</label><input class="input" placeholder="Filter by name…"/></div>
+  <div class="field"><label class="lbl">Select</label><select class="select"><option>All</option><option>Twitch</option></select></div>
+  <div class="field"><label class="lbl">Spin box</label><input class="spin" type="number" value="60"/></div>
+  <div class="field"><label class="lbl">Checkbox</label>
+    <div style="display:flex; gap:16px; padding:6px 0">
+      <span class="check"><span class="box on"></span>Enable file logging</span>
+      <span class="check"><span class="box"></span>Launch on login</span>
+    </div>
+  </div>
+</div>
+</body></html>

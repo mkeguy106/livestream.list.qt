@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Colors — Platform</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); font-family:var(--ll-font-sans); }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .card { border:1px solid var(--ll-border); border-radius:var(--ll-radius-md); padding:14px; background:var(--ll-widget-bg); }
+  .badge { display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; font-weight:700; font-size:14px; border-radius:var(--ll-radius-sm);}
+  .name { font-weight:700; font-size:16px; margin-top:10px; }
+  .hex { font-family:var(--ll-font-mono); font-size:11px; color:var(--ll-fg-3); margin-top:4px; }
+  .desc { font-size:11px; color:var(--ll-fg-2); margin-top:6px; line-height:1.4;}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="card"><span class="badge" style="color:#9146FF">T</span>
+    <div class="name" style="color:#9146FF">Twitch</div><div class="hex">#9146FF</div>
+    <div class="desc">Channel-name color for Twitch streams. Purple letter T in row badge.</div></div>
+  <div class="card"><span class="badge" style="color:#FF0000">Y</span>
+    <div class="name" style="color:#FF0000">YouTube</div><div class="hex">#FF0000</div>
+    <div class="desc">Channel-name color for YouTube streams. Red letter Y in row badge.</div></div>
+  <div class="card"><span class="badge" style="color:#53FC18">K</span>
+    <div class="name" style="color:#53FC18">Kick</div><div class="hex">#53FC18</div>
+    <div class="desc">Channel-name color for Kick streams. Green letter K in row badge.</div></div>
+  <div class="card"><span class="badge" style="color:#F47321">C</span>
+    <div class="name" style="color:#F47321">Chaturbate</div><div class="hex">#F47321</div>
+    <div class="desc">Channel-name color for Chaturbate streams. Orange letter C in row badge.</div></div>
+</div>
+</body></html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"/>
+<title>Colors — Light Theme</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); font-family:var(--ll-font-sans); color:var(--ll-fg);}
+  .wrap { display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+  .sw { border:1px solid var(--ll-border); border-radius:var(--ll-radius-md); overflow:hidden;}
+  .chip { height:60px;}
+  .meta { padding:8px; background:var(--ll-widget-bg); border-top:1px solid var(--ll-border-light);}
+  .name { font-size:12px; font-weight:600;}
+  .hex { font-family:var(--ll-font-mono); font-size:11px; color:var(--ll-fg-3); margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sw"><div class="chip" style="background:#f5f5f5"></div><div class="meta"><div class="name">Window</div><div class="hex">#f5f5f5</div></div></div>
+  <div class="sw"><div class="chip" style="background:#ffffff; border-bottom:1px solid #e0e0e0"></div><div class="meta"><div class="name">Widget</div><div class="hex">#ffffff</div></div></div>
+  <div class="sw"><div class="chip" style="background:#e8e8e8"></div><div class="meta"><div class="name">Toolbar</div><div class="hex">#e8e8e8</div></div></div>
+  <div class="sw"><div class="chip" style="background:#6441a5"></div><div class="meta"><div class="name">Accent</div><div class="hex">#6441a5</div></div></div>
+  <div class="sw"><div class="chip" style="background:#e8e8f0"></div><div class="meta"><div class="name">Banner bg</div><div class="hex">#e8e8f0</div></div></div>
+  <div class="sw"><div class="chip" style="background:#cccccc"></div><div class="meta"><div class="name">Border</div><div class="hex">#cccccc</div></div></div>
+</div>
+</body></html>
