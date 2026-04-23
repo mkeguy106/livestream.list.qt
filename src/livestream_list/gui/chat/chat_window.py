@@ -2,10 +2,12 @@
 
 import logging
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
+    QDrag,
+    QDropEvent,
     QEnterEvent,
     QIcon,
     QMouseEvent,
@@ -346,7 +348,11 @@ class _FlowTabBar(QWidget):
     tab_clicked = Signal(int)
     tab_close_requested = Signal(int)
     tab_moved = Signal(int, int)  # from_index, to_index
+    tab_detach_requested = Signal(int, object)  # index, QPoint(global)
+    tab_drop_received = Signal(str)  # channel_key from drag-and-drop
     context_menu_requested = Signal(int, object)  # index, QPoint(global)
+
+    _MIME_TYPE = "application/x-llqt-chat-tab"
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -361,6 +367,7 @@ class _FlowTabBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(30)
         self.setMouseTracking(True)
+        self.setAcceptDrops(True)
         self.setStyleSheet(f"background-color: {theme.window_bg};")
 
     def add_tab(self, icon: QIcon | None, text: str) -> int:
@@ -465,10 +472,22 @@ class _FlowTabBar(QWidget):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if self._drag_tab is not None:
-            target = self.tab_at(event.position().toPoint())
-            if target >= 0 and target != self._drag_index:
-                self._move_tab(self._drag_index, target)
-                self._drag_index = target
+            pos = event.position().toPoint()
+            if self.rect().contains(pos):
+                # Still inside tab bar — reorder tabs
+                target = self.tab_at(pos)
+                if target >= 0 and target != self._drag_index:
+                    self._move_tab(self._drag_index, target)
+                    self._drag_index = target
+            else:
+                # Dragged outside tab bar — start cross-window DnD
+                drag_index = self._drag_index
+                self._drag_tab = None
+                self._drag_index = -1
+                self.releaseMouse()
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+                self._start_dnd_drag(drag_index)
+                return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
@@ -478,6 +497,21 @@ class _FlowTabBar(QWidget):
             self.releaseMouse()
             self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseReleaseEvent(event)
+
+    def _start_dnd_drag(self, index: int) -> None:
+        """Start a Qt drag-and-drop to detach a tab."""
+        self.tab_detach_requested.emit(index, self.mapToGlobal(self._tabs[index].pos()))
+
+    def dragEnterEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        if event.mimeData().hasFormat(self._MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        mime = event.mimeData()
+        if mime.hasFormat(self._MIME_TYPE):
+            channel_key = bytes(mime.data(self._MIME_TYPE).data()).decode()
+            event.acceptProposedAction()
+            self.tab_drop_received.emit(channel_key)
 
     def _move_tab(self, from_idx: int, to_idx: int) -> None:
         """Move a tab button from one index to another."""
@@ -503,6 +537,8 @@ class FlowTabWidget(QWidget):
 
     tabCloseRequested = Signal(int)  # noqa: N815
     currentChanged = Signal(int)  # noqa: N815
+    tabDetachRequested = Signal(int, object)  # noqa: N815 index, QPoint
+    tabDropReceived = Signal(str)  # noqa: N815 channel_key
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -516,6 +552,8 @@ class FlowTabWidget(QWidget):
         self._tab_bar.tab_clicked.connect(self.setCurrentIndex)
         self._tab_bar.tab_close_requested.connect(self.tabCloseRequested.emit)
         self._tab_bar.tab_moved.connect(self._on_tab_moved)
+        self._tab_bar.tab_detach_requested.connect(self.tabDetachRequested.emit)
+        self._tab_bar.tab_drop_received.connect(self.tabDropReceived.emit)
         layout.addWidget(self._tab_bar)
 
         self._stack = QStackedWidget(self)
@@ -656,6 +694,8 @@ class ChatWindow(QMainWindow):
         self._tab_widget = FlowTabWidget()
         self._tab_widget.tabCloseRequested.connect(self._on_tab_close)
         self._tab_widget.currentChanged.connect(self._on_tab_changed)
+        self._tab_widget.tabDetachRequested.connect(self._on_tab_detach)
+        self._tab_widget.tabDropReceived.connect(self._on_tab_drop)
 
         self.setCentralWidget(self._tab_widget)
 
@@ -1534,7 +1574,20 @@ class ChatWindow(QMainWindow):
                     break
             self.open_dm_tab(username, user_id)
 
-    def _on_popout_requested(self, channel_key: str) -> None:
+    def _on_tab_detach(self, index: int, global_pos: QPoint) -> None:
+        """Handle tab dragged outside the tab bar — pop it out."""
+        widget = self._tab_widget.widget(index)
+        channel_key = getattr(widget, "channel_key", None) if widget else None
+        if channel_key:
+            self._on_popout_requested(channel_key, global_pos)
+
+    def _on_tab_drop(self, channel_key: str) -> None:
+        """Handle a popped-out tab dropped back onto the tab bar."""
+        self._on_popin_requested(channel_key)
+
+    def _on_popout_requested(
+        self, channel_key: str, position: QPoint | None = None
+    ) -> None:
         """Pop out a chat widget into its own window."""
         widget = self._widgets.get(channel_key)
         if not widget:
@@ -1559,6 +1612,8 @@ class ChatWindow(QMainWindow):
         popout.popin_requested.connect(self._on_popin_requested)
         popout.closed.connect(lambda key=channel_key: self._on_popout_closed(key))
         self._popout_windows[channel_key] = popout
+        if position is not None:
+            popout.move(position)
         popout.show()
         if self.settings.chat.builtin.always_on_top:
             if is_kde_plasma():
@@ -1650,9 +1705,19 @@ class ChatPopoutWindow(QMainWindow):
         self.setCentralWidget(widget)
         widget.show()
 
-        # Add toolbar with pop-in button
+        # Add toolbar with drag handle and pop-in button
         toolbar = self.addToolBar("Actions")
         toolbar.setMovable(False)
+
+        # Drag handle for dragging back into main chat window
+        drag_label = QLabel(" \u2630 ")  # Trigram / hamburger icon
+        drag_label.setCursor(Qt.CursorShape.OpenHandCursor)
+        drag_label.setToolTip("Drag to dock back into the chat window")
+        drag_label.mousePressEvent = self._drag_handle_press  # type: ignore[method-assign]
+        drag_label.mouseMoveEvent = self._drag_handle_move  # type: ignore[method-assign]
+        toolbar.addWidget(drag_label)
+        self._drag_start_pos: QPoint | None = None
+
         popin_action = toolbar.addAction("Pop In")
         popin_action.triggered.connect(lambda: self.popin_requested.emit(self.channel_key))
 
@@ -1671,6 +1736,25 @@ class ChatPopoutWindow(QMainWindow):
                 padding: 2px;
             }}
         """)
+
+    def _drag_handle_press(self, event: QMouseEvent) -> None:
+        """Track drag start position on the drag handle."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_pos = event.globalPosition().toPoint()
+
+    def _drag_handle_move(self, event: QMouseEvent) -> None:
+        """Start Qt DnD when dragged far enough from the handle."""
+        if self._drag_start_pos is None:
+            return
+        delta = event.globalPosition().toPoint() - self._drag_start_pos
+        if delta.manhattanLength() < 10:
+            return
+        self._drag_start_pos = None
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(_FlowTabBar._MIME_TYPE, self.channel_key.encode())
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
 
     def take_widget(self) -> QWidget | None:
         """Remove and return the chat widget for re-docking."""
