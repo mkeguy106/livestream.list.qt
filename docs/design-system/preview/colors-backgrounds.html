@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Colors — Backgrounds</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  html,body { margin:0; padding:0; background:var(--ll-window-bg); font-family:var(--ll-font-sans); color:var(--ll-fg); }
+  .wrap { padding:16px; display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .sw { border:1px solid var(--ll-border); border-radius:var(--ll-radius-md); overflow:hidden; }
+  .chip { height:72px; display:flex; align-items:flex-end; padding:8px; }
+  .meta { padding:8px 10px; background:var(--ll-widget-bg); border-top:1px solid var(--ll-border-light); }
+  .name { font-size:12px; font-weight:600; color:var(--ll-fg); }
+  .hex  { font-family:var(--ll-font-mono); font-size:11px; color:var(--ll-fg-3); margin-top:2px; }
+  .role { font-size:10px; color:var(--ll-fg-3); text-transform:uppercase; letter-spacing:.08em; margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="sw"><div class="chip" style="background:#0e1525"></div>
+    <div class="meta"><div class="name">Window</div><div class="hex">#0e1525</div><div class="role">window_bg / chat_bg / toolbar_bg</div></div></div>
+  <div class="sw"><div class="chip" style="background:#1a1a2e"></div>
+    <div class="meta"><div class="name">Widget</div><div class="hex">#1a1a2e</div><div class="role">widget_bg / popup_bg</div></div></div>
+  <div class="sw"><div class="chip" style="background:#16213e"></div>
+    <div class="meta"><div class="name">Input</div><div class="hex">#16213e</div><div class="role">input_bg / tab inactive / banner</div></div></div>
+  <div class="sw"><div class="chip" style="background:#1f2b4d"></div>
+    <div class="meta"><div class="name">Popup hover</div><div class="hex">#1f2b4d</div><div class="role">menu / list hover</div></div></div>
+  <div class="sw"><div class="chip" style="background:#333333"></div>
+    <div class="meta"><div class="name">Border light</div><div class="hex">#333333</div><div class="role">subtle divider</div></div></div>
+  <div class="sw"><div class="chip" style="background:#444444"></div>
+    <div class="meta"><div class="name">Border</div><div class="hex">#444444</div><div class="role">default 1px border</div></div></div>
+</div>
+</body></html>

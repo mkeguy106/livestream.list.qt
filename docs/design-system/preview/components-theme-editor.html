@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Theme Editor</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .wrap { background:var(--ll-widget-bg); border:1px solid var(--ll-border); border-radius:4px; padding:14px;}
+  .row { display:grid; grid-template-columns:90px 22px 1fr 60px; gap:8px; align-items:center; margin:6px 0;}
+  .lbl { font-size:12px; color:var(--ll-fg-2);}
+  .sw { width:22px; height:22px; border-radius:3px; border:1px solid var(--ll-border);}
+  .hex { background:var(--ll-input-bg); color:var(--ll-fg); border:1px solid var(--ll-border); border-radius:4px; padding:4px 8px; font:12px var(--ll-font-mono); width:100%; box-sizing:border-box;}
+  .hex.focus { border-color:var(--ll-accent);}
+  .rst { font:11px var(--ll-font-sans); padding:3px 10px; background:var(--ll-input-bg); border:1px solid var(--ll-border); border-radius:3px; color:var(--ll-fg-2); cursor:pointer;}
+  .sec { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ll-fg-3); margin:10px 0 4px;}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="sec">Backgrounds</div>
+    <div class="row"><div class="lbl">Window:</div><div class="sw" style="background:#0e1525"></div><input class="hex focus" value="#0e1525"/><button class="rst">Reset</button></div>
+    <div class="row"><div class="lbl">Widget:</div><div class="sw" style="background:#1a1a2e"></div><input class="hex" value="#1a1a2e"/><button class="rst">Reset</button></div>
+    <div class="row"><div class="lbl">Input:</div><div class="sw" style="background:#16213e"></div><input class="hex" value="#16213e"/><button class="rst">Reset</button></div>
+    <div class="sec">Accent</div>
+    <div class="row"><div class="lbl">Accent:</div><div class="sw" style="background:#7b5cbf"></div><input class="hex" value="#7b5cbf"/><button class="rst">Reset</button></div>
+    <div class="row"><div class="lbl">Hover:</div><div class="sw" style="background:#9171d6"></div><input class="hex" value="#9171d6"/><button class="rst">Reset</button></div>
+  </div>
+</body></html>

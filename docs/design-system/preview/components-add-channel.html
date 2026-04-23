@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Add Channel Dialog</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; height:100%; background:rgba(5,8,15,.6); font-family:var(--ll-font-sans); color:var(--ll-fg); display:flex; align-items:center; justify-content:center;}
+  .dlg { width:520px; background:var(--ll-widget-bg); border:1px solid var(--ll-border); border-radius:4px; box-shadow:0 8px 32px rgba(0,0,0,.55);}
+  .hdr { padding:12px 16px; border-bottom:1px solid var(--ll-border-light); display:flex; justify-content:space-between;}
+  .ttl { font-weight:600; font-size:14px;}
+  .x { color:var(--ll-fg-3); cursor:pointer;}
+  .body { padding:16px;}
+  .fld { display:flex; align-items:center; gap:10px; margin-bottom:10px;}
+  .lbl { width:90px; font-size:13px; color:var(--ll-fg-2);}
+  .inp { flex:1; background:var(--ll-input-bg); color:var(--ll-fg); border:1px solid var(--ll-accent); border-radius:4px; padding:6px 8px; font:13px var(--ll-font-mono);}
+  .hint { font-size:11px; color:var(--ll-fg-3); margin-left:100px; margin-top:-4px; margin-bottom:10px;}
+  .sel { background:var(--ll-input-bg); color:var(--ll-fg); border:1px solid var(--ll-border); border-radius:4px; padding:6px 8px; font:13px var(--ll-font-sans); width:140px;}
+  .ftr { display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid var(--ll-border-light);}
+  .btn { font:13px var(--ll-font-sans); padding:5px 14px; border-radius:4px; border:1px solid var(--ll-border); background:var(--ll-input-bg); color:var(--ll-fg); cursor:pointer;}
+  .btn.primary { background:var(--ll-accent); border-color:var(--ll-accent); color:#fff;}
+  .detect { font-size:11px; color:var(--ll-status-live); margin-left:100px; margin-top:-4px; margin-bottom:10px; display:flex; align-items:center; gap:6px;}
+  .detect::before { content:'✓';}
+</style>
+</head>
+<body>
+  <div class="dlg">
+    <div class="hdr"><div class="ttl">Add Channel</div><div class="x">×</div></div>
+    <div class="body">
+      <div class="fld"><div class="lbl">URL or name:</div><input class="inp" value="https://twitch.tv/shroud"/></div>
+      <div class="detect">Detected as Twitch · shroud</div>
+      <div class="fld"><div class="lbl">Platform:</div>
+        <select class="sel"><option>Twitch (auto)</option><option>YouTube</option><option>Kick</option><option>Chaturbate</option></select>
+      </div>
+      <div class="hint">Pasted from clipboard automatically. Paste any channel URL and the platform is auto-detected.</div>
+    </div>
+    <div class="ftr"><button class="btn">Cancel</button><button class="btn primary">Add</button></div>
+  </div>
+</body></html>

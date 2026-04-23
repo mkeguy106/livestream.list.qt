@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Components — Banners</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-chat-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .banner { padding:10px 14px; border-radius:var(--ll-radius-md); margin-bottom:10px; font-size:13px; color:#fff; display:flex; justify-content:space-between; align-items:center;}
+  .raid { background:#F47321;}
+  .hype { background:#7b5cbf;}
+  .info-banner { background:var(--ll-chat-banner-bg); color:var(--ll-chat-banner-text); border:1px solid var(--ll-border); display:grid; grid-template-columns:1fr auto; gap:8px;}
+  .ttl { font-weight:700;}
+  .meta { font-size:11px; color:var(--ll-fg-3); margin-top:2px;}
+  .bar { height:6px; background:rgba(255,255,255,.25); border-radius:3px; margin-top:8px; overflow:hidden;}
+  .bar > span { display:block; height:100%; width:62%; background:#fff; border-radius:3px;}
+</style>
+</head>
+<body>
+  <div class="banner raid">
+    <div><div class="ttl">Raid from xQc · 12,400 viewers</div><div class="meta" style="color:rgba(255,255,255,.75)">Auto-joining in 108s</div></div>
+    <div style="font-family:var(--ll-font-mono); font-weight:700">1:48</div>
+  </div>
+  <div class="banner hype" style="display:block">
+    <div style="display:flex; justify-content:space-between;">
+      <div class="ttl">Hype Train — Level 3</div>
+      <div style="font-family:var(--ll-font-mono); font-weight:700">2:14</div>
+    </div>
+    <div style="font-size:11px; color:rgba(255,255,255,.8); margin-top:2px">620 / 1000 points</div>
+    <div class="bar"><span></span></div>
+  </div>
+  <div class="banner info-banner">
+    <div>
+      <div class="ttl" style="color:var(--ll-fg)">shroud</div>
+      <div class="meta">42.8K · 3h 22m · Counter-Strike 2</div>
+    </div>
+    <div style="color:var(--ll-fg-3); cursor:pointer">×</div>
+  </div>
+</body></html>

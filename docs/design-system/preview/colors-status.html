@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Colors — Status</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:16px; background:var(--ll-window-bg); font-family:var(--ll-font-sans); color:var(--ll-fg);}
+  .row { display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--ll-border); border-radius:var(--ll-radius-md); margin-bottom:8px; background:var(--ll-widget-bg);}
+  .dot { width:12px; height:12px; border-radius:50%; flex:none;}
+  .label { font-weight:600; width:130px;}
+  .use { flex:1; font-size:12px; color:var(--ll-fg-2);}
+  .hex { font-family:var(--ll-font-mono); font-size:11px; color:var(--ll-fg-3);}
+</style>
+</head>
+<body>
+  <div class="row"><span class="dot" style="background:#4CAF50"></span>
+    <span class="label">Live</span><span class="use">Green LED on live rows; success states</span><span class="hex">#4CAF50</span></div>
+  <div class="row"><span class="dot" style="background:#999999"></span>
+    <span class="label">Offline</span><span class="use">Grey LED on offline rows; faded row text</span><span class="hex">#999999</span></div>
+  <div class="row"><span class="dot" style="background:#f44336"></span>
+    <span class="label">Error</span><span class="use">Validation errors, failed API calls</span><span class="hex">#f44336</span></div>
+  <div class="row"><span class="dot" style="background:#2196F3"></span>
+    <span class="label">Info</span><span class="use">Informational toasts, notice banners</span><span class="hex">#2196F3</span></div>
+  <div class="row"><span class="dot" style="background:#F47321"></span>
+    <span class="label">Raid banner</span><span class="use">120s raid countdown banner</span><span class="hex">#F47321</span></div>
+  <div class="row"><span class="dot" style="background:#7b5cbf"></span>
+    <span class="label">Hype train</span><span class="use">Hype-train banner &amp; progress bar</span><span class="hex">#7b5cbf</span></div>
+</body></html>

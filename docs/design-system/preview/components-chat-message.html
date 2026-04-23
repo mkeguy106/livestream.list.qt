@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<title>Components — Chat Message</title>
+<link rel="stylesheet" href="../colors_and_type.css"/>
+<style>
+  html,body { margin:0; padding:0; background:var(--ll-chat-bg); color:var(--ll-fg); font-family:var(--ll-font-sans);}
+  .msg { display:grid; grid-template-columns:50px auto 1fr; gap:6px; padding:4px 10px; font-size:13px; line-height:1.45;}
+  .msg.odd { background:rgba(255,255,255,.1);}
+  .msg.mention { background:rgba(255,136,0,.2);}
+  .ts { color:var(--ll-fg-3); font-family:var(--ll-font-mono); font-size:11px; align-self:baseline; padding-top:2px;}
+  .user { font-weight:700; align-self:baseline;}
+  .msg.system { color:#be96ff; font-style:italic; background:rgba(123,92,191,.08); grid-template-columns:50px 1fr;}
+</style>
+</head>
+<body>
+  <div class="msg"><span class="ts">12:27</span><span class="user" style="color:#ff7043">GamerFan42:</span><span>let's gooo shroud is live!</span></div>
+  <div class="msg odd"><span class="ts">12:27</span><span class="user" style="color:#29b6f6">PixelWarrior:</span><span>that clutch was insane</span></div>
+  <div class="msg"><span class="ts">12:27</span><span class="user" style="color:#66bb6a">StreamSniper99:</span><span><span style="color:#ff7043">@GamerFan42</span> yeah he's been playing really well today</span></div>
+  <div class="msg system"><span class="ts">12:27</span><span><b>PixelWarrior</b> subscribed at Tier 1. They've subscribed for 6 months!</span></div>
+  <div class="msg mention"><span class="ts">12:28</span><span class="user" style="color:#ab47bc">NightOwl_TV:</span><span><span style="color:#ff7043">@you</span> welcome! you picked a great stream</span></div>
+  <div class="msg odd"><span class="ts">12:28</span><span class="user" style="color:#ffa726">FragMovie:</span><span>ace ace ace!!! LETS GOOO</span></div>
+</body></html>
