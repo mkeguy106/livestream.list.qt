@@ -487,7 +487,7 @@ The CI workflow triggers on `v*` tags and builds Flatpak + Windows installer. Al
 
 ## Documentation Maintenance
 
-When making changes to the codebase, **all three documentation targets must be kept in sync**: CLAUDE.md, README.md, and the wiki. Each serves a different audience and purpose — update the relevant ones for every change.
+When making changes to the codebase, **all four documentation targets must be kept in sync**: CLAUDE.md, README.md, the wiki, and this project's Obsidian note. Each serves a different audience and purpose — update the relevant ones for every change.
 
 ### When to Update
 
@@ -516,6 +516,7 @@ When making changes to the codebase, **all three documentation targets must be k
 - **CLAUDE.md** — Developer-facing: architecture, threading rules, pitfalls, data structures, API details, CI/CD. Things that require reading multiple files to understand. Don't duplicate what's obvious from reading a single file.
 - **README.md** — User-facing: feature list, installation, usage, keyboard shortcuts, configuration, roadmap. Keep the feature list comprehensive but concise (one line per feature with sub-bullets for details).
 - **Wiki** — Both audiences, expanded: detailed guides, step-by-step instructions, troubleshooting, FAQ. The wiki is the most detailed reference and should be the most thorough.
+- **Obsidian** (`~/GoogleDrive/obsidian/notes/Livestream List Qt.md`) — personal high-level snapshot: what the project is, architecture summary, current status. Update only when status or architecture changes meaningfully; it's a summary, not a substitute for the wiki's detail.
 
 ### How to Update the Wiki
 
