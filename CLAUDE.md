@@ -194,7 +194,7 @@ The app has a built-in chat client (alternative to opening browser popout chat).
 ### Theme System
 
 Two-file architecture:
-- `core/theme_data.py` — `ThemeData` dataclass, 32 color fields across 8 categories, 6 built-in theme definitions, theme file I/O (load/save/import/export). Custom themes stored in `~/.config/livestream-list-qt/themes/*.json`.
+- `core/theme_data.py` — `ThemeData` dataclass, 40 color fields across 9 categories, 7 built-in theme definitions, theme file I/O (load/save/import/export). Custom themes stored in `~/.config/livestream-list-qt/themes/*.json`.
 - `gui/theme.py` — `ThemeManager` singleton, runtime theme state, stylesheet generation with caching, dark/light mode detection via QPalette. Chat color overrides via `ChatColorSettings`.
 
 Theme editor dialog: `gui/dialogs/theme_editor.py`.

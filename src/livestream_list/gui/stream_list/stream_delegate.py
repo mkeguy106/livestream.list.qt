@@ -40,14 +40,6 @@ from .stream_model import PlayingRole, SelectionRole, StreamRole
 
 _delegate_logger = logging.getLogger(__name__)
 
-# Platform colors
-PLATFORM_COLORS = {
-    StreamPlatform.TWITCH: "#9146FF",
-    StreamPlatform.KICK: "#53FC18",
-    StreamPlatform.YOUTUBE: "#FF0000",
-    StreamPlatform.CHATURBATE: "#F47321",
-}
-
 # Platform icon text
 PLATFORM_ICONS = {
     StreamPlatform.TWITCH: "T",
@@ -146,6 +138,10 @@ class StreamRowDelegate(QStyledItemDelegate):
         # Alternating row colors
         self._list_alt_row_even = QColor(theme.list_alt_row_even)
         self._list_alt_row_odd = QColor(theme.list_alt_row_odd)
+        # Platform brand colors
+        self._platform_colors = {
+            platform: QColor(theme.platform_color(platform.value)) for platform in StreamPlatform
+        }
 
     def apply_theme(self) -> None:
         """Apply theme colors (call when theme changes).
@@ -317,7 +313,7 @@ class StreamRowDelegate(QStyledItemDelegate):
             platform = livestream.channel.platform
             platform_text = PLATFORM_ICONS.get(platform, "?")
             if self._settings.platform_colors:
-                color = QColor(PLATFORM_COLORS.get(platform, "#888888"))
+                color = self._platform_colors.get(platform, self._text_muted)
             else:
                 color = self._text_primary if is_selected else self._text_muted
             bold_font = QFont(font)
@@ -368,11 +364,11 @@ class StreamRowDelegate(QStyledItemDelegate):
             name_color = self._selection_text
         elif is_private_room and self._settings.platform_colors:
             # Dimmed platform color for private/hidden Chaturbate rooms
-            color = QColor(PLATFORM_COLORS.get(channel.platform, "#888888"))
+            color = QColor(self._platform_colors.get(channel.platform, self._text_muted))
             color.setAlpha(90)
             name_color = color
         elif self._settings.platform_colors:
-            name_color = QColor(PLATFORM_COLORS.get(channel.platform, "#888888"))
+            name_color = self._platform_colors.get(channel.platform, self._text_muted)
         else:
             name_color = self._text_primary
 

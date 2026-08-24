@@ -35,7 +35,6 @@ from ...chat.manager import ChatManager
 from ...chat.models import HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
-from ..theme import PLATFORM_COLORS as THEME_PLATFORM_COLORS
 from ..theme import get_theme
 from ..window_utils import (
     apply_always_on_top,
@@ -47,13 +46,10 @@ from .chat_widget import ChatWidget
 
 logger = logging.getLogger(__name__)
 
-# Platform colors for tab icons (from theme)
-PLATFORM_COLORS = {
-    StreamPlatform.TWITCH: QColor(THEME_PLATFORM_COLORS.get("twitch", "#9146ff")),
-    StreamPlatform.YOUTUBE: QColor(THEME_PLATFORM_COLORS.get("youtube", "#ff0000")),
-    StreamPlatform.KICK: QColor(THEME_PLATFORM_COLORS.get("kick", "#53fc18")),
-    StreamPlatform.CHATURBATE: QColor(THEME_PLATFORM_COLORS.get("chaturbate", "#F47321")),
-}
+
+def _platform_qcolor(platform: StreamPlatform) -> QColor:
+    """Get the current theme's brand color for a platform (for tab icons)."""
+    return QColor(get_theme().platform_color(platform.value))
 
 
 def _create_dot_icon(color: QColor, size: int = 12) -> QIcon:
@@ -950,7 +946,7 @@ class ChatWindow(QMainWindow):
 
         # Add tab with platform-colored dot
         platform = livestream.channel.platform
-        icon = _create_dot_icon(PLATFORM_COLORS.get(platform, QColor("#888")))
+        icon = _create_dot_icon(_platform_qcolor(platform))
         tab_name = livestream.channel.display_name or livestream.channel.channel_id
         idx = self._tab_widget.addTab(widget, icon, tab_name)
         self._tab_widget.setCurrentIndex(idx)
@@ -1585,9 +1581,7 @@ class ChatWindow(QMainWindow):
         """Handle a popped-out tab dropped back onto the tab bar."""
         self._on_popin_requested(channel_key)
 
-    def _on_popout_requested(
-        self, channel_key: str, position: QPoint | None = None
-    ) -> None:
+    def _on_popout_requested(self, channel_key: str, position: QPoint | None = None) -> None:
         """Pop out a chat widget into its own window."""
         widget = self._widgets.get(channel_key)
         if not widget:
@@ -1634,7 +1628,7 @@ class ChatWindow(QMainWindow):
         if widget and channel_key in self._livestreams:
             livestream = self._livestreams[channel_key]
             platform = livestream.channel.platform
-            icon = _create_dot_icon(PLATFORM_COLORS.get(platform, QColor("#888")))
+            icon = _create_dot_icon(_platform_qcolor(platform))
             tab_name = livestream.channel.display_name or livestream.channel.channel_id
 
             widget.setParent(self._tab_widget)

@@ -1054,6 +1054,7 @@ class MainWindow(QMainWindow):
                 }}
                 QPushButton:hover {{
                     background-color: {theme.accent_hover};
+                    color: {theme.selection_text};
                 }}
                 QStatusBar {{
                     background-color: {theme.toolbar_bg};
@@ -1087,6 +1088,12 @@ class MainWindow(QMainWindow):
             # Notify chat window if open
             if hasattr(self.app, "_chat_window") and self.app._chat_window:
                 self.app._chat_window.apply_theme()
+            # Tray and window icons are drawn from theme colors
+            from .tray import create_app_icon
+
+            self.app.setWindowIcon(create_app_icon(64))
+            if getattr(self.app, "tray_icon", None):
+                self.app.tray_icon.refresh_icon()
         finally:
             self.setUpdatesEnabled(True)
 

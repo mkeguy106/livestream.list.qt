@@ -7,13 +7,18 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygon
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
 
-from .theme import ThemeManager
+from .theme import get_theme
 
 logger = logging.getLogger(__name__)
 
 
 def create_app_icon(size: int = 22) -> QIcon:
-    """Create the application icon at the specified size."""
+    """Create the application icon at the specified size.
+
+    Colors are derived from the active theme so the icon matches the app
+    (and the system tray it sits in) for every theme, including monochrome
+    ones and light trays.
+    """
     pixmap = QPixmap(size, size)
     pixmap.fill(QColor(0, 0, 0, 0))  # Transparent background
 
@@ -23,11 +28,13 @@ def create_app_icon(size: int = 22) -> QIcon:
     # Scale factor based on size (22 is the base size)
     scale = size / 22.0
 
-    # Draw a simple monitor-like shape
-    # Use theme-aware colors for tray icon visibility
-    is_dark = ThemeManager.is_dark_mode()
-    monitor_color = QColor(100, 150, 200) if is_dark else QColor(60, 100, 160)
-    screen_color = QColor(40, 60, 80) if is_dark else QColor(30, 45, 65)
+    theme = get_theme()
+    monitor_color = QColor(theme.text_primary)
+    screen_color = QColor(theme.window_bg)
+    play_color = QColor(theme.accent)
+    live_color = QColor(theme.status_live)
+
+    # Monitor body
     painter.setPen(monitor_color)
     painter.setBrush(monitor_color)
     painter.drawRoundedRect(
@@ -39,12 +46,11 @@ def create_app_icon(size: int = 22) -> QIcon:
         int(2 * scale),
     )
 
-    # Screen (darker inside)
+    # Screen (theme background inside)
     painter.setBrush(screen_color)
     painter.drawRect(int(4 * scale), int(4 * scale), int(14 * scale), int(10 * scale))
 
     # Play button triangle
-    play_color = QColor(255, 255, 255)
     painter.setPen(play_color)
     painter.setBrush(play_color)
     triangle = QPolygon(
@@ -56,8 +62,7 @@ def create_app_icon(size: int = 22) -> QIcon:
     )
     painter.drawPolygon(triangle)
 
-    # Live indicator dot (red)
-    live_color = QColor(255, 50, 50)
+    # Live indicator dot
     painter.setPen(live_color)
     painter.setBrush(live_color)
     painter.drawEllipse(int(15 * scale), int(3 * scale), int(4 * scale), int(4 * scale))
@@ -113,6 +118,10 @@ class TrayIcon(QSystemTrayIcon):
     def _create_icon(self) -> None:
         """Create the tray icon."""
         self.setIcon(create_app_icon(22))
+
+    def refresh_icon(self) -> None:
+        """Redraw the icon with the current theme colors."""
+        self._create_icon()
 
     def _create_menu(self) -> None:
         """Create the context menu."""

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from .settings import get_config_dir
 
-# All 32 ThemeColors field names, in order for iteration
+# All ThemeColors field names, in order for iteration
 THEME_COLOR_FIELDS: list[str] = [
     "window_bg",
     "widget_bg",
@@ -52,6 +52,10 @@ THEME_COLOR_FIELDS: list[str] = [
     "list_alt_row_odd",
     "popup_hover",
     "popup_selected",
+    "platform_twitch",
+    "platform_youtube",
+    "platform_kick",
+    "platform_chaturbate",
 ]
 
 # Color categories for grouped display in the editor UI
@@ -83,6 +87,12 @@ THEME_COLOR_CATEGORIES: dict[str, list[str]] = {
     ],
     "Stream List": ["list_alt_row_even", "list_alt_row_odd"],
     "Popups": ["popup_hover", "popup_selected"],
+    "Platforms": [
+        "platform_twitch",
+        "platform_youtube",
+        "platform_kick",
+        "platform_chaturbate",
+    ],
 }
 
 # Human-readable labels for color fields
@@ -123,6 +133,10 @@ THEME_COLOR_LABELS: dict[str, str] = {
     "list_alt_row_odd": "Odd row",
     "popup_hover": "Popup hover",
     "popup_selected": "Popup selected",
+    "platform_twitch": "Twitch",
+    "platform_youtube": "YouTube",
+    "platform_kick": "Kick",
+    "platform_chaturbate": "Chaturbate",
 }
 
 # Fields that use alpha-enabled color picker
@@ -222,6 +236,10 @@ _DARK_COLORS = {
     "popup_selected": "#7b5cbf",
     "popup_border": "#444444",
     "toolbar_bg": "#0e1525",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
 }
 
 _LIGHT_COLORS = {
@@ -261,6 +279,10 @@ _LIGHT_COLORS = {
     "popup_selected": "#6441a5",
     "popup_border": "#cccccc",
     "toolbar_bg": "#e8e8e8",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
 }
 
 _HIGH_CONTRAST_COLORS = {
@@ -300,6 +322,10 @@ _HIGH_CONTRAST_COLORS = {
     "popup_selected": "#ffcc00",
     "popup_border": "#888888",
     "toolbar_bg": "#000000",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
 }
 
 _NORD_DARK_COLORS = {
@@ -339,6 +365,10 @@ _NORD_DARK_COLORS = {
     "popup_selected": "#88C0D0",
     "popup_border": "#4C566A",
     "toolbar_bg": "#2E3440",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
 }
 
 _MONOKAI_COLORS = {
@@ -378,6 +408,10 @@ _MONOKAI_COLORS = {
     "popup_selected": "#A6E22E",
     "popup_border": "#49483E",
     "toolbar_bg": "#272822",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
 }
 
 _SOLARIZED_DARK_COLORS = {
@@ -417,6 +451,53 @@ _SOLARIZED_DARK_COLORS = {
     "popup_selected": "#268BD2",
     "popup_border": "#586E75",
     "toolbar_bg": "#002B36",
+    "platform_twitch": "#9146FF",
+    "platform_youtube": "#FF0000",
+    "platform_kick": "#53FC18",
+    "platform_chaturbate": "#F47321",
+}
+
+_OBSIDIAN_MONO_COLORS = {
+    "window_bg": "#0e0e10",
+    "widget_bg": "#16161a",
+    "input_bg": "#1d1d22",
+    "text_primary": "#e8e8ec",
+    "text_secondary": "#c4c4ca",
+    "text_muted": "#8a8a91",
+    "accent": "#e8e8ec",
+    "accent_hover": "#c9c9cf",
+    "border": "#2c2c31",
+    "border_light": "#222226",
+    "selection_bg": "#d8d8dd",
+    "selection_text": "#101013",
+    "status_live": "#7fae7f",
+    "status_offline": "#6e6e76",
+    "status_error": "#c76666",
+    "status_success": "#7fae7f",
+    "status_info": "#9aa2b4",
+    "chat_bg": "#0c0c0e",
+    "chat_input_bg": "#1d1d22",
+    "chat_tab_active": "#d8d8dd",
+    "chat_tab_inactive": "#16161a",
+    "chat_banner_bg": "#16161a",
+    "chat_banner_text": "#c4c4ca",
+    "chat_url": "#b8b8c0",
+    "chat_url_selected": "#34343c",
+    "chat_system_message": "#a8a8b2",
+    "chat_alt_row_even": "#00000000",
+    "chat_alt_row_odd": "#12ffffff",
+    "chat_mention_highlight": "#2effffff",
+    "list_alt_row_even": "#00000000",
+    "list_alt_row_odd": "#0affffff",
+    "popup_bg": "#18181c",
+    "popup_hover": "#242429",
+    "popup_selected": "#3a3a42",
+    "popup_border": "#3a3a40",
+    "toolbar_bg": "#0a0a0c",
+    "platform_twitch": "#9d8ec2",
+    "platform_youtube": "#bc8383",
+    "platform_kick": "#8fb08f",
+    "platform_chaturbate": "#c2a183",
 }
 
 # ---------------------------------------------------------------------------
@@ -468,6 +549,13 @@ BUILTIN_THEMES: dict[str, ThemeData] = {
         builtin=True,
         colors=_SOLARIZED_DARK_COLORS,
     ),
+    "obsidian-mono": ThemeData(
+        name="Obsidian Mono",
+        slug="obsidian-mono",
+        base="dark",
+        builtin=True,
+        colors=_OBSIDIAN_MONO_COLORS,
+    ),
 }
 
 # Ordered list of built-in theme slugs for cycling
@@ -478,6 +566,7 @@ BUILTIN_THEME_ORDER: list[str] = [
     "nord-dark",
     "monokai",
     "solarized-dark",
+    "obsidian-mono",
 ]
 
 

@@ -63,6 +63,11 @@ class ThemeColors:
         popup_border: str,
         # Toolbar
         toolbar_bg: str,
+        # Platform brand colors
+        platform_twitch: str,
+        platform_youtube: str,
+        platform_kick: str,
+        platform_chaturbate: str,
     ):
         self.window_bg = window_bg
         self.widget_bg = widget_bg
@@ -100,6 +105,14 @@ class ThemeColors:
         self.popup_selected = popup_selected
         self.popup_border = popup_border
         self.toolbar_bg = toolbar_bg
+        self.platform_twitch = platform_twitch
+        self.platform_youtube = platform_youtube
+        self.platform_kick = platform_kick
+        self.platform_chaturbate = platform_chaturbate
+
+    def platform_color(self, platform: str) -> str:
+        """Get the brand color for a platform key ("twitch", "youtube", ...)."""
+        return str(getattr(self, f"platform_{platform}", "#888888"))
 
 
 # Dark theme colors (current app colors)
@@ -150,6 +163,11 @@ DARK_THEME = ThemeColors(
     popup_border="#444444",
     # Toolbar
     toolbar_bg="#0e1525",
+    # Platform brand colors
+    platform_twitch="#9146FF",
+    platform_youtube="#FF0000",
+    platform_kick="#53FC18",
+    platform_chaturbate="#F47321",
 )
 
 # Light theme colors
@@ -200,6 +218,11 @@ LIGHT_THEME = ThemeColors(
     popup_border="#cccccc",
     # Toolbar
     toolbar_bg="#e8e8e8",
+    # Platform brand colors
+    platform_twitch="#9146FF",
+    platform_youtube="#FF0000",
+    platform_kick="#53FC18",
+    platform_chaturbate="#F47321",
 )
 
 # High contrast theme (WCAG AAA compliant)
@@ -250,15 +273,12 @@ HIGH_CONTRAST_THEME = ThemeColors(
     popup_border="#888888",
     # Toolbar
     toolbar_bg="#000000",
+    # Platform brand colors
+    platform_twitch="#9146FF",
+    platform_youtube="#FF0000",
+    platform_kick="#53FC18",
+    platform_chaturbate="#F47321",
 )
-
-# Platform colors (same for both themes)
-PLATFORM_COLORS = {
-    "twitch": "#9146FF",
-    "youtube": "#FF0000",
-    "kick": "#53FC18",
-    "chaturbate": "#F47321",
-}
 
 
 # Cache for generated stylesheets (keyed by theme object id)
@@ -494,7 +514,7 @@ def get_app_stylesheet() -> str:
         }}
         QPushButton:hover {{
             background-color: {theme.accent_hover};
-            color: white;
+            color: {theme.selection_text};
         }}
         QPushButton:pressed {{
             background-color: {theme.accent};
