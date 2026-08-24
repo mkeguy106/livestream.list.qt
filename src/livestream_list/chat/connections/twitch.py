@@ -189,7 +189,7 @@ class TwitchChatConnection(BaseChatConnection):
         self._oauth_token = oauth_token
         self._nick = ""  # Set during auth (lowercase for IRC)
         self._display_name = ""  # Display name with proper case (for local echo)
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._ws: aiohttp.ClientWebSocketResponse[bool] | None = None
         self._session: aiohttp.ClientSession | None = None
         self._auth_failed = False
         self._can_send = False  # Set True only if token has chat:edit scope

@@ -41,7 +41,7 @@ class ChaturbateChatConnection(BaseChatConnection):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._ws: aiohttp.ClientWebSocketResponse[bool] | None = None
         self._session: aiohttp.ClientSession | None = None
         self._chat_username: str = ""
         self._chat_password: str = ""

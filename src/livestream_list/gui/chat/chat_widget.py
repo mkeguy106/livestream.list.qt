@@ -597,7 +597,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
         self._card_hover_timer.setSingleShot(True)
         self._card_hover_timer.setInterval(400)
         self._card_hover_timer.timeout.connect(self._on_card_hover_timeout)
-        self._card_hover_user = None  # ChatUser or None
+        self._card_hover_user: ChatUser | None = None
         self._card_hover_pos = QPoint()
         self._active_user_card: UserCardPopup | None = None
         self._setup_ui()

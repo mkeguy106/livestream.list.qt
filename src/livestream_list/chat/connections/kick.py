@@ -61,7 +61,7 @@ class KickChatConnection(BaseChatConnection):
         self._kick_settings = kick_settings
         self._auth_token = kick_settings.access_token if kick_settings else ""
         self._nick = ""  # Set after fetching user info from Kick API
-        self._ws: aiohttp.ClientWebSocketResponse | None = None
+        self._ws: aiohttp.ClientWebSocketResponse[bool] | None = None
         self._session: aiohttp.ClientSession | None = None
         self._chatroom_id: int | None = None
         self._broadcaster_user_id: int | None = None
