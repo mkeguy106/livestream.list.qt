@@ -23,7 +23,7 @@ from ..core.monitor import StreamMonitor
 from ..core.settings import Settings, get_config_dir
 from ..core.streamlink import StreamlinkLauncher
 from ..notifications.notifier import Notifier
-from .kwin_placement import KWinPlacement
+from .kwin_placement import WAYLAND_APP_ID, KWinPlacement
 from .theme import ThemeManager, get_app_stylesheet
 
 logger = logging.getLogger(__name__)
@@ -233,6 +233,11 @@ class Application(QApplication):
         self.setApplicationVersion(__version__)
         self.setOrganizationName("app.livestreamlist")
         self.setOrganizationDomain("app.livestreamlist")
+        # Pins the Wayland app_id (KWin reports it as resourceClass) to a
+        # constant instead of letting Qt derive it from the executable name.
+        # gui/kwin_placement.py identifies our windows by it, and it is what
+        # associates the window with its .desktop file for the taskbar icon.
+        self.setDesktopFileName(WAYLAND_APP_ID)
 
         # Core components (settings loaded eagerly — Settings.load() never raises)
         self.settings: Settings = Settings.load()
@@ -246,7 +251,9 @@ class Application(QApplication):
         # Window position persistence. Wayland never tells a client where its
         # windows are and ignores move(), so on KDE we drive KWin's scripting
         # interface instead. No-ops everywhere else.
-        self.placement = KWinPlacement(get_config_dir(), self.applicationDisplayName(), parent=self)
+        self.placement = KWinPlacement(
+            get_config_dir(), self.applicationDisplayName(), WAYLAND_APP_ID, parent=self
+        )
 
         # UI components (set after window creation)
         # Use weakref for main_window to avoid reference cycles

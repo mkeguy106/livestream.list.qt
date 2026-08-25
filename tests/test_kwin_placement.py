@@ -101,48 +101,68 @@ def test_popout_caption_does_not_collide_with_chat_window_caption():
 # goes through Qt's resize(), which works fine on Wayland.
 
 _DBUS = {
-    "service": "app.livestreamlist.Placement.p99",
+    "service": "app.livestreamlist.Placement.ab12cd34",
     "path": "/Placement",
     "interface": "app.livestreamlist.Placement",
 }
+_APP_ID = "app.livestreamlist.LivestreamListQt"
 
 
-def test_config_carries_pid_so_script_only_touches_our_own_windows():
-    config = build_config(pid=99, placements={}, **_DBUS)
-    assert config["pid"] == 99
+def test_config_carries_app_id_so_script_only_touches_our_own_windows():
+    # Deliberately NOT the PID: inside a Flatpak sandbox os.getpid() returns
+    # the namespaced pid (2), while KWin reports the host pid, so a pid filter
+    # never matches and nothing is ever placed. The Wayland app_id is
+    # identical inside and outside the sandbox.
+    config = build_config(app_id=_APP_ID, captions=[], placements={}, **_DBUS)
+    assert config["appId"] == _APP_ID
+
+
+def test_config_carries_known_captions_so_unrelated_windows_are_ignored():
+    config = build_config(
+        app_id=_APP_ID, captions=["Livestream List (Qt)", "Chat"], placements={}, **_DBUS
+    )
+    assert config["captions"] == ["Livestream List (Qt)", "Chat"]
 
 
 def test_config_carries_dbus_callback_target():
-    config = build_config(pid=99, placements={}, **_DBUS)
-    assert config["service"] == "app.livestreamlist.Placement.p99"
+    config = build_config(app_id=_APP_ID, captions=[], placements={}, **_DBUS)
+    assert config["service"] == "app.livestreamlist.Placement.ab12cd34"
     assert config["path"] == "/Placement"
     assert config["interface"] == "app.livestreamlist.Placement"
 
 
 def test_config_maps_caption_to_position_only():
     config = build_config(
-        pid=99,
+        app_id=_APP_ID,
+        captions=["Livestream List (Qt)"],
         placements={"Livestream List (Qt)": Rect(x=5484, y=894, width=460, height=830)},
         **_DBUS,
     )
-    # Size is deliberately absent — Qt owns it.
+    # Size is deliberately absent - Qt owns it.
     assert config["placements"] == {"Livestream List (Qt)": {"x": 5484, "y": 894}}
 
 
 def test_config_allows_no_placements_so_geometry_can_still_be_learned():
     # First run has nothing saved, but the script must still load and report
     # geometry back, or we would never learn where the window is.
-    config = build_config(pid=99, placements={}, **_DBUS)
+    config = build_config(app_id=_APP_ID, captions=["Chat"], placements={}, **_DBUS)
     assert config["placements"] == {}
 
 
 def test_script_embeds_config_as_parseable_json():
-    placements = {"Chat — Livestream List (Qt)": Rect(x=10, y=20, width=400, height=600)}
-    script = build_script(build_config(pid=99, placements=placements, **_DBUS))
+    placements = {"Chat \u2014 Livestream List (Qt)": Rect(x=10, y=20, width=400, height=600)}
+    script = build_script(
+        build_config(
+            app_id=_APP_ID,
+            captions=["Chat \u2014 Livestream List (Qt)"],
+            placements=placements,
+            **_DBUS,
+        )
+    )
     match = re.search(r"^var CONFIG = (.*);$", script, re.MULTILINE)
     assert match, "script must embed its payload as a single JSON literal"
     assert json.loads(match.group(1))["placements"] == {
-        "Chat — Livestream List (Qt)": {"x": 10, "y": 20}
+        "Chat \u2014 Livestream List (Qt)": {"x": 10, "y": 20}
     }
 
 
@@ -151,10 +171,23 @@ def test_script_escapes_captions_containing_quotes():
     # of the generated JavaScript.
     caption = 'Evil" + attack() + "'
     script = build_script(
-        build_config(pid=99, placements={caption: Rect(x=1, y=2, width=3, height=4)}, **_DBUS)
+        build_config(
+            app_id=_APP_ID,
+            captions=[caption],
+            placements={caption: Rect(x=1, y=2, width=3, height=4)},
+            **_DBUS,
+        )
     )
     match = re.search(r"^var CONFIG = (.*);$", script, re.MULTILINE)
     assert caption in json.loads(match.group(1))["placements"]
+
+
+def test_script_matches_on_app_id_not_pid():
+    # Guards the Flatpak regression: a pid-based filter silently placed
+    # nothing inside the sandbox.
+    script = build_script(build_config(app_id=_APP_ID, captions=[], placements={}, **_DBUS))
+    assert "resourceClass" in script
+    assert "w.pid" not in script
 
 
 # --- off-screen fallback policy ---------------------------------------------

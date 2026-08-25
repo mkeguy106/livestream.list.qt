@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +23,12 @@ from typing import Any
 from PySide6.QtCore import ClassInfo, QObject, Signal, Slot
 from PySide6.QtDBus import QDBusConnection, QDBusInterface, QDBusMessage
 from PySide6.QtGui import QGuiApplication
+
+# Our Wayland app_id, matching the Flatpak application id and the installed
+# .desktop file. KWin reports this as a window's `resourceClass`. Set via
+# QGuiApplication.setDesktopFileName() so it is identical for native and
+# Flatpak runs.
+WAYLAND_APP_ID = "app.livestreamlist.LivestreamListQt"
 
 # Role names for the windows whose position is persisted.
 PLACEMENT_ROLE_MAIN = "main"
@@ -148,6 +154,10 @@ class PlacementRegistry:
         if placement is not None:
             self._pending[caption_of(title, self._display_name)] = placement
 
+    def known_captions(self) -> list[str]:
+        """Every caption that maps to a registered window."""
+        return list(self._role_by_caption)
+
     def pending_placements(self) -> dict[str, Rect]:
         """Caption-to-position instructions not yet carried out by KWin."""
         return dict(self._pending)
@@ -182,7 +192,8 @@ class PlacementRegistry:
 
 def build_config(
     *,
-    pid: int,
+    app_id: str,
+    captions: Sequence[str],
     placements: Mapping[str, Rect],
     service: str,
     path: str,
@@ -190,12 +201,19 @@ def build_config(
 ) -> dict[str, Any]:
     """Build the JSON payload embedded in the generated KWin script.
 
+    Windows are identified by ``app_id`` (the Wayland app_id, which KWin
+    reports as ``resourceClass``) narrowed to ``captions``. Note this is
+    deliberately NOT the process id: inside a Flatpak sandbox ``os.getpid()``
+    returns the namespaced pid while KWin reports the host pid, so a pid
+    filter matches nothing and silently places no windows.
+
     ``placements`` maps a KWin caption to the geometry to restore. Only the
     position is passed through: Qt's ``resize()`` works on Wayland, so size is
     left alone and we avoid fighting the toolkit over frame-vs-client extents.
     """
     return {
-        "pid": pid,
+        "appId": app_id,
+        "captions": list(captions),
         "service": service,
         "path": path,
         "interface": interface,
@@ -224,7 +242,10 @@ _SCRIPT_BODY = """
     }
 
     function attach(w) {
-        if (!w || w.pid !== CONFIG.pid || !w.normalWindow) {
+        if (!w || !w.normalWindow || w.resourceClass !== CONFIG.appId) {
+            return;
+        }
+        if (CONFIG.captions.indexOf(w.caption) === -1) {
             return;
         }
         var target = CONFIG.placements[w.caption];
@@ -325,13 +346,16 @@ class KWinPlacement(QObject):
         self,
         script_dir: Path,
         display_name: str,
+        app_id: str,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._script_path = script_dir / SCRIPT_FILENAME
         self._registry = PlacementRegistry(display_name)
-        self._pid = os.getpid()
-        self._service_name = f"{DBUS_SERVICE_PREFIX}.p{self._pid}"
+        self._app_id = app_id
+        # A random token, not the pid: inside Flatpak every instance sees pid
+        # 2, so pid-suffixed names would collide under --allow-multiple.
+        self._service_name = f"{DBUS_SERVICE_PREFIX}.i{uuid.uuid4().hex[:12]}"
         self._receiver: _GeometryReceiver | None = None
         self._available: bool | None = None
         self._service_registered = False
@@ -387,7 +411,8 @@ class KWinPlacement(QObject):
         if not self._ensure_service():
             return
         config = build_config(
-            pid=self._pid,
+            app_id=self._app_id,
+            captions=self._registry.known_captions(),
             placements=self._registry.pending_placements(),
             service=self._service_name,
             path=DBUS_OBJECT_PATH,

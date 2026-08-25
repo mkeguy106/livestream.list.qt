@@ -405,6 +405,25 @@ def create_sample_chat_messages(cache: EmoteCache) -> list[ChatMessage]:
 # ── Mock Application ────────────────────────────────────────────────
 
 
+class NoOpPlacement:
+    """Stand-in for KWinPlacement during screenshot capture.
+
+    Screenshots run under QT_QPA_PLATFORM=offscreen, so there are no real
+    windows to position. A live KWinPlacement would still load its script into
+    KWin, which on a developer's machine would match the app_id and caption of
+    their actually-running copy and move that window instead.
+    """
+
+    def register_window(self, role, title, saved):
+        pass
+
+    def position(self, role):
+        return None
+
+    def shutdown(self):
+        pass
+
+
 class MockApplication(QObject):
     """Minimal mock of Application for MainWindow and PreferencesDialog."""
 
@@ -421,9 +440,13 @@ class MockApplication(QObject):
         self._chat_window = None
         self._qt_app = QApplication.instance()
         self.tray_icon = None
+        self.placement = NoOpPlacement()
 
     def styleSheet(self):  # noqa: N802
         return self._qt_app.styleSheet()
+
+    def setWindowIcon(self, icon):  # noqa: N802
+        return self._qt_app.setWindowIcon(icon)
 
     def setStyleSheet(self, stylesheet):  # noqa: N802
         self._qt_app.setStyleSheet(stylesheet)
