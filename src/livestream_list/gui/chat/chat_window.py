@@ -35,6 +35,7 @@ from ...chat.manager import ChatManager
 from ...chat.models import HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
+from ..kwin_placement import PLACEMENT_ROLE_CHAT, KWinPlacement, Rect
 from ..theme import get_theme
 from ..window_utils import (
     apply_always_on_top,
@@ -650,11 +651,13 @@ class ChatWindow(QMainWindow):
         self,
         chat_manager: ChatManager,
         settings: Settings,
+        placement: KWinPlacement | None = None,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.chat_manager = chat_manager
         self.settings = settings
+        self._placement = placement
         self._widgets: dict[str, QWidget] = {}
         self._livestreams: dict[str, Livestream] = {}
         self._popout_windows: dict[str, ChatPopoutWindow] = {}
@@ -677,10 +680,18 @@ class ChatWindow(QMainWindow):
         self.setWindowTitle("Chat")
         self.setMinimumSize(350, 400)
 
-        # Restore window geometry from settings
+        # Restore window geometry from settings. Position goes through KWin
+        # because Wayland ignores move(); see gui/kwin_placement.py.
         ws = self.settings.chat.builtin.window
         self.resize(ws.width, ws.height)
-        if ws.x is not None and ws.y is not None:
+        if self._placement is not None:
+            saved = (
+                Rect(x=ws.x, y=ws.y, width=ws.width, height=ws.height)
+                if ws.x is not None and ws.y is not None
+                else None
+            )
+            self._placement.register_window(PLACEMENT_ROLE_CHAT, self.windowTitle(), saved)
+        elif ws.x is not None and ws.y is not None:
             self.move(ws.x, ws.y)
 
         # Menu bar
@@ -1649,13 +1660,23 @@ class ChatWindow(QMainWindow):
         apply_always_on_top(windows, on_top)
 
     def save_window_state(self) -> None:
-        """Save window position and size to settings."""
+        """Save window position and size to settings.
+
+        Size comes from Qt; position comes from KWin where available, because
+        Wayland reports (0, 0) to self.pos().
+        """
         ws = self.settings.chat.builtin.window
         ws.width = self.width()
         ws.height = self.height()
-        pos = self.pos()
-        ws.x = pos.x()
-        ws.y = pos.y()
+        position = (
+            self._placement.position(PLACEMENT_ROLE_CHAT)
+            if self._placement is not None
+            else None
+        )
+        if position is None:
+            pos = self.pos()
+            position = (pos.x(), pos.y())
+        ws.x, ws.y = position
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Disconnect tabbed chats and hide. Popouts stay connected."""

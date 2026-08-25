@@ -54,6 +54,7 @@ from .dialogs import (
     ExportDialog,
     PreferencesDialog,
 )
+from .kwin_placement import PLACEMENT_ROLE_MAIN, Rect
 from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
 from .theme import ThemeManager, get_app_stylesheet, get_theme
 from .window_utils import apply_always_on_top
@@ -226,16 +227,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Livestream List (Qt)")
         self.setMinimumWidth(460)
         self.resize(self.app.settings.window.width, self.app.settings.window.height)
-        # Restore window position if saved (validate against current screens)
-        if self.app.settings.window.x is not None and self.app.settings.window.y is not None:
-            from PySide6.QtGui import QGuiApplication
-
-            target_pos = (self.app.settings.window.x, self.app.settings.window.y)
-            for screen in QGuiApplication.screens():
-                geom = screen.availableGeometry()
-                if geom.contains(target_pos[0] + 50, target_pos[1] + 50):
-                    self.move(target_pos[0], target_pos[1])
-                    break
+        # Restore window position. On Wayland move() is ignored by the
+        # compositor, so this is handed to KWin (see gui/kwin_placement.py),
+        # which also reports the true position back for saving. If the saved
+        # spot is no longer on any screen, no placement is emitted and the
+        # compositor places the window as it normally would.
+        ws = self.app.settings.window
+        saved = (
+            Rect(x=ws.x, y=ws.y, width=ws.width, height=ws.height)
+            if ws.x is not None and ws.y is not None
+            else None
+        )
+        self.app.placement.register_window(PLACEMENT_ROLE_MAIN, self.windowTitle(), saved)
 
         # Central widget
         central = QWidget()
@@ -1641,12 +1644,18 @@ class MainWindow(QMainWindow):
             event.accept()
 
     def _save_window_geometry(self) -> None:
-        """Save current window position and size to settings."""
-        pos = self.pos()
+        """Save current window position and size to settings.
+
+        Size comes from Qt, which is accurate everywhere. Position comes from
+        KWin where available, because Wayland reports (0, 0) to self.pos().
+        """
         self.app.settings.window.width = self.width()
         self.app.settings.window.height = self.height()
-        self.app.settings.window.x = pos.x()
-        self.app.settings.window.y = pos.y()
+        position = self.app.placement.position(PLACEMENT_ROLE_MAIN)
+        if position is None:
+            pos = self.pos()
+            position = (pos.x(), pos.y())
+        self.app.settings.window.x, self.app.settings.window.y = position
         self.app.save_settings()
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
