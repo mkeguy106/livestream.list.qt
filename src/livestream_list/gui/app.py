@@ -20,9 +20,10 @@ from .. import __version__
 from ..chat.manager import ChatManager
 from ..core.models import Livestream
 from ..core.monitor import StreamMonitor
-from ..core.settings import Settings
+from ..core.settings import Settings, get_config_dir
 from ..core.streamlink import StreamlinkLauncher
 from ..notifications.notifier import Notifier
+from .kwin_placement import KWinPlacement
 from .theme import ThemeManager, get_app_stylesheet
 
 logger = logging.getLogger(__name__)
@@ -241,6 +242,11 @@ class Application(QApplication):
         self.notification_bridge: NotificationBridge | None = None
         self.chat_manager: ChatManager | None = None
         self._chat_window: Any = None  # Lazy-initialized ChatWindow
+
+        # Window position persistence. Wayland never tells a client where its
+        # windows are and ignores move(), so on KDE we drive KWin's scripting
+        # interface instead. No-ops everywhere else.
+        self.placement = KWinPlacement(get_config_dir(), self.applicationDisplayName(), parent=self)
 
         # UI components (set after window creation)
         # Use weakref for main_window to avoid reference cycles
@@ -622,7 +628,7 @@ class Application(QApplication):
             from .chat.chat_window import ChatWindow
 
             assert self.chat_manager is not None
-            self._chat_window = ChatWindow(self.chat_manager, self.settings)
+            self._chat_window = ChatWindow(self.chat_manager, self.settings, self.placement)
             if self.main_window:
                 self._chat_window.chat_settings_requested.connect(
                     self.main_window._show_chat_preferences
@@ -775,6 +781,9 @@ class Application(QApplication):
 
     def cleanup(self) -> None:
         """Clean up resources."""
+        # Unload the KWin script and drop our D-Bus name
+        self.placement.shutdown()
+
         # Stop watchdog
         if self._watchdog:
             self._watchdog.stop()

@@ -15,6 +15,9 @@ finish-args:
   - --talk-name=org.freedesktop.Notifications
   # System tray
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Window position persistence on KDE (Wayland cannot do this client-side)
+  - --talk-name=org.kde.KWin
+  - --own-name=app.livestreamlist.Placement.*
   - --own-name=org.kde.StatusNotifierItem-2-1
   # Open URLs in browser
   - --talk-name=org.freedesktop.portal.OpenURI

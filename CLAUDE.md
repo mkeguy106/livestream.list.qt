@@ -112,6 +112,7 @@ src/livestream_list/
 │   ├── stream_list/      # Stream list model and custom delegate
 │   ├── app.py            # Main QApplication, AsyncWorker
 │   ├── main_window.py    # QMainWindow, toolbar, stream list container
+│   ├── kwin_placement.py # Window position persistence via KWin scripting (Wayland)
 │   └── theme.py          # ThemeManager singleton, stylesheet generation
 └── notifications/        # Desktop notification integration
 ```
@@ -152,6 +153,39 @@ The app runs both natively and in Flatpak. Key patterns:
 - `IS_FLATPAK` constant in `core/platform.py` checks for `/.flatpak-info` or `FLATPAK_ID` env var
 - `flatpak-spawn --host` wraps commands to run on host (browser launch, streamlink)
 - Flatpak builds are the primary distribution method via GitHub releases
+
+### Window Position Persistence (`gui/kwin_placement.py`)
+
+Wayland deliberately withholds absolute window position from clients:
+`self.pos()` returns `(0, 0)` and `move()` is ignored by the compositor. Qt
+alone therefore cannot remember where a window was closed. On KDE the app
+drives KWin's scripting interface over D-Bus instead.
+
+**Flow:**
+1. Before a window is shown, `KWinPlacement.register_window(role, title, saved)`
+   validates the saved geometry against `QGuiApplication.screens()`.
+2. A script is generated into `~/.config/livestream-list-qt/kwin-placement.js`
+   carrying a JSON payload: our PID, the caption-to-position map, and the D-Bus
+   address to call back on. It is loaded via `org.kde.kwin.Scripting.loadScript`.
+3. The script hooks `workspace.windowAdded`, matches windows by **PID** (never
+   by `resourceClass`, which differs between native and Flatpak builds), applies
+   the saved position as the window maps, and `callDBus`es true frame geometry
+   back to the app on every move.
+4. `closeEvent` saves the cached position — no D-Bus round-trip while quitting.
+
+**Rules:**
+- Position comes from KWin, size comes from Qt. Never mix them; see the frame
+  vs. client pitfall below.
+- Windows are matched by caption, which Qt composes as
+  `"{title} — {applicationDisplayName}"` using U+2014, suppressed when the two
+  are equal. `expected_captions()` encodes this; it is why `ChatPopoutWindow`
+  ("Chat - <channel>") is never mistaken for `ChatWindow` ("Chat").
+- If the saved position is unreachable, **no** placement is emitted and KWin
+  places the window per its own policy. Nothing is recentered.
+- Every method no-ops when KWin is not on the session bus, so GNOME, Windows
+  and X11 keep their previous behavior.
+- Flatpak needs `--talk-name=org.kde.KWin` and `--own-name=app.livestreamlist.Placement.*`.
+- Geometry helpers are Qt-free so they unit-test without a QApplication.
 
 ### Built-in Chat System
 
@@ -208,6 +242,7 @@ Core architecture files (most other files follow patterns established in these):
 | `gui/app.py` | Main QApplication, AsyncWorker, signal-based threading |
 | `gui/main_window.py` | QMainWindow, toolbar, stream list container |
 | `gui/theme.py` | ThemeManager singleton, stylesheet generation |
+| `gui/kwin_placement.py` | Window position persistence on KDE Wayland via KWin scripting + D-Bus |
 | `gui/dialogs/preferences/` | Preferences package — dialog coordinator + per-tab modules (general, playback, chat, accounts) |
 | `gui/chat/chat_widget.py` | Single-channel chat widget (message list, input, banners) |
 | `gui/chat/youtube_web_chat.py` | YouTube embedded QWebEngineView chat, shared profile, cookie tracker |
@@ -321,6 +356,9 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | Unknown platform in channels.json | `_load_channels` in `monitor.py` skips channels with unknown `StreamPlatform` values (e.g., from experimental branches) with a warning instead of crashing |
 | Chaturbate private room shows as live | Bulk API returns private rooms as "online". Individual API `room_status` field detects private/hidden/group shows. Live Chaturbate channels are verified via concurrent individual API checks during refresh. Stream delegate shows dimmed color + tooltip for non-public rooms. |
 | Stale single-instance socket after crash | `SingleInstanceGuard.start_listening()` calls `QLocalServer.removeServer()` and retries once if `listen()` fails. Socket name is `"livestream-list-qt"`. |
+| Window position not remembered on Wayland | Wayland never reports absolute position (`self.pos()` returns `(0, 0)`) and ignores `move()`. Position must go through KWin's scripting interface — see `gui/kwin_placement.py`. Qt-side `move()`/`pos()` cannot be made to work. |
+| KWin reports frame geometry, Qt uses client size | `frameGeometry` includes the titlebar (~16px here), `resize()` does not. Feeding KWin's height back into `resize()` grows the window every launch. `KWinPlacement.position()` returns position only, for exactly this reason. |
+| KWin script re-applies a placement and yanks the window | `start()` re-runs the script, and it re-attaches to existing windows. `PlacementRegistry` clears a pending placement as soon as that window is reported, so reloading the script to place the chat window cannot move the main window back. |
 
 ## CI/CD
 
