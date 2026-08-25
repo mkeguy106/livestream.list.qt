@@ -1669,9 +1669,7 @@ class ChatWindow(QMainWindow):
         ws.width = self.width()
         ws.height = self.height()
         position = (
-            self._placement.position(PLACEMENT_ROLE_CHAT)
-            if self._placement is not None
-            else None
+            self._placement.position(PLACEMENT_ROLE_CHAT) if self._placement is not None else None
         )
         if position is None:
             pos = self.pos()

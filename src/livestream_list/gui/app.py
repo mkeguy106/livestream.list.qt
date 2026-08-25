@@ -246,9 +246,7 @@ class Application(QApplication):
         # Window position persistence. Wayland never tells a client where its
         # windows are and ignores move(), so on KDE we drive KWin's scripting
         # interface instead. No-ops everywhere else.
-        self.placement = KWinPlacement(
-            get_config_dir(), self.applicationDisplayName(), parent=self
-        )
+        self.placement = KWinPlacement(get_config_dir(), self.applicationDisplayName(), parent=self)
 
         # UI components (set after window creation)
         # Use weakref for main_window to avoid reference cycles
