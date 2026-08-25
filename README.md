@@ -66,6 +66,9 @@ This is a Qt port of [livestream.list.linux](https://github.com/mkeguy106/livest
   - Second launch brings existing window to foreground with a warning dialog
   - Override with `--allow-multiple` or `-m` flag
 - **Launch on Startup** - Option to start automatically when you log in
+- **Remembers Window Position** - Reopens the main and chat windows where you closed them
+  - Falls back to your desktop's normal placement if that spot is no longer on any screen (e.g. a monitor was unplugged)
+  - On Linux this requires KWin (KDE Plasma); Wayland gives applications no way to position themselves
 - **Streamlink Integration** - Double-click to launch streams in mpv/VLC with playback tracking
   - Auto-play: per-channel auto-launch when a stream goes live, with global toggle in toolbar
   - Console window for viewing streamlink/yt-dlp output in real-time (auto-closes by default)
