@@ -370,12 +370,18 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 The release workflow (`.github/workflows/release.yml`) runs 5 jobs on tag push (`v*`):
 
 1. **create-release** — GitHub-hosted `ubuntu-latest`, creates draft release
-2. **build-flatpak** — Self-hosted Linux runner (`docker01.dd.local`), builds Flatpak in Docker
-3. **build-windows** — GitHub-hosted `windows-latest`, builds PyInstaller exe + Inno Setup installer
+2. **build-flatpak** — GitHub-hosted `ubuntu-latest`, builds Flatpak in a privileged container (~9 min)
+3. **build-windows** — GitHub-hosted `windows-latest`, builds PyInstaller exe + Inno Setup installer (~7.5 min)
 4. **update-screenshots** — Calls the reusable `screenshots.yml` workflow (see below)
 5. **publish-release** — Undrafts the release after both builds succeed
 
-**Flatpak runner location**: `docker01.dd.local:/share/bsv/docker-compose/github-runner/`
+**Every job runs on GitHub-hosted runners.** A full release takes ~10 minutes
+wall clock, since the Flatpak and Windows jobs run in parallel.
+
+The self-hosted runner on `docker01.dd.local` has not been used by this repo
+since #36 (2026-03-22) moved Flatpak builds to GitHub-hosted runners. A
+`docker-runner-qt` runner may still be registered and idle; it can be
+deregistered. Do not add `runs-on: self-hosted` back without a reason.
 
 **Windows build files**: `livestream-list-qt.spec` (PyInstaller), `installer/livestream-list-qt.iss` (Inno Setup)
 
@@ -442,26 +448,27 @@ QT_QPA_PLATFORM=offscreen python scripts/capture_screenshots.py
 
 ### Troubleshooting Release Builds
 
-If a release stays "queued" for a long time:
-
 ```bash
-# Check runner status
-ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose ps"
+# Watch a release run
+gh run list --workflow=release.yml --limit 1
+gh run watch <run-id> --exit-status
 
-# Check runner logs (look for "deprecated" or errors)
-ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose logs --tail 50 github-runner-qt"
+# Inspect a failed job (logs are only available once the run completes)
+gh run view <run-id> --log-failed
 
-# Restart runners
-ssh docker01.dd.local "cd /share/bsv/docker-compose/github-runner && docker compose down && docker compose up -d"
-
-# Cleanup docker to free space (run periodically)
-ssh docker01.dd.local "docker system prune -af --volumes"
+# Which runner actually ran each job, and how long it took
+gh api repos/mkeguy106/livestream.list.qt/actions/runs/<run-id>/jobs \
+  -q '.jobs[] | "\(.name) \(.runner_name) \(.labels|join(","))"'
 ```
 
-**Common issues:**
-- Runner version deprecated → pull latest image and restart
-- Runner in restart loop → check logs for auth/token issues
-- Job canceled mid-run → re-run workflow with `gh run rerun <run-id>`
+**Known failure modes:**
+
+| Symptom | Cause |
+|---------|-------|
+| Windows job fails at "Download yt-dlp.exe" with `API rate limit exceeded` | Unauthenticated `api.github.com` calls are capped at 60/hour per shared runner IP. The step sends `secrets.GITHUB_TOKEN`; if this recurs, check the token is still being passed. |
+| `Publish Release` skipped, release stays a draft or ships partial assets | It depends on **both** build jobs. One build failing leaves the other's asset uploaded but the release unpublished. Fix the failing job and re-tag. |
+| Screenshots job fails with `'MockApplication' object has no attribute ...` | `MainWindow` gained a new `self.app.<attr>` access. Add it to `MockApplication` in `scripts/capture_screenshots.py`. |
+| Release job fails on storage | Prune old releases — see [Release Hygiene](#release-hygiene). |
 
 ## Before Creating a Release
 
