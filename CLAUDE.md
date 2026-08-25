@@ -167,10 +167,10 @@ drives KWin's scripting interface over D-Bus instead.
 2. A script is generated into `~/.config/livestream-list-qt/kwin-placement.js`
    carrying a JSON payload: our PID, the caption-to-position map, and the D-Bus
    address to call back on. It is loaded via `org.kde.kwin.Scripting.loadScript`.
-3. The script hooks `workspace.windowAdded`, matches windows by **PID** (never
-   by `resourceClass`, which differs between native and Flatpak builds), applies
-   the saved position as the window maps, and `callDBus`es true frame geometry
-   back to the app on every move.
+3. The script hooks `workspace.windowAdded`, matches windows by **Wayland
+   app_id** (KWin reports it as `resourceClass`) narrowed to a known caption
+   list, applies the saved position as the window maps, and `callDBus`es true
+   frame geometry back to the app on every move.
 4. `closeEvent` saves the cached position — no D-Bus round-trip while quitting.
 
 **Rules:**
@@ -182,6 +182,9 @@ drives KWin's scripting interface over D-Bus instead.
   ("Chat - <channel>") is never mistaken for `ChatWindow` ("Chat").
 - If the saved position is unreachable, **no** placement is emitted and KWin
   places the window per its own policy. Nothing is recentered.
+- The app_id is pinned by `QGuiApplication.setDesktopFileName(WAYLAND_APP_ID)`
+  in `app.py`, so it is identical for native and Flatpak runs instead of being
+  derived by Qt from the executable name.
 - Every method no-ops when KWin is not on the session bus, so GNOME, Windows
   and X11 keep their previous behavior.
 - Flatpak needs `--talk-name=org.kde.KWin` and `--own-name=app.livestreamlist.Placement.*`.
@@ -358,6 +361,8 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | Stale single-instance socket after crash | `SingleInstanceGuard.start_listening()` calls `QLocalServer.removeServer()` and retries once if `listen()` fails. Socket name is `"livestream-list-qt"`. |
 | Window position not remembered on Wayland | Wayland never reports absolute position (`self.pos()` returns `(0, 0)`) and ignores `move()`. Position must go through KWin's scripting interface — see `gui/kwin_placement.py`. Qt-side `move()`/`pos()` cannot be made to work. |
 | KWin reports frame geometry, Qt uses client size | `frameGeometry` includes the titlebar (~16px here), `resize()` does not. Feeding KWin's height back into `resize()` grows the window every launch. `KWinPlacement.position()` returns position only, for exactly this reason. |
+| `os.getpid()` inside Flatpak is not the PID KWin sees | The sandbox is PID-namespaced, so the app sees pid 2 while KWin reports the host pid. Any window matching keyed on pid silently matches nothing inside Flatpak — it fails *quietly*, placing no windows rather than erroring. Match on the Wayland app_id (`resourceClass`) instead. Also means pid-suffixed D-Bus names collide between Flatpak instances. |
+| `MockApplication` missing `placement` / `setWindowIcon` | `scripts/capture_screenshots.py` builds a real `MainWindow` against a mock app. Anything new that `MainWindow` reads off `self.app` must be added there too, or the screenshots workflow breaks. `placement` gets a `NoOpPlacement` — a live one would load its KWin script and move the developer's actually-running copy of the app. |
 | KWin script re-applies a placement and yanks the window | `start()` re-runs the script, and it re-attaches to existing windows. `PlacementRegistry` clears a pending placement as soon as that window is reported, so reloading the script to place the chat window cannot move the main window back. |
 
 ## CI/CD
