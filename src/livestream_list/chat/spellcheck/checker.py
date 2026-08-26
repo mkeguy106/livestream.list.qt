@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,63 @@ class _SpellBackend:
             self._engine.word_frequency.load_words([w.lower() for w in words])
 
 
+def caret_inside(start: int, end: int, caret: int) -> bool:
+    """True if the text cursor sits within the word spanning [start, end].
+
+    Inclusive at both ends. A caret resting exactly on either edge means the
+    user has navigated there to edit the word, so autocorrect must leave it
+    alone — otherwise deleting a character rewrites the word out from under
+    them and throws the caret past it.
+    """
+    return start <= caret <= end
+
+
+def choose_confident_correction(word: str, suggestions: Sequence[str]) -> str | None:
+    """Pick the suggestion safe to apply silently, or None to leave the word.
+
+    This is the autocorrect decision only. The click-to-correct popup offers
+    the full suggestion list regardless — the bar is higher here because
+    autocorrect rewrites text the user did not ask it to touch.
+
+    Applies, in order:
+      1. Apostrophe expansions win outright (dont -> don't). High confidence,
+         and names essentially never collide with a contraction.
+      2. Capitalized words are left alone. A capitalized word is a name far
+         more often than a typo, and silently turning "Kaydop" into "Gaydo"
+         is worse than leaving a typo underlined.
+      3. Multi-word suggestions are rejected. Splitting "arejay" into
+         "are jay" is the most disruptive edit autocorrect can make.
+      4. Otherwise accept a lone suggestion, or a top suggestion within
+         Damerau-Levenshtein distance 1 (covers transposition and one-char
+         slips).
+    """
+    candidates = [s for s in suggestions if s.lower() != word.lower()]
+    if not candidates:
+        return None
+
+    # 1. Apostrophe expansion — allowed even for capitalized words.
+    for suggestion in candidates:
+        stripped = suggestion.replace("'", "").replace("\u2019", "")
+        if stripped.lower() == word.lower():
+            return suggestion
+
+    # 2. Never silently rewrite something that looks like a name.
+    if word[:1].isupper():
+        return None
+
+    top = candidates[0]
+
+    # 3. Never split a word in two.
+    if " " in top:
+        return None
+
+    if len(candidates) == 1:
+        return top
+    if _damerau_levenshtein(word.lower(), top.lower()) <= 1:
+        return top
+    return None
+
+
 class SpellChecker:
     """Wraps spellcheck backend with custom dictionary and chat-aware skip rules."""
 
@@ -301,36 +359,14 @@ class SpellChecker:
         return None
 
     def get_confident_correction(self, word: str) -> str | None:
-        """Get a correction only when confidence is high.
+        """Get a correction only when it is safe to apply without asking.
 
-        Returns a correction if:
-        - An apostrophe expansion exists (dont→don't, youre→you're), or
-        - Only 1 suggestion exists (unambiguous), or
-        - The top suggestion is within Damerau-Levenshtein distance 1
-          (covers transpositions like teh→the, single-char typos).
-        Returns None if no suggestions or the word should be skipped.
+        Delegates the decision to :func:`choose_confident_correction`; see
+        there for the rules and why each exists.
         """
         if self._should_skip(word):
             return None
-        suggestions = self._spell.suggest(word)
-        if not suggestions:
-            return None
-        # Filter out the original word
-        suggestions = [s for s in suggestions if s.lower() != word.lower()]
-        if not suggestions:
-            return None
-        # Apostrophe expansions: dont→don't, youre→you're, wont→won't
-        for s in suggestions:
-            stripped = s.replace("'", "").replace("\u2019", "")
-            if stripped.lower() == word.lower():
-                return s
-        if len(suggestions) == 1:
-            return suggestions[0]
-        # Trust the top-ranked suggestion if it's a close match
-        top = suggestions[0]
-        if _damerau_levenshtein(word.lower(), top.lower()) <= 1:
-            return top
-        return None
+        return choose_confident_correction(word, self._spell.suggest(word))
 
     def add_words(self, words: set[str]) -> None:
         """Whitelist words in the custom dictionary (emotes/usernames)."""
