@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- Rounded background -->
-  <rect width="128" height="128" rx="24" fill="#7C3AED"/>
+  <!-- Rounded background. Charcoal rather than a saturated brand colour so the
+       icon sits quietly on a dark panel instead of shouting on it. -->
+  <rect width="128" height="128" rx="28" fill="#16161a"/>
+  <rect x="1" y="1" width="126" height="126" rx="27" fill="none" stroke="#2c2c31" stroke-width="2"/>
   <!-- Monitor body -->
-  <rect x="24" y="28" width="80" height="56" rx="6" fill="#FFFFFF"/>
+  <rect x="24" y="28" width="80" height="56" rx="6" fill="#e8e8ec"/>
   <!-- Screen -->
-  <rect x="30" y="34" width="68" height="44" rx="3" fill="#7C3AED" opacity="0.15"/>
+  <rect x="30" y="34" width="68" height="44" rx="3" fill="#16161a"/>
   <!-- Play triangle -->
-  <polygon points="54,46 54,68 74,57" fill="#7C3AED"/>
+  <polygon points="54,46 54,68 74,57" fill="#e8e8ec"/>
   <!-- Live dot -->
-  <circle cx="88" cy="43" r="4" fill="#EF4444"/>
+  <circle cx="88" cy="43" r="4" fill="#7fae7f"/>
   <!-- Stand -->
-  <rect x="52" y="84" width="24" height="5" rx="2" fill="#FFFFFF"/>
-  <rect x="44" y="89" width="40" height="5" rx="2.5" fill="#FFFFFF"/>
+  <rect x="52" y="84" width="24" height="5" rx="2" fill="#e8e8ec"/>
+  <rect x="44" y="89" width="40" height="5" rx="2.5" fill="#e8e8ec"/>
 </svg>
