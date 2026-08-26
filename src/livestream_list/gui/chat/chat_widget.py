@@ -53,6 +53,7 @@ from ...chat.models import (
     HypeTrainEvent,
     ModerationEvent,
 )
+from ...chat.spellcheck.checker import caret_inside
 from ...chat.workers import AsyncTaskWorker
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
@@ -320,10 +321,18 @@ class ChatInput(QLineEdit):
         corrections: list[tuple[int, int, str, str]] = []  # (start, end, original, replacement)
         keep_red: list[tuple[int, int]] = []
 
+        caret = self.cursorPosition()
+
         for start, end, word in results:
             # Only autocorrect each word once per message — if the user changes it
             # back, respect their intent and don't correct again
             if word.lower() in self._corrected_words:
+                keep_red.append((start, end))
+                continue
+            # Never rewrite the word the cursor is sitting in. The user has
+            # navigated there to edit it; correcting now replaces their
+            # in-flight edit and throws the caret past the word.
+            if caret_inside(start, end, caret):
                 keep_red.append((start, end))
                 continue
             # "past" = user has moved on: text after word starts with space + alpha
@@ -348,13 +357,16 @@ class ChatInput(QLineEdit):
 
         # Apply corrections from end to start to preserve positions
         corrections.sort(key=lambda c: c[0], reverse=True)
-        cursor_pos = self.cursorPosition()
+        cursor_pos = caret
 
         self.blockSignals(True)
-        new_text = text
         new_greens: list[tuple[int, int, str]] = []
         for start, end, original, replacement in corrections:
-            new_text = new_text[:start] + replacement + new_text[end:]
+            # setSelection + insert goes through QLineEdit's undo stack, so an
+            # unwanted correction can be taken back with Ctrl+Z. setText()
+            # clears that stack, which left the user no way to undo.
+            self.setSelection(start, end - start)
+            self.insert(replacement)
             diff = len(replacement) - len(original)
             if cursor_pos > end:
                 cursor_pos += diff
@@ -363,9 +375,9 @@ class ChatInput(QLineEdit):
             new_greens.append((start, start + len(replacement), replacement))
             self._corrected_words.add(original.lower())
 
-        self.setText(new_text)
         self.setCursorPosition(cursor_pos)
         self.blockSignals(False)
+        new_text = self.text()
 
         # Re-run spellcheck on corrected text (without autocorrect to avoid recursion)
         new_results = self._spell_checker.check_text(new_text)
@@ -1100,6 +1112,11 @@ class ChatWidget(QWidget, ChatSearchMixin):
             self._spell_completer = SpellCompleter(self._input, self._spell_checker, parent=self)
             self._input.add_completer(self._spell_completer)
             self._input.set_spell_checker(self._spell_checker, self._spell_completer)
+            # Seed the streamer's own name. Usernames are otherwise only
+            # learned from messages as they arrive, so the one name most
+            # likely to be typed is unknown until someone else says it.
+            if self.livestream and self.livestream.channel.display_name:
+                self._spell_checker.dictionary.add_username(self.livestream.channel.display_name)
         except ImportError:
             logger.warning("Spellcheck not available, disabled")
         except (FileNotFoundError, OSError, ValueError) as e:
