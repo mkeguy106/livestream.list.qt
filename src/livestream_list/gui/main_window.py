@@ -56,7 +56,7 @@ from .dialogs import (
 )
 from .kwin_placement import PLACEMENT_ROLE_MAIN, Rect
 from .stream_list import StreamListModel, StreamRole, StreamRowDelegate
-from .theme import ThemeManager, get_app_stylesheet, get_theme
+from .theme import ThemeManager, contrasting_text_color, get_app_stylesheet, get_theme
 from .window_utils import apply_always_on_top
 
 if TYPE_CHECKING:
@@ -1786,10 +1786,7 @@ class MainWindow(QMainWindow):
         enabled = self.auto_play_btn.isChecked()
         if enabled:
             accent = get_theme().accent
-            # Choose contrasting text: white for dark accents, black for light
-            r, g, b = int(accent[1:3], 16), int(accent[3:5], 16), int(accent[5:7], 16)
-            luminance = 0.299 * r + 0.587 * g + 0.114 * b
-            text_color = "#000000" if luminance > 140 else "#ffffff"
+            text_color = contrasting_text_color(accent)
             self.auto_play_btn.setStyleSheet(
                 f"QToolButton {{ background-color: {accent}; color: {text_color};"
                 f" border: 1px solid {accent}; border-radius: 3px;"

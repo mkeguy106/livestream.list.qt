@@ -236,6 +236,15 @@ Two-file architecture:
 
 Theme editor dialog: `gui/dialogs/theme_editor.py`.
 
+**Text over themed backgrounds**: `contrasting_text_color(bg)` in `gui/theme.py`
+returns `#000000` or `#ffffff`, whichever measures higher WCAG contrast against
+`bg`. Every place that paints text on `theme.accent` must use it — see the
+pitfall below. It maximizes measured contrast rather than thresholding on
+brightness, because a threshold puts mid-tone colors (Solarized's `#268BD2`) on
+the wrong side, landing at 3.68:1 where the other choice reaches 5.71:1. All
+seven built-in themes clear the 4.5:1 AA floor; `tests/test_theme_contrast.py`
+asserts it, so a new built-in theme with a failing accent breaks the build.
+
 ### Key Files
 
 Core architecture files (most other files follow patterns established in these):
@@ -359,6 +368,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | Unknown platform in channels.json | `_load_channels` in `monitor.py` skips channels with unknown `StreamPlatform` values (e.g., from experimental branches) with a warning instead of crashing |
 | Chaturbate private room shows as live | Bulk API returns private rooms as "online". Individual API `room_status` field detects private/hidden/group shows. Live Chaturbate channels are verified via concurrent individual API checks during refresh. Stream delegate shows dimmed color + tooltip for non-public rooms. |
 | Stale single-instance socket after crash | `SingleInstanceGuard.start_listening()` calls `QLocalServer.removeServer()` and retries once if `listen()` fails. Socket name is `"livestream-list-qt"`. |
+| White text hardcoded on `theme.accent` | An accent is arbitrary — Obsidian Mono's is near-white (`#e8e8ec`), and the theme editor allows anything. `color: white` on an accent background rendered at 1.22:1 contrast (invisible) in Obsidian Mono and under 2:1 in high-contrast, nord-dark and monokai. Use `contrasting_text_color(theme.accent)` from `gui/theme.py`; never hardcode the text color over a themed background. |
 | Window position not remembered on Wayland | Wayland never reports absolute position (`self.pos()` returns `(0, 0)`) and ignores `move()`. Position must go through KWin's scripting interface — see `gui/kwin_placement.py`. Qt-side `move()`/`pos()` cannot be made to work. |
 | KWin reports frame geometry, Qt uses client size | `frameGeometry` includes the titlebar (~16px here), `resize()` does not. Feeding KWin's height back into `resize()` grows the window every launch. `KWinPlacement.position()` returns position only, for exactly this reason. |
 | `os.getpid()` inside Flatpak is not the PID KWin sees | The sandbox is PID-namespaced, so the app sees pid 2 while KWin reports the host pid. Any window matching keyed on pid silently matches nothing inside Flatpak — it fails *quietly*, placing no windows rather than erroring. Match on the Wayland app_id (`resourceClass`) instead. Also means pid-suffixed D-Bus names collide between Flatpak instances. |

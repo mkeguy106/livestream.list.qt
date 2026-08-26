@@ -415,6 +415,48 @@ class ThemeManager:
         return cls._active_colors
 
 
+def _relative_luminance(hex_color: str) -> float:
+    """WCAG 2.1 relative luminance of an #rrggbb color."""
+    raw = hex_color.lstrip("#")
+    channels = [int(raw[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    linear = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+
+def _contrast_ratio(a: str, b: str) -> float:
+    """WCAG 2.1 contrast ratio between two colors, from 1:1 to 21:1."""
+    lighter, darker = sorted((_relative_luminance(a), _relative_luminance(b)), reverse=True)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def contrasting_text_color(background: str) -> str:
+    """Return the text color readable on ``background`` — "#ffffff" or "#000000".
+
+    A theme's accent is arbitrary: built-in Obsidian Mono uses a near-white
+    accent, and the theme editor lets users pick anything. Hardcoding white
+    text on an accent background makes it vanish, so callers building
+    stylesheets should ask for the text color instead.
+
+    Picks whichever of black or white measures higher contrast against the
+    background, rather than thresholding on brightness — a threshold puts
+    mid-tone colors like Solarized's blue on the wrong side, landing under the
+    WCAG AA floor when the other choice clears it comfortably.
+
+    Falls back to white on an unparseable value — this runs while building
+    stylesheets, where raising would take down the whole UI.
+    """
+    value = background.strip().lstrip("#")
+    if len(value) == 3:  # shorthand, e.g. "fff"
+        value = "".join(ch * 2 for ch in value)
+    try:
+        normalized = "#" + "".join(f"{int(value[i : i + 2], 16):02x}" for i in (0, 2, 4))
+    except (ValueError, IndexError):
+        return "#ffffff"
+    on_black = _contrast_ratio("#000000", normalized)
+    on_white = _contrast_ratio("#ffffff", normalized)
+    return "#000000" if on_black >= on_white else "#ffffff"
+
+
 def get_theme() -> ThemeColors:
     """Get the current theme colors (convenience function)."""
     return ThemeManager.colors()
