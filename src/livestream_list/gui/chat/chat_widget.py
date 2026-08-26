@@ -56,7 +56,7 @@ from ...chat.models import (
 from ...chat.workers import AsyncTaskWorker
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import BuiltinChatSettings
-from ..theme import get_theme
+from ..theme import contrasting_text_color, get_theme
 from .emote_completer import EmoteCompleter
 from .emote_picker import EmotePickerWidget
 from .link_preview import LinkPreviewCache
@@ -2276,6 +2276,9 @@ class ChatWidget(QWidget, ChatSearchMixin):
         reducing layout recalculations during theme switches.
         """
         theme = get_theme()
+        # Text painted on top of the accent color. Computed, not hardcoded:
+        # Obsidian Mono's accent is near-white, so white text vanishes.
+        accent_text = contrasting_text_color(theme.accent)
 
         # Consolidated stylesheet using object name (ID) selectors
         # This is much faster than setting styles on each widget individually
@@ -2292,14 +2295,14 @@ class ChatWidget(QWidget, ChatSearchMixin):
                 margin-top: 3px;
             }}
             #chat_room_state_label {{
-                color: white;
+                color: {accent_text};
                 font-size: 11px;
                 font-weight: bold;
                 background: transparent;
             }}
             #chat_room_state_close {{
                 background: rgba(0, 0, 0, 0.2);
-                color: white;
+                color: {accent_text};
                 border: none;
                 border-radius: 10px;
                 font-size: 12px;
@@ -2366,7 +2369,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             /* New messages button */
             #chat_new_msg {{
                 background-color: {theme.accent};
-                color: white;
+                color: {accent_text};
                 border: none;
                 border-radius: 12px;
                 padding: 4px 12px;
@@ -2413,7 +2416,7 @@ class ChatWidget(QWidget, ChatSearchMixin):
             /* Send button */
             #chat_send_btn {{
                 background-color: {theme.accent};
-                color: white;
+                color: {accent_text};
                 border: none;
                 border-radius: 4px;
                 padding: 6px 12px;

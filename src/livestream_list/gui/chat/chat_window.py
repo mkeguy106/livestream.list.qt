@@ -36,7 +36,7 @@ from ...chat.models import HypeTrainEvent, ModerationEvent
 from ...core.models import Livestream, StreamPlatform
 from ...core.settings import Settings
 from ..kwin_placement import PLACEMENT_ROLE_CHAT, KWinPlacement, Rect
-from ..theme import get_theme
+from ..theme import contrasting_text_color, get_theme
 from ..window_utils import (
     apply_always_on_top,
     apply_always_on_top_qt,
@@ -102,6 +102,7 @@ class _NewWhisperDialog(QDialog):
         layout.addLayout(btn_layout)
 
         theme = get_theme()
+        accent_text = contrasting_text_color(theme.accent)
         self.setStyleSheet(f"""
             QDialog {{
                 background-color: {theme.window_bg};
@@ -124,7 +125,7 @@ class _NewWhisperDialog(QDialog):
             }}
             QPushButton {{
                 background-color: {theme.accent};
-                color: white;
+                color: {accent_text};
                 border: none;
                 border-radius: 4px;
                 padding: 6px 16px;
