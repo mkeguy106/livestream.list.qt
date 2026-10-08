@@ -28,7 +28,7 @@ classifiers = [
 
 dependencies = [
     "aiohttp>=3.9.0",
-    "PySide6>=6.11.0",
+    "PySide6>=6.11.0,<6.12",  # 6.12.0 leaks refs to None; aborts on Python <3.12 (tests/test_pyside_refcounts.py)
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
     "desktop-notifier>=5.0.0",
