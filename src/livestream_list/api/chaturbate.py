@@ -21,6 +21,11 @@ logger = logging.getLogger(__name__)
 # Public API (no auth required)
 BASE_URL = "https://chaturbate.com"
 
+# Per-channel requests in flight at once when the bulk API is unavailable.
+# Measured: 107 channels at 6 concurrent finish in ~2.4s with no 429s. The
+# refresh waits on every platform, so a slow fallback stalls all of them.
+INDIVIDUAL_CONCURRENCY = 6
+
 
 class ChaturbateApiClient(BaseApiClient):
     """Client for Chaturbate API.
@@ -139,8 +144,8 @@ class ChaturbateApiClient(BaseApiClient):
         """Get livestream status for multiple channels.
 
         Uses the bulk room-list API when session cookies are available
-        (1-2 requests for all followed channels). Falls back to throttled
-        individual requests otherwise.
+        (1-2 requests for all followed channels). Falls back to individual
+        requests, a few at a time, otherwise.
         """
         if not channels:
             return []
@@ -213,7 +218,7 @@ class ChaturbateApiClient(BaseApiClient):
                     if offset >= total:
                         break
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.warning(f"Chaturbate bulk API error: {e}")
+            logger.warning(f"Chaturbate bulk API error: {e!r}")
             return None
 
         # Build results
@@ -265,18 +270,21 @@ class ChaturbateApiClient(BaseApiClient):
             return "offline"
 
     async def _get_livestreams_individual(self, channels: list[Channel]) -> list[Livestream]:
-        """Fallback: check channels one at a time with delays."""
-        results: list[Livestream] = []
-        for i, channel in enumerate(channels):
-            try:
-                result = await self.get_livestream(channel)
-                results.append(result)
-            except Exception as e:
-                results.append(Livestream(channel=channel, live=False, error_message=str(e)))
-            # Throttle to avoid 429 rate limiting
-            if i < len(channels) - 1:
-                await asyncio.sleep(2.0)
-        return results
+        """Fallback: check channels individually, a few at a time.
+
+        A 429 is retried with backoff inside get_livestream, which keeps its
+        slot while it waits, so rate limiting still slows the whole pass down.
+        """
+        semaphore = asyncio.Semaphore(INDIVIDUAL_CONCURRENCY)
+
+        async def check(channel: Channel) -> Livestream:
+            async with semaphore:
+                try:
+                    return await self.get_livestream(channel)
+                except Exception as e:
+                    return Livestream(channel=channel, live=False, error_message=str(e))
+
+        return list(await asyncio.gather(*(check(ch) for ch in channels)))
 
     def _get_cookie_string(self) -> str:
         """Get Chaturbate session cookies from QWebEngine profile."""
