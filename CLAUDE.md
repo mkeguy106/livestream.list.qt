@@ -142,7 +142,7 @@ Qt requires UI updates on the main thread. `AsyncWorker` (in `gui/app.py`) is a 
 
 ### API Clients
 
-- **Twitch**: Helix API (authenticated) + GraphQL (unauthenticated, for public data). GraphQL uses batched queries (up to 35 channels/request). GraphQL works without authentication.
+- **Twitch**: Helix API (authenticated) + GraphQL (unauthenticated, for public data). GraphQL batches live-status lookups through the plural `users(logins: $logins)` field (100 channels/request, logins passed as variables). GraphQL works without authentication.
 - **YouTube**: yt-dlp subprocess (`yt-dlp --dump-json --no-download <url>`), batch size 5.
 - **Kick**: Direct REST API. Uses `start_time` field (not `created_at`) for stream duration.
 - **Chaturbate**: REST API (`/api/chatvideocontext/{username}/` for individual, `/api/ts/roomlist/room-list/?follow=true` for bulk). Bulk API requires session cookies (from QWebEngine login). Individual endpoint is public/unauthenticated. WebSocket chat connection for native chat. `room_status` field from individual API detects private/hidden/group shows — bulk API only returns public rooms, so live channels are verified via individual API concurrently during refresh.
@@ -377,6 +377,7 @@ Platform detection is centralized in `core/platform.py` (`IS_WINDOWS`, `IS_LINUX
 | `os.getpid()` inside Flatpak is not the PID KWin sees | The sandbox is PID-namespaced, so the app sees pid 2 while KWin reports the host pid. Any window matching keyed on pid silently matches nothing inside Flatpak — it fails *quietly*, placing no windows rather than erroring. Match on the Wayland app_id (`resourceClass`) instead. Also means pid-suffixed D-Bus names collide between Flatpak instances. |
 | `MockApplication` missing `placement` / `setWindowIcon` | `scripts/capture_screenshots.py` builds a real `MainWindow` against a mock app. Anything new that `MainWindow` reads off `self.app` must be added there too, or the screenshots workflow breaks. `placement` gets a `NoOpPlacement` — a live one would load its KWin script and move the developer's actually-running copy of the app. |
 | KWin script re-applies a placement and yanks the window | `start()` re-runs the script, and it re-attaches to existing windows. `PlacementRegistry` clears a pending placement as soon as that window is reported, so reloading the script to place the chat window cannot move the main window back. |
+| Every Twitch channel shows offline; log says `GraphQL batch query failed with status 400` | Since 2026-10-07 Twitch rejects any GraphQL query with more than 15 root field aliases. The old batch sent 35 aliased `user(login:)` fields per request, so every batch 400'd, every Twitch channel came back offline with no error, and *Hide offline* emptied the list. Batch via the plural `users(logins:)` field instead: one root field, results positional with `null` for unknown logins. Never batch with aliases. The warning now logs Twitch's error body. |
 
 ## CI/CD
 
