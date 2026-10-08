@@ -367,59 +367,56 @@ class TwitchApiClient(BaseApiClient):
         if not logins:
             return {}
 
-        # Build query with aliases for each user
-        # Example: u0: user(login: "channel1") { ... } u1: user(login: "channel2") { ... }
-        user_fragment = """
-            id
-            login
-            displayName
-            stream {
+        # One plural root field rather than one aliased user(login:) per channel:
+        # Twitch rejects queries with more than 15 root field aliases (HTTP 400).
+        query = """
+        query GetStreamsBatch($logins: [String!]) {
+            users(logins: $logins) {
                 id
-                title
-                viewersCount
-                createdAt
-                game {
-                    name
-                    slug
+                login
+                displayName
+                stream {
+                    id
+                    title
+                    viewersCount
+                    createdAt
+                    game {
+                        name
+                        slug
+                    }
+                }
+                lastBroadcast {
+                    startedAt
                 }
             }
-            lastBroadcast {
-                startedAt
-            }
+        }
         """
-
-        # Build aliased queries
-        queries = []
-        for i, login in enumerate(logins):
-            # Escape quotes in login name
-            escaped_login = login.replace('"', '\\"')
-            queries.append(f'u{i}: user(login: "{escaped_login}") {{ {user_fragment} }}')
-
-        query = "query GetStreamsBatch { " + " ".join(queries) + " }"
 
         async def do_request() -> dict[str, dict[str, Any] | None]:
             async with self.session.post(
                 self.GQL_URL,
                 headers=self._get_gql_headers(),
-                json={"query": query},
+                json={"query": query, "variables": {"logins": logins}},
             ) as resp:
                 if self._is_retryable_status(resp.status):
                     raise aiohttp.ClientResponseError(
                         resp.request_info, resp.history, status=resp.status
                     )
                 if resp.status != 200:
-                    logger.warning(f"GraphQL batch query failed with status {resp.status}")
+                    body = (await resp.text())[:500]
+                    logger.warning(f"GraphQL batch query failed with status {resp.status}: {body}")
                     return {}
 
                 data = await safe_json(resp)
                 if not data or not isinstance(data, dict):
                     return {}
-                result_data = data.get("data", {})
+                users = (data.get("data") or {}).get("users") or []
 
-                # Map results back to login names
+                # users is positional: one entry per requested login, null for
+                # logins that don't exist (banned, renamed, deleted).
                 result: dict[str, dict[str, Any] | None] = {}
-                for i, login in enumerate(logins):
-                    result[login.lower()] = result_data.get(f"u{i}")
+                for login, user in zip(logins, users):
+                    result[login.lower()] = user
 
                 return result
 
@@ -522,10 +519,10 @@ class TwitchApiClient(BaseApiClient):
 
         channel_map = {c.channel_id.lower(): c for c in channels}
 
-        # Batch channels into groups for parallel requests. 35 balances GraphQL
-        # query complexity limits with efficient parallelism (fewer large batches
-        # vs. many small ones). Twitch GraphQL has undocumented query size limits.
-        batch_size = 35
+        # Batch channels into groups for parallel requests. users(logins:) has
+        # accepted 276 logins in one request; 100 stays well clear of any
+        # undocumented size limit while keeping the request count low.
+        batch_size = 100
         all_logins = [c.channel_id for c in channels]
 
         # Create all batch requests
