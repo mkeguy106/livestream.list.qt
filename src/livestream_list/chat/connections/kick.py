@@ -22,9 +22,18 @@ from .base import BaseChatConnection
 
 logger = logging.getLogger(__name__)
 
-# Kick uses Pusher for WebSocket chat
-PUSHER_WS_URL = "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679"
+# Kick uses Pusher for WebSocket chat. Kick rotates the Pusher app key (it did
+# in October 2026, and Pusher then rejects the old key with error 4001), so the
+# current key and cluster are read at connect time from the realtime descriptor
+# kick.com's own web client uses. These constants are only the fallback.
+PUSHER_APP_KEY = "34bf7a0ff419a2a775b9"
+PUSHER_CLUSTER = "us2"
 PUSHER_PARAMS = "?protocol=7&client=js&version=8.3.0&flash=false"
+KICK_REALTIME_URL = "https://web.kick.com/api/v1/realtime/connection"
+
+# The cluster becomes part of the Pusher hostname, so only accept bare labels
+PUSHER_KEY_RE = re.compile(r"[A-Za-z0-9]+")
+PUSHER_CLUSTER_RE = re.compile(r"[a-z0-9-]+")
 
 KICK_API_BASE = "https://kick.com/api/v2"
 KICK_OAUTH_BASE = "https://id.kick.com"
@@ -45,6 +54,49 @@ KICK_SYSTEM_BADGES: dict[str, str] = {
 
 # Matches [emote:ID:name] in Kick message content
 KICK_EMOTE_RE = re.compile(r"\[emote:(\d+):([^\]]+)\]")
+
+
+def pusher_ws_url(app_key: str, cluster: str) -> str:
+    """Build the Pusher WebSocket URL for an app key and cluster."""
+    return f"wss://ws-{cluster}.pusher.com/app/{app_key}{PUSHER_PARAMS}"
+
+
+def parse_pusher_credentials(descriptor: Any) -> tuple[str, str] | None:
+    """Extract (app_key, cluster) from a Kick realtime descriptor, or None if absent."""
+    if not isinstance(descriptor, dict):
+        return None
+    data = descriptor.get("data")
+    connections = data.get("connections") if isinstance(data, dict) else None
+    if not isinstance(connections, list):
+        return None
+    for connection in connections:
+        if not isinstance(connection, dict) or connection.get("provider") != "pusher":
+            continue
+        credentials = connection.get("credentials")
+        if not isinstance(credentials, dict):
+            continue
+        app_key = credentials.get("app_key")
+        cluster = credentials.get("cluster")
+        if (
+            isinstance(app_key, str)
+            and isinstance(cluster, str)
+            and PUSHER_KEY_RE.fullmatch(app_key)
+            and PUSHER_CLUSTER_RE.fullmatch(cluster)
+        ):
+            return app_key, cluster
+    return None
+
+
+def pusher_handshake_error(data: Any) -> str | None:
+    """Return why a Pusher handshake failed, or None if the connection was established."""
+    if isinstance(data, dict):
+        event = data.get("event")
+        if event == "pusher:connection_established":
+            return None
+        error = data.get("data")
+        if event == "pusher:error" and isinstance(error, dict):
+            return f"Pusher error {error.get('code')}: {error.get('message')}"
+    return f"unexpected Pusher handshake frame: {str(data)[:200]}"
 
 
 class KickChatConnection(BaseChatConnection):
@@ -90,15 +142,23 @@ class KickChatConnection(BaseChatConnection):
                     return
 
             # Connect to Pusher WebSocket
-            ws_url = f"{PUSHER_WS_URL}{PUSHER_PARAMS}"
+            ws_url = await self._fetch_pusher_url()
             self._ws = await self._session.ws_connect(ws_url)
 
-            # Wait for connection established
+            # Pusher's first frame is connection_established. Anything else
+            # (e.g. 4001 for a retired app key) means the socket is about to
+            # close, so report it instead of claiming to be connected.
             msg = await self._ws.receive()
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                data = json.loads(msg.data)
-                if data.get("event") == "pusher:connection_established":
-                    logger.debug(f"Kick Pusher connected for {channel_id}")
+            if msg.type != aiohttp.WSMsgType.TEXT:
+                self._emit_error(
+                    f"Kick chat socket closed during handshake ({msg.type.name}: {msg.extra})"
+                )
+                return
+            handshake_error = pusher_handshake_error(json.loads(msg.data))
+            if handshake_error:
+                self._emit_error(f"Kick chat handshake failed: {handshake_error}")
+                return
+            logger.debug(f"Kick Pusher connected for {channel_id}")
 
             # Subscribe to chatroom channel
             subscribe_data = {
@@ -284,6 +344,33 @@ class KickChatConnection(BaseChatConnection):
         except Exception as e:
             logger.error(f"Kick token refresh error: {e}")
             return False
+
+    async def _fetch_pusher_url(self) -> str:
+        """Ask Kick which Pusher app key and cluster to use, falling back to the known ones."""
+        # Only offer pusher: if centrifugo is also offered, Kick picks it, and we can't speak it.
+        body = {
+            "client": {"id": str(uuid.uuid4()), "type": "web"},
+            "capabilities": {"accepted_providers": [{"provider": "pusher"}]},
+        }
+        try:
+            assert self._session is not None
+            async with self._session.post(
+                KICK_REALTIME_URL,
+                json=body,
+                headers={"Accept": "application/json"},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    credentials = parse_pusher_credentials(await resp.json())
+                    if credentials:
+                        return pusher_ws_url(*credentials)
+                logger.warning(
+                    f"Kick realtime descriptor had no usable Pusher credentials "
+                    f"(status={resp.status}); using built-in key"
+                )
+        except Exception as e:
+            logger.warning(f"Kick realtime descriptor fetch failed: {e}; using built-in key")
+        return pusher_ws_url(PUSHER_APP_KEY, PUSHER_CLUSTER)
 
     async def _fetch_chatroom_id(self, channel_id: str) -> int | None:
         """Fetch the chatroom ID and badge URLs for a channel from the Kick API."""
